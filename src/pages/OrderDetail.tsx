@@ -90,7 +90,7 @@ import { BandDialog } from "@/components/BandDialog";
 import { AsyncButton } from "@/components/AsyncButton";
 import {
   fmtMoneyInr, manufacturingReadiness,
-  factoryPoolBalance, estimatedPureGoldNeeded, orderMaterialRequirements, issuanceUsed, labourValue, minimumLabourApplies, factoryFineGoldBalance,
+  factoryPoolBalance, estimatedPureGoldNeeded, orderMaterialRequirements, issuanceUsed, labourValue, minimumLabourApplies, makingCharge, factoryFineGoldBalance,
   deriveStockBalances,
 } from "@/lib/manufacturing";
 import { decreaseStockSelfHealing, increaseStock, transferStock } from "@/lib/stock";
@@ -764,6 +764,8 @@ function OrderDetailPageBody() {
   const [faOtherNet, setFaOtherNet] = useState("");
   const [faMinLabour, setFaMinLabour] = useState("");
   const [faMinUnder, setFaMinUnder] = useState(""); // grams: the minimum applies under this
+  // The minimum as this piece's making charge — flat, never gram × rate.
+  const [faMinFlat, setFaMinFlat] = useState(false);
   const [faOtherPurity, setFaOtherPurity] = useState("");
   const [faPerGram, setFaPerGram] = useState("");
   const [faCad, setFaCad] = useState("");
@@ -1126,6 +1128,7 @@ function OrderDetailPageBody() {
     setFaPerGram(finish?.labour?.perGramRate != null ? String(finish.labour.perGramRate) : "");
     setFaMinLabour(finish?.labour?.minimumLabour != null ? String(finish.labour.minimumLabour) : "");
     setFaMinUnder(finish?.labour?.minimumUnderGrams != null ? String(finish.labour.minimumUnderGrams) : "");
+    setFaMinFlat(!!finish?.labour?.minimumFlat);
     setFaCad(finish?.labour?.cadCharge != null ? String(finish.labour.cadCharge) : "");
     setFaDiaHandling(finish?.labour?.diamondHandlingRate != null ? String(finish.labour.diamondHandlingRate) : "");
     setFaOther(finish?.labour?.otherCharges != null ? String(finish.labour.otherCharges) : "");
@@ -1136,7 +1139,7 @@ function OrderDetailPageBody() {
     // still changeable here. A re-edit keeps what was saved.
     const from: string[] = [];
     if (!finish?.labour) {
-      const fac = db.factories.find(x => x.id === order.assignedFactoryId);
+      const fac = db.factories.find(x => x.id === (order.assignedFactoryId || issuedFactory?.id));
       const r = factoryRatesFor(fac?.labour, order.jewelleryType);
       if (r.perGram) setFaPerGram(String(r.perGram));
       if (r.minimum) setFaMinLabour(String(r.minimum));
@@ -1210,6 +1213,7 @@ function OrderDetailPageBody() {
       perGramRate: faPerGram ? Number(faPerGram) : undefined,
       minimumLabour: faMinLabour ? Number(faMinLabour) : undefined,
       minimumUnderGrams: faMinLabour && Number(faMinUnder) > 0 ? Math.round(Number(faMinUnder) * 1000) / 1000 : undefined,
+      ...(faMinFlat && faMinLabour ? { minimumFlat: true } : {}),
       diamondHandlingRate: faDiaHandling ? Number(faDiaHandling) : undefined,
       cadCharge: faCad ? Number(faCad) : undefined,
       otherCharges: faOther ? Number(faOther) : undefined,
@@ -1237,7 +1241,15 @@ function OrderDetailPageBody() {
     const hasNet = !isNaN(netW) && netW > 0;
     const labourNet = Math.round(((hasNet ? netW : 0) + faOtherW + xG.metal) * 1000) / 1000;
     const labourVal = labourValue(labour, labourNet, usedDiaCt);
-    const factoryId = order.assignedFactoryId;
+    // The factory that made it: the one set on the order, or — not set, but every
+    // issue went to one — that one (as the Factory step suggests). Without either,
+    // the labour had nowhere to go and was dropped without a word (a silver or
+    // platinum piece can reach Final Approval with no factory set).
+    const factoryId = order.assignedFactoryId || (issuedFactoryIds.length === 1 ? issuedFactoryIds[0] : "");
+    if (!factoryId && labourVal > 0) {
+      toast.error("Choose the factory that made it first (Manufacturing → Factory) — the labour is owed to it.");
+      return;
+    }
     const orderVal = parseFloat(faOrderValue);
     const ship = parseFloat(faShipping);
     const alreadyDone = order.timeline[faIdx]?.status === "done";
@@ -1282,6 +1294,8 @@ function OrderDetailPageBody() {
         if (!d.materialIssuances) d.materialIssuances = [];
         // The finishing record — update in place if it exists (re-edit), else create.
         if (factoryId) {
+          // Found from the issues: now it is the order's factory too.
+          if (!o.assignedFactoryId) o.assignedFactoryId = factoryId;
           let finish = finishRecordOf(d.materialIssuances, order.id);
           if (!finish) {
             finish = {
@@ -4462,6 +4476,7 @@ The piece then takes ours — add them from stock or buy them, as for any order.
           perGramRate: faPerGram ? Number(faPerGram) : undefined,
           minimumLabour: faMinLabour ? Number(faMinLabour) : undefined,
           minimumUnderGrams: faMinLabour && Number(faMinUnder) > 0 ? Math.round(Number(faMinUnder) * 1000) / 1000 : undefined,
+          ...(faMinFlat && faMinLabour ? { minimumFlat: true } : {}),
           diamondHandlingRate: faDiaHandling ? Number(faDiaHandling) : undefined,
           cadCharge: faCad ? Number(faCad) : undefined,
           otherCharges: faOther ? Number(faOther) : undefined,
@@ -4776,9 +4791,15 @@ The piece then takes ours — add them from stock or buy them, as for any order.
                   </div>
                   <div>
                     <Label className="text-[11px]">Minimum for pieces under (g)</Label>
-                    <Input type="number" min={0} step="0.001" value={faMinUnder} onChange={e => setFaMinUnder(e.target.value)} disabled={!faMinLabour}
+                    <Input type="number" min={0} step="0.001" value={faMinUnder} onChange={e => setFaMinUnder(e.target.value)} disabled={!faMinLabour || faMinFlat}
                       className="rounded-lg h-9 mt-1" placeholder="blank = when gram × rate is less" />
                   </div>
+                  {/* A small piece the factory bills at its minimum: that amount, flat — not × grams, and
+                      not only when gram × rate comes to less. */}
+                  <label className={`col-span-2 flex items-start gap-2 rounded-lg border px-2.5 py-2 text-xs ${faMinLabour ? "border-border bg-white cursor-pointer" : "border-border/50 bg-secondary/40 text-muted-foreground"}`}>
+                    <input type="checkbox" className="mt-0.5" checked={faMinFlat && !!faMinLabour} disabled={!faMinLabour} onChange={e => setFaMinFlat(e.target.checked)} />
+                    <span><span className="font-medium text-foreground">Charge the minimum as a flat amount</span> — the making is {faMinLabour ? fmtMoneyInr(Number(faMinLabour) || 0) : "the minimum"} for this piece, whatever its weight (not × grams).</span>
+                  </label>
                   <div><Label className="text-[11px]">CAD charge</Label><Input type="number" min={0} step="0.01" value={faCad} onChange={e => setFaCad(e.target.value)} className="rounded-lg h-9 mt-1" placeholder="₹" />
                     {/* A freelancer's approved design is already in the order's cost — not again here. */}
                     {(() => { const c = (db.cadJobs ?? []).filter(j => j.orderId === order.id && j.status === "approved").reduce((s, j) => s + (j.chargeInr ?? 0), 0);
@@ -4802,7 +4823,23 @@ The piece then takes ours — add them from stock or buy them, as for any order.
                   </p>
                 ) : null}
                 {faFilledFrom.length > 0 && <p className="text-[11px] mt-1.5 text-muted-foreground">{faFilledFrom.join(" · ")} — change any of it for this piece.</p>}
-                <p className="text-sm mt-2">Labour total: <span className="font-semibold text-brand-dark">{fmtMoneyInr(faLive)}</span></p>
+                {/* How the total is made up — every line the factory bills, so it can be checked against their bill. */}
+                {(() => {
+                  const making = makingCharge(faLabour, faNetW);
+                  const rows: [string, number][] = [
+                    [faMinInUse ? `Making — minimum${faMinFlat ? " (flat)" : ""}` : `Making — ${faNetW.toFixed(3)} g × ${fmtMoneyInr(Number(faPerGram) || 0)}`, making],
+                    ...(faMetalG && faMetalRate ? [[`Metal by factory — ${Number(faMetalG)} g × ${fmtMoneyInr(Number(faMetalRate))}`, Math.round(Number(faMetalG) * Number(faMetalRate) * 100) / 100] as [string, number]] : []),
+                    ...(faDiaHandling && usedDiaCt ? [[`Diamond handling — ${usedDiaCt} ct × ${fmtMoneyInr(Number(faDiaHandling))}`, Math.round(Number(faDiaHandling) * usedDiaCt * 100) / 100] as [string, number]] : []),
+                    ...(Number(faCad) ? [["CAD charge", Number(faCad)] as [string, number]] : []),
+                    ...(Number(faOther) ? [["Other charges", Number(faOther)] as [string, number]] : []),
+                  ];
+                  return (
+                    <div className="mt-2 rounded-lg border border-border/60 bg-secondary/30 px-3 py-2 text-xs space-y-1">
+                      {rows.map(([l, v]) => <div key={l} className="flex justify-between gap-3"><span className="text-muted-foreground">{l}</span><span className="tabular-nums">{fmtMoneyInr(v)}</span></div>)}
+                      <div className="flex justify-between gap-3 border-t border-border/60 pt-1 text-sm"><span className="font-medium">Labour total</span><span className="font-semibold text-brand-dark tabular-nums">{fmtMoneyInr(faLive)}</span></div>
+                    </div>
+                  );
+                })()}
               </div>
 
               <div className="mb-5">
