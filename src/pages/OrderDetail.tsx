@@ -14,7 +14,7 @@ import { useStudio } from "@/lib/studio";
 import { BuyMaterialForm } from "@/components/BuyMaterialForm";
 import { choicesOf } from "@/lib/optionLists";
 import { LotPicker, BagSelect } from "@/components/LotFields";
-import { bagNoOf, bagNoOfPurchase } from "@/lib/diamondBags";
+import { bagNoOf } from "@/lib/diamondBags";
 import { lotBalances, lotParts } from "@/lib/diamondLots";
 import { orderCost, rateOn, stockAverageRate, stockFineGoldRate } from "@/lib/orderCost";
 import { clientMaterialBalance, deliveryFine, diaBack, fmtCt, fmtFine, orderClientSends, orderUse, recordClientUse, shortfallChargeId, undoClientSend, undoClientSendBlocker } from "@/lib/clientMaterial";
@@ -42,6 +42,8 @@ import { needsAccess } from "@/lib/actionHints";
 import { readyStockOffices, officeLabel, officeOf } from "@/lib/offices";
 import { logItem, whoOf } from "@/lib/readyStockHistory";
 import { finishRecordOf, isReworkIssue } from "@/lib/rework";
+import { orderMaterialLines, type MaterialLine } from "@/lib/orderMaterials";
+import { exportOrderCsv, exportOrderPdf } from "@/lib/orderExport";
 import { PIECE_PHOTO_MAX, dropDeletedPicture, followOrderPictures, orderPictures } from "@/lib/readyStockPhotos";
 import { exportAllowed } from "@/lib/access";
 import { useEffect, useRef, useState, type ReactNode } from "react";
@@ -69,14 +71,14 @@ import { Input } from "@/components/ui/input";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Share2, ArrowLeft, CheckCircle2, Users, Circle, Loader2, Printer, DollarSign, Plus, TrendingUp, AlertCircle, Wallet, ImagePlus, Truck, ExternalLink, Eye, Scale, Calculator, Minimize2, Maximize2, RotateCcw, Factory as FactoryIcon, Coins, Gem, X, Box, Camera, Video, Download, Trash2, Pencil, PackageCheck, Gift, Tag, Flame, Undo2, XCircle, ShoppingCart, Copy, FileText, type LucideIcon } from "lucide-react";
+import { Share2, ArrowLeft, CheckCircle2, Users, Circle, Loader2, Printer, DollarSign, Plus, TrendingUp, AlertCircle, Wallet, ImagePlus, Truck, ExternalLink, Eye, Scale, Calculator, Minimize2, Maximize2, RotateCcw, Factory as FactoryIcon, Coins, Gem, X, Box, Camera, Video, Download, Trash2, Pencil, PackageCheck, Gift, Tag, Flame, Undo2, XCircle, ShoppingCart, Copy, FileText, FileSpreadsheet, type LucideIcon } from "lucide-react";
 import { copyBlocker, copyHref } from "@/lib/orderCopy";
 import { MeltDialog } from "@/components/MeltDialog";
 import { OtherMaterialSelect, StockGradeInput, useOtherMaterials } from "@/components/MaterialFields";
 import { coField, companyOf, companyOfOrder, workCompanyOf, companyById, companiesOf, hasCompanies } from "@/lib/companies";
 import { CompanyBadge } from "@/components/CompanyFields";
 import { OrderLabels } from "@/components/autopilot/OrderLabels";
-import { isOtherMaterial, materialName, materialUnit, fmtQty, purchaseQty, diamondSpec, type MaterialKey } from "@/lib/materials";
+import { isOtherMaterial, materialName, materialUnit, fmtQty, type MaterialKey } from "@/lib/materials";
 import { ActionSheet } from "@/components/ActionSheet";
 import { DataTable, CellMain, CellAmount, CellTag, type DataColumn } from "@/components/DataTable";
 import { StatStrip } from "@/components/TableToolbar";
@@ -87,7 +89,7 @@ import { generateBand, labelPresets } from "@/lib/band";
 import { BandDialog } from "@/components/BandDialog";
 import { AsyncButton } from "@/components/AsyncButton";
 import {
-  fmtMoneyInr, purchasePending, issuancePending, manufacturingReadiness,
+  fmtMoneyInr, manufacturingReadiness,
   factoryPoolBalance, estimatedPureGoldNeeded, orderMaterialRequirements, issuanceUsed, labourValue, minimumLabourApplies, factoryFineGoldBalance,
   deriveStockBalances,
 } from "@/lib/manufacturing";
@@ -2194,6 +2196,11 @@ function OrderDetailPageBody() {
       onSelect: handlePrintInvoice, show: !!nextAction && billOffered },
     { label: "Make invoice", icon: FileText, hint: "Dispatched and priced — bill it now", onSelect: () => setInvoicing(true),
       show: mayInvoice && nextAction?.label !== "Make invoice" },
+    // The whole order in a file — costs on the admin's copy only (lib/orderExport.ts).
+    { label: "Download order — PDF", icon: FileText, hint: mayExport ? `Details, weights, material and repairs, payments, due${user!.role === "admin" ? " · with costs (admin)" : ""}` : needsAccess("orders", "export"),
+      disabled: !mayExport, onSelect: () => exportOrderPdf(db, order, { faDone, withCost: user!.role === "admin" }), show: isStaffUser },
+    { label: "Download order — Excel", icon: FileSpreadsheet, hint: mayExport ? "The same, to edit" : needsAccess("orders", "export"),
+      disabled: !mayExport, onSelect: () => exportOrderCsv(db, order, { faDone, withCost: user!.role === "admin" }), show: isStaffUser },
     { label: "Edit details", icon: Pencil, hint: editWhy ?? "Type, metal, size, due date, instructions…", disabled: !!editWhy, onSelect: () => setEditOpen(true), show: isStaffUser },
     { label: "Share this piece", icon: Share2, hint: "A product PDF or a link — photos, video, details, a price you set", onSelect: () => setSharingPiece(true),
       show: isStaffUser && !isDiamondOnlyOrder(order) },
@@ -3899,84 +3906,25 @@ The piece then takes ours — add them from stock or buy them, as for any order.
 
           {/* Everything bought or issued for this order, in one table. */}
           {(linkedPurchases.length > 0 || linkedIssuances.length > 0) && (() => {
-            type MatRow = { id: string; href: string; gold: boolean; title: string; detail?: string; qty: string;
-              /** Stones (or pieces) — beside the carats, not lost in the detail line. */
-              pcs?: number; source: string; sourceSub?: string;
-              costInr?: number; dueInr: number; labourDueInr: number; status: string; tone: "blue" | "green" | "amber" | "neutral"; actions: MoreAction[] };
+            type MatRow = MaterialLine & { actions: MoreAction[] };
             const rowAct = (icon: LucideIcon, label: string, hint: string, why: string | undefined, busy: boolean, onRun: () => unknown, danger = false): MoreAction =>
               ({ label, icon, danger, disabled: !!why || busy, hint: why ?? hint, onSelect: () => { void onRun(); } });
             const purchaseActs = (p: Purchase): MoreAction[] => isStaffUser ? [
               rowAct(Pencil, "Edit purchase", "Wrong carat, rate or bill no.", purchaseWhy(p, "edit"), false, () => openEditPurchase(p)),
               rowAct(Trash2, "Remove purchase", "Reverses the supplier due, stock and factory issue", purchaseWhy(p, "remove"), removingPurchaseId === p.id, () => removeLinkedPurchase(p), true),
             ] : [];
-            const supplierText = (p: Purchase) => `${db.suppliers.find(s => s.id === p.supplierId)?.name || "Supplier"}${p.invoiceNumber ? ` · bill ${p.invoiceNumber}` : ""}`;
-            const brokerText = (p: Purchase) => {
-              const br = p.brokerId ? (db.brokers ?? []).find(x => x.id === p.brokerId) : undefined;
-              return br && p.brokerageInr ? `brokerage ${fmtMoneyInr(p.brokerageInr)} to ${br.name}${p.brokeragePaidBy === "supplier" ? " (supplier pays)" : ""}` : undefined;
-            };
-            const kindTitle = (material: string, kind: string | undefined, grade: string) =>
-              material === "gold" ? `Gold ${grade}`.trim()
-              : material === "diamond" ? (kind === "certified" ? "Certified diamond" : "Loose diamond")
-              : materialName(db.settings, material as MaterialKey);
-            const rows: MatRow[] = [];
-            // Purchases not yet shown as an issue below — a bought diamond is one row, not two.
-            for (const p of linkedPurchases.filter(x => !linkedIssuances.some(i => i.sourcePurchaseId === x.id))) {
-              rows.push({
-                id: p.id, href: `/suppliers/${p.supplierId}`, gold: p.material === "gold",
-                title: kindTitle(p.material, p.diamond?.kind, p.gold?.purity ?? ""),
-                detail: p.material === "diamond" ? [bagNoOfPurchase(db, p), diamondSpec(p.diamond && { ...p.diamond, pieces: undefined }, (db.diamondPackets ?? []).find(x => x.purchaseId === p.id))].filter(Boolean).join(" · ") || undefined
-                  : isOtherMaterial(p.material) && p.other?.grade && p.other.grade !== "—" ? p.other.grade : undefined,
-                qty: fmtQty(purchaseQty(p), materialUnit(db.settings, p.material)),
-                pcs: p.material === "diamond" ? (p.diamond?.kind === "certified" ? 1 : p.diamond?.pieces) : materialUnit(db.settings, p.material) === "pcs" ? undefined : p.other?.pieces,
-                source: supplierText(p), sourceSub: brokerText(p),
-                costInr: p.totalInr, dueInr: purchasePending(p), labourDueInr: 0,
-                status: "Bought", tone: "neutral", actions: purchaseActs(p),
-              });
-            }
-            for (const mi of linkedIssuances) {
-              const unit = materialUnit(db.settings, mi.material);
-              const used = issuanceUsed(mi);
-              const packs = mi.diamondKind === "certified" ? (db.diamondPackets ?? []).filter(x => mi.diamondPacketIds?.includes(x.id)) : [];
-              const srcPurchase = mi.source === "purchase" && mi.sourcePurchaseId ? linkedPurchases.find(x => x.id === mi.sourcePurchaseId) : undefined;
-              const factory = db.factories.find(f => f.id === mi.factoryId);
-              const spec = mi.diamondSpec;
-              const lot = mi.material === "diamond" && mi.diamondKind !== "certified" ? mi.purityOrQuality : "";
-              const detail = mi.diamondKind === "certified"
-                ? packs.map(x => [x.shape, `${x.carat}ct`, x.color, x.clarity, `${x.certificateLab || "Cert"} ${x.certificateNumber}`].filter(Boolean).join(" · ")).join("; ")
-                : mi.material === "diamond"
-                ? [bagNoOf(db, lot), lot, spec?.type && !lot.includes(spec.type) ? spec.type : undefined,
-                    spec?.mm && !lot.includes(spec.mm) ? (/mm$/i.test(spec.mm) ? spec.mm : `${spec.mm} mm`) : undefined, spec?.size && !lot.includes(spec.size) ? spec.size : undefined,
-                    spec?.color && !lot.includes(spec.color) ? spec.color : undefined, spec?.clarity && !lot.includes(spec.clarity) ? spec.clarity : undefined,
-                    spec?.ratePerCaratInr ? `${fmtMoneyInr(spec.ratePerCaratInr)}/ct` : undefined].filter(Boolean).join(" · ")
-                : isOtherMaterial(mi.material) ? mi.purityOrQuality : undefined;
-              // After Final Approval a stone was either set in the piece or went back to stock.
-              const returnedCt = mi.finishReturnedCt ?? 0;
-              const [status, tone]: [string, MatRow["tone"]] = faDone && mi.material === "diamond"
-                ? (mi.diamondKind !== "certified" && returnedCt > 0
-                    ? [`${Math.round((mi.quantityIssued - returnedCt) * 1000) / 1000} ct used · ${returnedCt} ct back`, "amber"]
-                    : mi.finishDisposition === "returned" ? [mi.source === "client" ? "Back to the client" : "Back to stock", "amber"] : ["Used in piece", "green"])
-                : mi.status === "open" ? ["In progress", "blue"] : ["Closed", "green"];
-              const check = !srcPurchase && isStockIssuance(mi) && isStaffUser ? canEditIssuance(db, mi) : undefined;
+            // The same lines the order's download carries (lib/orderMaterials.ts); a repair is a line of its own.
+            const rows: MatRow[] = orderMaterialLines(db, order, faDone).map(l => {
+              const mi = l.issuance;
+              if (l.repair || (!l.purchase && !mi)) return { ...l, actions: [] };
+              if (l.purchase) return { ...l, actions: purchaseActs(l.purchase) };
+              const check = isStockIssuance(mi!) && isStaffUser ? canEditIssuance(db, mi!) : undefined;
               const issueWhy = check ? (orderEditAccess(db, user, can, order) ?? (check.ok ? undefined : check.reason)) : undefined;
-              rows.push({
-                // Stones a diamond-only order sold straight from stock have no factory: the row opens the bags.
-                id: mi.id, href: mi.factoryId ? `/factories/${mi.factoryId}` : "/stock/diamond", gold: mi.material === "gold",
-                title: mi.diamondKind === "certified" && packs.length > 1 ? `${packs.length} certified diamonds` : kindTitle(mi.material, mi.diamondKind, mi.purityOrQuality),
-                detail: detail || undefined,
-                qty: `${used}${unit}${Math.abs(used - mi.quantityIssued) > 0.001 ? ` of ${mi.quantityIssued}${unit}` : ""}`,
-                // Loose: the stones issued, less any counted back at Final Approval; certified: the stones.
-                pcs: mi.diamondKind === "certified" ? (packs.length || undefined)
-                  : mi.piecesIssued ? Math.max(0, mi.piecesIssued - (mi.finishReturnedPcs ?? 0)) : undefined,
-                source: srcPurchase ? supplierText(srcPurchase) : mi.source === "stock" ? "Our stock" : mi.source === "factoryPool" ? "Factory's holding" : mi.source === "melt" ? "Melted piece" : mi.source === "transfer" ? "Transfer" : "—",
-                sourceSub: [srcPurchase ? brokerText(srcPurchase) : undefined, mi.factoryId ? `to ${factory?.name || "factory"}` : "sold with the order"].filter(Boolean).join(" · "),
-                costInr: srcPurchase?.totalInr ?? spec?.amountInr, dueInr: srcPurchase ? purchasePending(srcPurchase) : 0, labourDueInr: issuancePending(mi),
-                status, tone,
-                actions: srcPurchase ? purchaseActs(srcPurchase) : check ? [
-                  rowAct(Pencil, "Edit", "Wrong carat or shape taken from stock", issueWhy, false, () => openEditIssuance(mi)),
-                  rowAct(Trash2, "Cancel this issue", "The material goes back into stock", issueWhy, removingIssuanceId === mi.id, () => removeIssuance(mi), true),
-                ] : [],
-              });
-            }
+              return { ...l, actions: check ? [
+                rowAct(Pencil, "Edit", "Wrong carat or shape taken from stock", issueWhy, false, () => openEditIssuance(mi!)),
+                rowAct(Trash2, "Cancel this issue", "The material goes back into stock", issueWhy, removingIssuanceId === mi!.id, () => removeIssuance(mi!), true),
+              ] : [] };
+            });
             const columns: DataColumn<MatRow>[] = [
               { key: "material", header: "Material", always: true, sortValue: r => r.title, csv: r => [r.title, r.detail].filter(Boolean).join(" · "),
                 cell: r => (
