@@ -706,7 +706,8 @@ function FactoryHistoryPageBody() {
   const issuancesForOrder = (orderNo?: string) => {
     if (!orderNo) return issuances;
     const q = orderNo.trim().toLowerCase();
-    return issuances.filter(mi => (db.orders.find(o => o.id === mi.orderId)?.orderNumber ?? "").toLowerCase().includes(q));
+    // A repair's gold taken out has no order of its own — it is the repaired order's (rework.orderId).
+    return issuances.filter(mi => (db.orders.find(o => o.id === (mi.orderId || mi.rework?.orderId))?.orderNumber ?? "").toLowerCase().includes(q));
   };
 
   const ordSuffix = (o?: string) => (o ? `-Order-${o.replace(/[^\w.-]+/g, "_")}` : "");

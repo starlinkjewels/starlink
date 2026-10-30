@@ -347,7 +347,7 @@ function MaterialSection({ material }: { material: MaterialKey }) {
   return (
     <div className="max-w-7xl mx-auto space-y-5">
       <PageHeader
-        back={{ label: "Back to Stock", onClick: () => navigate("/stock") }}
+        back={{ label: "Back to Stock", to: "/stock" }}
         title={materialLabel}
         subtitle={material === "gold" ? "By karat, or each purity" : material === "diamond" ? "By size, or each bag — shape · type · mm · sieve · colour · clarity" : def?.kind === "stone" ? `Gem · by size, or each line — stone · shape · type · mm · sieve · colour · grade, in ${unit}` : `${def && KIND_LABEL[def.kind] ? `${KIND_LABEL[def.kind]} · ` : ""}by grade, in ${unit}`}
         actions={<CompanyFilter value={co} onChange={pickCo} className="h-10 rounded-xl text-sm bg-white w-full sm:w-52" />}
@@ -828,7 +828,7 @@ function CertifiedSection() {
   return (
     <div className="max-w-7xl mx-auto space-y-5">
       <PageHeader
-        back={{ label: "Back to Stock", onClick: () => navigate("/stock") }}
+        back={{ label: "Back to Stock", to: "/stock" }}
         title="Certified Diamonds"
         subtitle={`${allInStockPackets.length} packet${allInStockPackets.length !== 1 ? "s" : ""} in stock`}
         actions={<CompanyFilter value={co} onChange={pickCo} className="h-10 rounded-xl text-sm bg-white w-full sm:w-52" />}

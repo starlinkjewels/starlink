@@ -1,7 +1,8 @@
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import type { LucideIcon } from "lucide-react";
 import { ArrowLeft, ChevronRight, LayoutGrid, Rows3 } from "lucide-react";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
+import { previousPath } from "@/hooks/useBackNav";
 import { Button } from "@/components/ui/button";
 import { MoreMenu, type MoreAction } from "@/components/MoreMenu";
 import { useWideScroll } from "@/components/WideScroll";
@@ -53,6 +54,13 @@ export function PageHeader({ title, subtitle, info, back, eyebrow, primary, seco
   // Two named buttons and the ⋯ on a 390px phone: words only, no icons, so the row fits.
   const tight = !!primary && !!secondary ? "max-sm:[&_svg:first-child]:hidden" : "";
   const studio = useStudio();
+  // The back link: when the page before this one IS where it points, it steps back —
+  // as the phone's Back does, so the list is where it was left and Back after it
+  // doesn't come round to this page again. Otherwise it opens that page.
+  const navigate = useNavigate();
+  const stepBack = (e: React.MouseEvent) => {
+    if (back?.to && previousPath() === back.to) { e.preventDefault(); navigate(-1); }
+  };
   // The new look: where you are as a trail ("Suppliers › Paresh") on a computer; on a
   // phone the top bar has the back arrow, so the page doesn't repeat it.
   const crumb = back ? back.label.replace(/^back to\s+/i, "") : "";
@@ -71,14 +79,14 @@ export function PageHeader({ title, subtitle, info, back, eyebrow, primary, seco
       {back && trail && (
         <nav aria-label="Breadcrumb" className="ui-crumbs max-md:hidden flex items-center gap-1 text-sm text-muted-foreground min-w-0">
           {back.to
-            ? <Link to={back.to} className="hover:text-foreground truncate">{crumb}</Link>
+            ? <Link to={back.to} onClick={stepBack} className="hover:text-foreground truncate">{crumb}</Link>
             : <button type="button" onClick={back.onClick} className="hover:text-foreground truncate">{crumb}</button>}
           {typeof title === "string" && <><ChevronRight className="h-3.5 w-3.5 shrink-0 opacity-60" /><span aria-current="page" className="text-foreground/80 truncate">{title}</span></>}
         </nav>
       )}
       {back && !trail && (
         back.to
-          ? <Link to={back.to} className="ui-back inline-flex items-center gap-1.5 min-h-10 -my-2.5 pr-2 text-sm text-muted-foreground hover:text-foreground -ml-0.5"><ArrowLeft className="h-4 w-4" />{back.label}</Link>
+          ? <Link to={back.to} onClick={stepBack} className="ui-back inline-flex items-center gap-1.5 min-h-10 -my-2.5 pr-2 text-sm text-muted-foreground hover:text-foreground -ml-0.5"><ArrowLeft className="h-4 w-4" />{back.label}</Link>
           : <button type="button" onClick={back.onClick} className="ui-back inline-flex items-center gap-1.5 min-h-10 -my-2.5 pr-2 text-sm text-muted-foreground hover:text-foreground -ml-0.5"><ArrowLeft className="h-4 w-4" />{back.label}</button>
       )}
       {/* On a phone the page's buttons sit at the top right, beside the title (as in any

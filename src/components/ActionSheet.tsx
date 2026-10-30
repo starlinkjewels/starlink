@@ -3,6 +3,7 @@ import type { LucideIcon } from "lucide-react";
 import { Sheet, SheetContent, SheetDescription, SheetTitle } from "@/components/ui/sheet";
 import { HeldWhileStale } from "@/components/ui/dialog";
 import { useHeldWhileStale } from "@/hooks/useDataFresh";
+import { useBackToClose } from "@/hooks/useBackNav";
 
 /**
  * The panel a task slides in on: a new purchase, a payment, a transfer. The
@@ -26,6 +27,8 @@ export function ActionSheet({ open, onOpenChange, title, description, icon: Icon
 }) {
   // Never a form filled from the device's saved copy: held, then closed to open again from the latest.
   const { held, hasForm } = useHeldWhileStale(open, onOpenChange);
+  // The phone's Back (or the browser's) closes the panel, and the page stays.
+  useBackToClose(open, () => onOpenChange(false));
   const width = size === "xl" ? "sm:max-w-[60rem]" : size === "lg" ? "sm:max-w-[48rem]" : "sm:max-w-[36rem]";
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>

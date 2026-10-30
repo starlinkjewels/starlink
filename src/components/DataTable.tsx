@@ -2,6 +2,7 @@ import { Fragment, useEffect, useMemo, useRef, useState, type MouseEvent, type R
 import { ArrowDown, ArrowUp, ArrowUpDown, Check, ChevronDown, FileSpreadsheet, Inbox, Search, SearchX, ChevronLeft, ChevronRight, Minus, Plus, X } from "lucide-react";
 import { useStudio } from "@/lib/studio";
 import { useMayExport } from "@/hooks/useCan";
+import { useEntryState } from "@/hooks/useBackNav";
 import { useNavigate } from "react-router-dom";
 import { downloadCsv } from "@/lib/ledgerExport";
 import { MoreMenu, type MoreAction } from "@/components/MoreMenu";
@@ -96,13 +97,16 @@ export function compareCells(a: string | number, b: string | number): number {
 }
 
 export function DataTable<T>({
-  id, rows, columns, rowKey, defaultSort = null, searchText, exportName, emptyText = "Nothing to show.",
+  id, stateKey, rows, columns, rowKey, defaultSort = null, searchText, exportName, emptyText = "Nothing to show.",
   pageSizes = [25, 50, 100], maxHeight, footer, toolbarExtra, onRowClick, rowActions, onRowActionsOpen, selected, onSelectedChange,
   rowClassName, controls = "full", noun = "row", plural, searchPlaceholder = "Search this table", totals, totalsLabel = "Total", expand, rowHref, pinnedRows, pinnedAt = "bottom", resetKey, canClickRow, details,
   search, filters, onClearFilters, exports, exportScope, summary, loading, emptyAction,
 }: {
   /** Names this table's remembered choices — unique per table. */
   id: string;
+  /** What its search, page and opened rows belong to, when not the table itself
+   *  (one bag's history in a panel that shows one bag after another). */
+  stateKey?: string;
   rows: T[];
   columns: DataColumn<T>[];
   rowKey: (row: T) => string;
@@ -184,8 +188,22 @@ export function DataTable<T>({
   // Chosen for this table in its View menu: wins over the row spacing set for every table (Settings → Table Style).
   const padCls = prefs.dense ? `dt-pad-${prefs.dense}` : "";
   const pageSize = prefs.pageSize ?? pageSizes[0];
-  const [q, setQ] = useState("");
-  const [page, setPage] = useState(1);
+  // The search, the page and the opened rows are kept for this visit of the page:
+  // Back to it shows the table as it was left (hooks/useBackNav.ts).
+  const st = stateKey ?? id;
+  const [q, setQ] = useEntryState(`dt:${st}:q`, "");
+  const [page, setPage] = useEntryState(`dt:${st}:page`, 1);
+  const rootRef = useRef<HTMLDivElement>(null);
+  // Another page of rows starts at its top row — not where the last one ended.
+  const goPage = (n: number) => {
+    setPage(n);
+    requestAnimationFrame(() => {
+      const el = rootRef.current, main = el?.closest("main");
+      if (!el || !main) return;
+      const top = el.getBoundingClientRect().top - main.getBoundingClientRect().top;
+      if (top < 0) main.scrollTop += top - 88; // clear of the phone's top bar
+    });
+  };
   const [lastReset, setLastReset] = useState(resetKey);
   // How wide the table's box shows, so an opened row's details fit it even
   // when the table itself is wider and scrolls sideways.
@@ -213,8 +231,9 @@ export function DataTable<T>({
   if (resetKey !== lastReset) { setLastReset(resetKey); setPage(1); }
   const full = controls === "full";
   const mayExport = useMayExport();
-  const [open, setOpen] = useState<Set<string>>(new Set());
-  const toggleOpen = (k: string) => setOpen(prev => { const n = new Set(prev); if (!n.delete(k)) n.add(k); return n; });
+  const [openKeys, setOpenKeys] = useEntryState<string[]>(`dt:${st}:open`, []);
+  const open = useMemo(() => new Set(openKeys), [openKeys]);
+  const toggleOpen = (k: string) => setOpenKeys(prev => (prev.includes(k) ? prev.filter(x => x !== k) : [...prev, k]));
   const ticking = !!selected && !!onSelectedChange;
 
   // A column with nothing in it on any row (a voucher number no entry has)
@@ -407,7 +426,7 @@ export function DataTable<T>({
   const listed = [...(pinnedAt === "top" && cur === 1 ? pinnedRows ?? [] : []), ...visible, ...(pinnedAt === "bottom" && cur === pages && !(!search && q) ? pinnedRows ?? [] : [])];
 
   return (
-    <div className="space-y-2.5">
+    <div ref={rootRef} className="space-y-2.5">
       {full && (
       // One row on every screen: the search, then its buttons on the right of it. No
       // "12 orders" count — the page's tiles and tabs already say how many.
@@ -718,8 +737,8 @@ export function DataTable<T>({
           </span>
           <span className="inline-flex items-center gap-1.5">
             {(cur - 1) * pageSize + 1}–{Math.min(cur * pageSize, filtered.length)} of {filtered.length}
-            <button type="button" disabled={cur <= 1} onClick={() => setPage(cur - 1)} className="h-7 w-7 grid place-items-center rounded-md border border-border bg-white disabled:opacity-40" aria-label="Previous page"><ChevronLeft className="h-3.5 w-3.5" /></button>
-            <button type="button" disabled={cur >= pages} onClick={() => setPage(cur + 1)} className="h-7 w-7 grid place-items-center rounded-md border border-border bg-white disabled:opacity-40" aria-label="Next page"><ChevronRight className="h-3.5 w-3.5" /></button>
+            <button type="button" disabled={cur <= 1} onClick={() => goPage(cur - 1)} className="h-7 w-7 grid place-items-center rounded-md border border-border bg-white disabled:opacity-40" aria-label="Previous page"><ChevronLeft className="h-3.5 w-3.5" /></button>
+            <button type="button" disabled={cur >= pages} onClick={() => goPage(cur + 1)} className="h-7 w-7 grid place-items-center rounded-md border border-border bg-white disabled:opacity-40" aria-label="Next page"><ChevronRight className="h-3.5 w-3.5" /></button>
           </span>
         </div>
       )}

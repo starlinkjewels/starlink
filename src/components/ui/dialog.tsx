@@ -6,12 +6,15 @@ import { X } from "lucide-react";
 
 import { cn } from "@/lib/utils";
 import { HeldFormContext, useDataFresh, useHeldWhileStale, useNoteFields } from "@/hooks/useDataFresh";
+import { useBackToClose } from "@/hooks/useBackNav";
 
 // Opened in the first second, while the device's saved copy is on screen: held,
 // and if it has fields, closed once the server's answer is in so it is opened
 // again from the latest (see useHeldWhileStale).
 const Dialog = ({ open, onOpenChange, ...props }: React.ComponentProps<typeof DialogPrimitive.Root>) => {
   const { hasForm } = useHeldWhileStale(open, onOpenChange);
+  // The phone's Back (or the browser's) closes the dialog, and the page stays.
+  useBackToClose(open, onOpenChange ? () => onOpenChange(false) : undefined);
   return (
     <HeldFormContext.Provider value={hasForm}>
       <DialogPrimitive.Root open={open} onOpenChange={onOpenChange} {...props} />

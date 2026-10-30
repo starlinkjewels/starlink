@@ -1,6 +1,7 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { motion, AnimatePresence } from "framer-motion";
+import { useBackToClose } from "@/hooks/useBackNav";
 import { ArrowLeft, ChevronRight, LogOut, MoreHorizontal, Users, Wallet, X, type LucideIcon } from "lucide-react";
 
 /**
@@ -65,6 +66,8 @@ function Sheet({ open, onClose, title, sub, groups, footer }: {
 }) {
   const navigate = useNavigate();
   const loc = useLocation();
+  // The phone's Back closes this menu, and the page stays.
+  useBackToClose(open, onClose);
   return (
     <AnimatePresence>
       {open && (

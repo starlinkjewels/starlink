@@ -348,6 +348,7 @@ export function BagPanel({ keys, label, companyId, start = "view", onClose }: {
             <p className="text-sm font-semibold text-brand-dark mb-2">{bag ? "History of this bag" : "History of these bags"}</p>
             <DataTable
               id="bag-history"
+              stateKey={`bag-history:${shownKeys.join("|")}`}
               noun="movement"
               rows={history}
               columns={columns}
