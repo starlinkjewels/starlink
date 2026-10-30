@@ -8,6 +8,7 @@ import { Download, Coins, Gem, Hammer } from "lucide-react";
 import { type TableFilter, StatStrip } from "@/components/TableToolbar";
 import { DataTable, CellMain, CellTag, type DataColumn } from "@/components/DataTable";
 import { SectionTitle } from "@/components/SectionTitle";
+import { finishRecordOf, isReworkIssue } from "@/lib/rework";
 
 // A zero prints as a dash, never as an empty cell. A blank reads as missing
 // data; "—" says plainly that nothing moved.
@@ -67,6 +68,8 @@ export interface FactoryOrderRow {
   entries: { id: string; date: string; text: string; qty?: string; amount?: number; kind: "out" | "in" | "pay" }[];
   /** Other materials on the job (Settings → Materials), each in its own unit: given and accounted for. */
   materials?: Record<string, { out: number; in: number }>;
+  /** A repair of the order's piece: a row of its own, under the factory's repair bill. */
+  repair?: boolean;
 }
 
 /**
@@ -85,6 +88,17 @@ export function buildFactoryOrderRows(
   settings?: Pick<Settings, "materials">,
 ): FactoryOrderRow[] {
   const byOrder = new Map<string, FactoryOrderRow>();
+  // A repair is a row of its own, under the factory's repair bill number — never
+  // added into the order's row (its gold and labour went into the piece's line,
+  // under the piece's bill). The piece's own finish record stays the order's,
+  // even where an older repair once wrote over it (lib/rework.ts).
+  const finishOf = new Map<string, string | undefined>();
+  const isRepair = (mi: MaterialIssuance) => {
+    if (!mi.orderId) return mi.source === "rework" && !!mi.rework?.orderId;
+    if (!isReworkIssue(mi)) return false;
+    if (!finishOf.has(mi.orderId)) finishOf.set(mi.orderId, finishRecordOf(issuances, mi.orderId)?.id);
+    return finishOf.get(mi.orderId) !== mi.id;
+  };
   /** Rows with a real diamond issue — only the others may show the order's estimate. */
   const hasDiaIssue = new Set<string>();
   /** Net weight the factory issues recorded for each row's finished piece. */
@@ -93,9 +107,30 @@ export function buildFactoryOrderRows(
     // Material handed over in BULK has no order. Each delivery is its own row —
     // lumping them into a single "pool" line hid when each one was given and how
     // much, which is the whole point of a ledger.
-    const key = mi.orderId || mi.id;
-    const order = orders.find(o => o.id === mi.orderId);
+    const repair = isRepair(mi);
+    const repairOrderId = repair ? (mi.rework?.orderId ?? mi.orderId ?? "") : "";
+    const key = repair ? `repair:${mi.rework?.key ?? `${repairOrderId}|${mi.issuedAt}`}` : mi.orderId || mi.id;
+    const order = orders.find(o => o.id === (repair ? repairOrderId : mi.orderId));
     let row = byOrder.get(key);
+    if (!row && repair) {
+      row = {
+        rowId: key, repair: true,
+        orderId: repairOrderId,
+        orderNo: order?.orderNumber || "Repair",
+        date: mi.rework?.at ?? mi.issuedAt,
+        jewellery: `Repair${order?.jewelleryType ? ` · ${order.jewelleryType}` : ""}`,
+        goldOut: 0, goldIn: 0, diaOut: 0, diaIn: 0, silverIn: 0, otherIn: 0,
+        labour: 0, paid: 0, open: 0, total: 0,
+        orderStatus: "Repair",
+        factoryBillNo: mi.rework?.billNo || undefined,
+        quotedUsd: 0, entries: [],
+        metalNote: undefined,
+        netWeight: 0,
+        receivedDate: undefined,
+      };
+      byOrder.set(key, row);
+    }
+    if (repair && !row!.factoryBillNo && mi.rework?.billNo) row!.factoryBillNo = mi.rework.billNo;
     if (!row) {
       row = {
         rowId: key,
@@ -162,7 +197,8 @@ export function buildFactoryOrderRows(
           : toPureGold(mi.finishedNetWeight, mi.finishedKarat || "24K");
         row.entries.push({
           id: mi.id + "-gout", date: mi.issuedAt, kind: "in",
-          text: `Finished piece — net ${mi.finishedNetWeight}g${mi.finishedPurity ? ` @ ${mi.finishedPurity}‰` : ""}`,
+          text: repair ? `Added to the piece in the repair — ${mi.finishedNetWeight}g${mi.finishedKarat ? ` ${mi.finishedKarat}` : ""}`
+            : `Finished piece — net ${mi.finishedNetWeight}g${mi.finishedPurity ? ` @ ${mi.finishedPurity}‰` : ""}`,
           qty: `${fine.toFixed(3)} g fine`,
         });
       }
@@ -218,6 +254,12 @@ export function buildFactoryOrderRows(
   for (const row of byOrder.values()) {
     const order = orders.find(o => o.id === row.orderId);
     if (!order) continue;
+    // A repair carries only what the repair moved — never the order's estimates or the piece's weight.
+    if (row.repair) {
+      row.metalNote = [order.productKarats, metalLabel(order.metal)].filter(Boolean).join(" ");
+      row.designNo = order.designNumber?.trim() || undefined;
+      continue;
+    }
     row.quotedUsd = order.estimatedMakingCharges || 0;
     row.metalNote = [order.productKarats, metalLabel(order.metal)].filter(Boolean).join(" ");
     // Any other material on the job, named in the item column: "14K Gold + 2.5 g Platinum".
@@ -341,9 +383,12 @@ export function FactoryOrderLedger({
 
   const n = (s: ReactNode, cls = "") => <span className={`tabular-nums whitespace-nowrap ${cls}`}>{s}</span>;
   const columns: DataColumn<FactoryOrderRow>[] = [
-    { key: "order", header: "Order", always: true, sortValue: r => r.orderNo, csv: r => r.orderNo,
+    { key: "order", header: "Order", always: true, sortValue: r => r.orderNo, csv: r => (r.repair ? `${r.orderNo} (repair)` : r.orderNo),
       cell: r => (r.orderId
-        ? <Link to={`/orders/${r.orderId}`} className="font-mono text-primary hover:underline whitespace-nowrap">{r.orderNo}</Link>
+        ? <span className="inline-flex flex-col items-start">
+            <Link to={`/orders/${r.orderId}`} className="font-mono text-primary hover:underline whitespace-nowrap">{r.orderNo}</Link>
+            {r.repair && <span className="text-[10px] font-semibold uppercase tracking-wide text-amber-700">Repair</span>}
+          </span>
         : <span className="font-medium text-amber-700 whitespace-nowrap">{r.orderNo}</span>) },
     { key: "bill", header: "Factory bill", sortValue: r => r.factoryBillNo ?? "", csv: r => r.factoryBillNo ?? "",
       cell: r => (r.factoryBillNo

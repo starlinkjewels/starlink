@@ -274,6 +274,8 @@ function OrderDetailPageBody() {
   const [showPricing, setShowPricing] = useState(false);
   const [priceValue, setPriceValue] = useState("");
   const [priceShipping, setPriceShipping] = useState("");
+  // The certificate fee: set when the order was placed, or added here later (a client asks for one after).
+  const [priceCert, setPriceCert] = useState("");
   const [priceCharges, setPriceCharges] = useState<ChargeDraft[]>([]);
 
   // Manufacturing — record a purchase / issue material for THIS order directly,
@@ -1969,17 +1971,28 @@ function OrderDetailPageBody() {
   const fillPricing = () => {
     setPriceValue(order.amount ? String(order.amount) : "");
     setPriceShipping(order.shippingCharge ? String(order.shippingCharge) : "");
+    setPriceCert(order.certificateFee ? String(order.certificateFee) : "");
     setPriceCharges(chargeDrafts(order.otherCharges));
   };
 
-  const savePricing = () => {
+  const savePricing = async () => {
     const val = parseFloat(priceValue);
     const ship = parseFloat(priceShipping) || 0;
+    const cert = parseFloat(priceCert) || 0;
     if (!val || val <= 0) { toast.error("Enter a valid order value"); return; }
+    if (cert < 0) { toast.error("The certificate fee can't be below 0"); return; }
+    // A sales return has already worked out what goes back for the certificate; a
+    // changed fee would no longer match its credit note.
+    const certChanged = Math.abs(cert - (order.certificateFee || 0)) > 0.0001;
+    if (certChanged && order.returns?.length) { toast.error("Pieces of this order were returned — the certificate fee can't be changed now"); return; }
+    if (certChanged && findInvoiceForOrder(db.invoices, order.id)
+      && !(await confirmBox("This order is already invoiced. Change the certificate fee?\n\nThe order's total and balance change; reprint the invoice so it shows the new fee."))) return;
     updateDb(d => {
       const o = d.orders.find(x => x.id === order.id)!;
       o.amount = val;
       o.shippingCharge = ship;
+      // A fee means a certificate goes with the piece; taking the fee off leaves the order's choice as it was.
+      if (cert > 0) { o.certificate = true; o.certificateFee = cert; } else if (o.certificateFee) o.certificateFee = 0;
       const charges = chargesOf(priceCharges);
       if (charges.length) o.otherCharges = charges; else delete o.otherCharges;
       // The client is not told: a price set or changed here sends no notice.
@@ -2519,6 +2532,12 @@ function OrderDetailPageBody() {
                 <p className="text-xs text-muted-foreground">Shipping</p>
                 <p className="mt-0.5 text-xl font-semibold text-foreground tabular-nums">{(order.shippingCharge || 0) > 0 ? fmtMoney(order.shippingCharge) : "—"}</p>
               </div>
+              {(order.certificateFee || 0) > 0 && (
+                <div className="min-w-0">
+                  <p className="text-xs text-muted-foreground">Certificate</p>
+                  <p className="mt-0.5 text-xl font-semibold text-foreground tabular-nums">{fmtMoney(order.certificateFee || 0)}</p>
+                </div>
+              )}
               {(order.otherCharges?.length ?? 0) > 0 && (
                 <div className="min-w-0 col-span-2">
                   <p className="text-xs text-muted-foreground">Other charges · {fmtMoney(otherChargesTotal(order))}</p>
@@ -2556,6 +2575,16 @@ function OrderDetailPageBody() {
                         onChange={e => setPriceShipping(e.target.value)}
                         className="rounded-xl h-10"
                         placeholder="0"
+                      />
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label htmlFor="price-cert" className="text-xs">Certificate fee ($)</Label>
+                      <Input
+                        id="price-cert" type="number" min={0} step="0.01"
+                        value={priceCert}
+                        onChange={e => setPriceCert(e.target.value)}
+                        className="rounded-xl h-10"
+                        placeholder="0 — no certificate charge"
                       />
                     </div>
                     <div className="space-y-1.5 sm:col-span-2">

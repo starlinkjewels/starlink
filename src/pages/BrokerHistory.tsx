@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Link, useNavigate, useParams } from "react-router-dom";
+import { Link, useParams } from "react-router-dom";
 import { Handshake, Pencil, Wallet, Truck, Receipt, Coins, ArrowDownRight, Tag, ArrowDownCircle } from "lucide-react";
 import { fmtDate, type Purchase, type SupplierSale } from "@/lib/db";
 import { useDb } from "@/hooks/useDb";
@@ -24,7 +24,6 @@ type Tab = "bills" | "sales" | "suppliers" | "money";
  */
 export function BrokerHistoryPage() {
   const { id } = useParams<{ id: string }>();
-  const navigate = useNavigate();
   const db = useDb();
   const { user } = useAuth();
   const isAdmin = user?.role === "admin";
@@ -128,7 +127,7 @@ export function BrokerHistoryPage() {
   return (
     <div className="space-y-5">
       <PageHeader
-        back={{ label: "Brokers", onClick: () => navigate("/suppliers") }}
+        back={{ label: "Brokers", to: "/suppliers" }}
         title={broker.name}
         subtitle={[broker.phone, broker.brokeragePct != null ? `${broker.brokeragePct}% usual brokerage` : null, broker.active === false ? "switched off" : null].filter(Boolean).join(" · ") || "Broker"}
         primary={{ label: "Pay through broker", icon: Wallet, onClick: () => setPaying(true) }}

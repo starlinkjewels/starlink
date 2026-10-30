@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Link, useNavigate, useParams } from "react-router-dom";
+import { Link, useParams } from "react-router-dom";
 import { PenTool, Pencil, Wallet, FolderOpen, CheckCircle2, CalendarDays, IndianRupee, Receipt } from "lucide-react";
 import { fmtDate, currentUserOrders, type LockerTransaction } from "@/lib/db";
 import { useDb } from "@/hooks/useDb";
@@ -25,7 +25,6 @@ type Tab = "designs" | "months" | "payments";
  */
 export function DesignerHistoryPage() {
   const { id } = useParams<{ id: string }>();
-  const navigate = useNavigate();
   const db = useDb();
   const { user } = useAuth();
   const can = useCan();
@@ -101,7 +100,7 @@ export function DesignerHistoryPage() {
   return (
     <div className="space-y-5">
       <PageHeader
-        back={{ label: "Designers", onClick: () => navigate("/designers") }}
+        back={{ label: "Designers", to: "/designers" }}
         title={designer.name}
         subtitle={[KIND_LABEL[designer.kind], freelance && designer.ratePerDesign != null ? `${fmtMoneyInr(designer.ratePerDesign)} a design` : null, contact || null, designer.active === false ? "switched off" : null].filter(Boolean).join(" · ")}
         primary={freelance && mayPay ? { label: "Pay", icon: Wallet, onClick: () => setPaying(true) } : null}

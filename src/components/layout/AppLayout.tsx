@@ -26,6 +26,7 @@ import { SyncStatus } from "@/components/SyncStatus";
 import { useFreshKey } from "@/hooks/useDataFresh";
 import { useChatAlerts } from "@/hooks/useChatAlerts";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
+import { noteTrail, useBackToClose, useScrollMemory } from "@/hooks/useBackNav";
 
 interface NavItem { to: string; label: string; icon: any; roles?: string[]; highlight?: boolean; }
 const NAV: NavItem[] = [
@@ -273,6 +274,10 @@ export function AppLayout() {
   }, [appearanceKey]); // eslint-disable-line react-hooks/exhaustive-deps
   const navigate = useNavigate();
   const loc = useLocation();
+  // Back (the phone's, the browser's) returns to where the page was; a page opened
+  // anew starts at the top (hooks/useBackNav.ts).
+  useScrollMemory();
+  useEffect(() => { noteTrail((window.history.state as { idx?: number } | null)?.idx ?? 0, loc.pathname); }, [loc.key]); // eslint-disable-line react-hooks/exhaustive-deps
   // The new look (preview) is on on this device: its own menus and tab bar (StudioShell).
   const studio = useStudio();
   // A page that is one task from start to finish (placing an order) puts the
@@ -285,6 +290,10 @@ export function AppLayout() {
   const [scanOpen, setScanOpen] = useState(false);
   const [pendingTasks, setPendingTasks] = useState(0);
   const profileRef = useRef<HTMLDivElement>(null);
+  // Back closes an open drawer or panel first, and the page stays.
+  useBackToClose(moreOpen, () => setMoreOpen(false));
+  useBackToClose(tasksOpen, () => setTasksOpen(false));
+  useBackToClose(scanOpen, () => setScanOpen(false));
 
   useEffect(() => {
     const calc = () => {
