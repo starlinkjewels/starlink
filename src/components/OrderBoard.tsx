@@ -22,6 +22,8 @@ import { confirmBox } from "@/lib/confirm";
 import { ProductionInfo } from "@/components/ProductionInfo";
 import { UserAvatar } from "@/components/UserAvatar";
 import type { ProductionTrack } from "@/lib/production";
+import { zoomable } from "@/components/ImageViewer";
+import { orderPictures } from "@/lib/readyStockPhotos";
 
 const PRIORITY_RANK: Record<string, number> = { Urgent: 0, "High Priority": 1, Normal: 2 };
 const DONE_SHOWN = 20;
@@ -248,7 +250,7 @@ export function OrderBoard({ orders, actions, tracks }: { orders: Order[]; actio
                       className={`rounded-xl bg-white border border-border/70 p-2.5 shadow-sm transition-shadow ${locked ? "" : "cursor-grab active:cursor-grabbing hover:shadow-md"} ${dragId === o.id ? "opacity-50" : ""}`}>
                       <div className="flex gap-2.5">
                         <div className="h-11 w-11 rounded-lg overflow-hidden bg-secondary/60 shrink-0 grid place-items-center">
-                          {img ? <img src={img} alt="" loading="lazy" draggable={false} className="h-full w-full object-cover" /> : <Package className="h-5 w-5 text-primary/30" />}
+                          {img ? <img src={img} alt="" loading="lazy" draggable={false} {...zoomable(img, orderPictures(o))} className="h-full w-full object-cover cursor-zoom-in" /> : <Package className="h-5 w-5 text-primary/30" />}
                         </div>
                         <div className="min-w-0 flex-1">
                           <div className="flex items-start justify-between gap-1 min-w-0">

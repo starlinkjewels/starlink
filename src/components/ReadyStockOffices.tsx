@@ -13,6 +13,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { zoomable } from "@/components/ImageViewer";
 
 /** The office a piece is at, as a small pin. Amber when none was ever set. */
 export function OfficeChip({ office, className = "" }: { office: string; className?: string }) {
@@ -72,7 +73,7 @@ export function MoveOfficeDialog({ items, onClose, onDone }: { items: ReadyStock
             {items.slice(0, 8).map(i => (
               <div key={i.id} className="flex items-center gap-3 px-3 py-2">
                 <div className="h-10 w-10 rounded-lg bg-white ring-1 ring-border/60 overflow-hidden grid place-items-center shrink-0">
-                  {i.images?.[0] ? <img src={i.images[0]} alt="" className="w-full h-full object-contain" /> : <Gem className="h-4 w-4 text-muted-foreground/40" />}
+                  {i.images?.[0] ? <img src={i.images[0]} alt="" {...zoomable(i.images[0], i.images)} className="w-full h-full object-contain cursor-zoom-in" /> : <Gem className="h-4 w-4 text-muted-foreground/40" />}
                 </div>
                 <div className="min-w-0 flex-1">
                   <p className="text-sm font-medium text-brand-dark truncate">{i.name}</p>

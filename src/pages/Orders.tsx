@@ -41,6 +41,8 @@ import { InvoiceBadge, needsInvoice } from "@/components/InvoiceBadge";
 import { PaginationBar } from "@/components/PaginationBar";
 import type { Order, MaterialIssuance } from "@/lib/db";
 import { useUrlState } from "@/hooks/useUrlState";
+import { zoomable } from "@/components/ImageViewer";
+import { orderPictures } from "@/lib/readyStockPhotos";
 
 const PAGE_SIZE = 12;
 
@@ -278,7 +280,7 @@ export function OrdersPage() {
         return (
           <div className="flex items-center gap-3 min-w-0">
             <div className="h-11 w-11 rounded-lg overflow-hidden bg-white ring-1 ring-border/60 shrink-0 grid place-items-center">
-              {img ? <img src={img} alt="" loading="lazy" className="w-full h-full object-contain" />
+              {img ? <img src={img} alt="" loading="lazy" {...zoomable(img, orderPictures(o))} className="w-full h-full object-contain cursor-zoom-in" />
                 : isDiamondOnlyOrder(o) ? <Gem className="h-4 w-4 text-sky-500/50" /> : <Package className="h-4 w-4 text-primary/30" />}
             </div>
             <div className="min-w-0">
@@ -645,6 +647,7 @@ export function OrdersPage() {
                   <div className="relative mx-3 aspect-square rounded-xl overflow-hidden ring-1 ring-border/60 bg-secondary/60 animate-pulse">
                     <img
                       src={img}
+                      {...zoomable(img, orderPictures(o))}
                       alt={o.orderNumber}
                       loading="lazy"
                       decoding="async"

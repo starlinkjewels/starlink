@@ -34,6 +34,7 @@ import { pieceTimeline, stepQty, whoOf, type TimelineEntry } from "@/lib/readySt
 import { readyStockDeleteBlocker } from "@/lib/readyStockGuards";
 import { builtFrom, orderPicturesPlan, piecePhotosBehind, takeOrderPictures } from "@/lib/readyStockPhotos";
 import { needsAccess } from "@/lib/actionHints";
+import { zoomable } from "@/components/ImageViewer";
 
 /** How each kind of history line looks. */
 const KIND: Record<ReadyStockEventKind, { icon: LucideIcon; tone: string; label: string }> = {
@@ -241,7 +242,7 @@ function PieceBody({ item }: { item: ReadyStockItem }) {
       cell: l => (
         <div className="flex items-center gap-2.5 min-w-0">
           <div className="h-10 w-10 rounded-lg bg-white ring-1 ring-border/60 overflow-hidden grid place-items-center shrink-0">
-            {l.images?.[0] ? <img src={l.images[0]} alt="" loading="lazy" className="w-full h-full object-contain" /> : <Gem className="h-4 w-4 text-muted-foreground/40" />}
+            {l.images?.[0] ? <img src={l.images[0]} alt="" loading="lazy" {...zoomable(l.images[0], l.images)} className="w-full h-full object-contain cursor-zoom-in" /> : <Gem className="h-4 w-4 text-muted-foreground/40" />}
           </div>
           <CellMain title={l.name} sub={`ID ${l.id.slice(-6).toUpperCase()} · ${l.splitFrom ? "split off" : "the first lot"}`} />
         </div>
