@@ -248,6 +248,8 @@ export function makingCharge(labour: NonNullable<MaterialIssuance["labour"]> | u
  *  say so instead of showing a total that does not match the rate times weight. */
 export function minimumLabourApplies(labour: NonNullable<MaterialIssuance["labour"]> | undefined, netWeight: number): boolean {
   if (!labour?.minimumLabour) return false;
+  // Charged as a flat amount for this piece: the minimum, never gram × rate.
+  if (labour.minimumFlat) return true;
   // The factory's own band: at or over so many grams it is gram × rate, never the
   // minimum (when there is a rate to charge by). Under it, as always: the minimum
   // when gram × rate comes to less — never less than gram × rate.

@@ -1889,6 +1889,9 @@ export interface MaterialIssuance {
     /** The minimum applies to a piece lighter than this (g) — the factory's own band.
      *  Unset (every order before it existed): whenever gram × rate comes to less. */
     minimumUnderGrams?: number;
+    /** The minimum IS this piece's making charge — a flat amount, whatever gram × rate
+     *  comes to (a small piece the factory bills at its minimum). Unset: a floor, as above. */
+    minimumFlat?: boolean;
     diamondHandlingRate?: number;
     cadCharge?: number;
     otherCharges?: number;
