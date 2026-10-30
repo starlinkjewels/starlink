@@ -78,7 +78,7 @@ import { OtherMaterialSelect, StockGradeInput, useOtherMaterials } from "@/compo
 import { coField, companyOf, companyOfOrder, workCompanyOf, companyById, companiesOf, hasCompanies } from "@/lib/companies";
 import { CompanyBadge } from "@/components/CompanyFields";
 import { OrderLabels } from "@/components/autopilot/OrderLabels";
-import { isOtherMaterial, materialName, materialUnit, fmtQty, type MaterialKey } from "@/lib/materials";
+import { isOtherMaterial, materialDef, materialName, materialUnit, fmtQty, purchaseQty, type MaterialKey } from "@/lib/materials";
 import { ActionSheet } from "@/components/ActionSheet";
 import { DataTable, CellMain, CellAmount, CellTag, type DataColumn } from "@/components/DataTable";
 import { StatStrip } from "@/components/TableToolbar";
@@ -3627,8 +3627,20 @@ function OrderDetailPageBody() {
 
             // ① factory · ② material · ③ Final Approval — what is done and what is next.
             const diaIssues = linkedIssuances.filter(i => i.material === "diamond");
-            const diaCt = Math.round(diaIssues.reduce((t, i) => t + (i.quantityIssued || 0), 0) * 1000) / 1000;
+            // Stones bought for this order and not issued yet count too — a gem bought for it is in the piece's material.
+            const unissued = linkedPurchases.filter(p => !linkedIssuances.some(i => i.sourcePurchaseId === p.id));
+            const diaBought = unissued.filter(p => p.material === "diamond");
+            const diaEntries = diaIssues.length + diaBought.length;
+            const diaCt = Math.round((diaIssues.reduce((t, i) => t + (i.quantityIssued || 0), 0) + diaBought.reduce((t, p) => t + purchaseQty(p), 0)) * 1000) / 1000;
             const otherIssues = linkedIssuances.filter(i => isOtherMaterial(i.material));
+            // Gems (an other material that is a stone): by material, issued or bought — "Lab Gems 1.18 ct".
+            const gems = (() => {
+              const by = new Map<string, number>();
+              for (const i of otherIssues) if (materialDef(db.settings, i.material)?.kind === "stone") by.set(i.material, (by.get(i.material) ?? 0) + (i.quantityIssued || 0));
+              for (const p of unissued) if (isOtherMaterial(p.material) && materialDef(db.settings, p.material)?.kind === "stone") by.set(p.material, (by.get(p.material) ?? 0) + purchaseQty(p));
+              return [...by.entries()].map(([m, q]) => `${materialName(db.settings, m as MaterialKey)} ${fmtQty(q, materialUnit(db.settings, m as MaterialKey))}`);
+            })();
+            const otherCount = otherIssues.filter(i => materialDef(db.settings, i.material)?.kind !== "stone").length;
             const diaMissing = readiness.missing.includes("diamond");
             const faActive = faStepIdx >= 0 && order.timeline[faStepIdx].status === "in_progress";
             const blockedText = `${readiness.missing.includes("gold") && !order.assignedFactoryId ? "assign a factory" : ""}${readiness.missing.includes("gold") && !order.assignedFactoryId && diaMissing ? " and " : ""}${diaMissing ? "add the diamond" : ""}`;
@@ -3798,8 +3810,10 @@ The piece then takes ours — add them from stock or buy them, as for any order.
                     <MfgStep n={2} title="Material" state={diaMissing || noDiaWeight ? "todo" : "done"}>
                       {order.noDiamond ? (
                         <p className="text-sm font-medium text-brand-dark">Gold only</p>
-                      ) : diaIssues.length > 0 ? (
-                        <p className="text-sm font-medium text-brand-dark">{diaIssues.length} diamond {diaIssues.length === 1 ? "entry" : "entries"} · {diaCt} ct</p>
+                      ) : diaEntries > 0 ? (
+                        <p className="text-sm font-medium text-brand-dark">{diaEntries} diamond {diaEntries === 1 ? "entry" : "entries"} · {diaCt} ct{gems.length ? ` + ${gems.join(" + ")}` : ""}</p>
+                      ) : gems.length > 0 && !needsDia ? (
+                        <p className="text-sm font-medium text-brand-dark">{gems.join(" + ")}</p>
                       ) : needsDia ? (
                         <p className="text-sm font-medium text-destructive">{order.clientSupplied?.diamonds ? "Their diamonds to come" : "Diamond still needed"}</p>
                       ) : noDiaWeight ? (
@@ -3812,7 +3826,7 @@ The piece then takes ours — add them from stock or buy them, as for any order.
                           : diaMissing && needsDia && order.clientSupplied?.diamonds ? "Waiting for the client's diamonds — see above"
                           : diaMissing && needsDia ? (studio ? "Add the diamonds — from stock or bought new" : "Add material → from stock or buy new")
                           : noDiaWeight ? "Add its diamonds (Add material), or ⋯ → No diamond in this piece"
-                          : otherIssues.length ? `+ ${otherIssues.length} other material${otherIssues.length === 1 ? "" : "s"}`
+                          : otherCount ? `+ ${otherCount} other material${otherCount === 1 ? "" : "s"}`
                           : order.diamondWeight ? `Estimate ${order.diamondWeight} ct` : "\u00a0"}
                       </p>
                     </MfgStep>

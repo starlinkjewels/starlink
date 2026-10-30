@@ -109,11 +109,14 @@ export function orderMaterialLines(db: DB, order: Order, faDone: boolean): Mater
       id: mi.id, href: mi.factoryId ? `/factories/${mi.factoryId}` : "/stock/diamond", gold: mi.material === "gold",
       title: mi.diamondKind === "certified" && packs.length > 1 ? `${packs.length} certified diamonds` : kindTitle(mi.material, mi.diamondKind, mi.purityOrQuality),
       detail: detail || undefined,
-      qty: `${used}${unit}${Math.abs(used - mi.quantityIssued) > 0.001 ? ` of ${mi.quantityIssued}${unit}` : ""}`,
+      // What was issued, until some of it is used; then "1.2 ct of 1.58 ct". ("0ct of 1.58ct"
+      // before Final Approval read as "Oct of 1.58ct".)
+      qty: mi.status === "open" && used <= 0.0005 ? fmtQty(mi.quantityIssued, unit)
+        : `${fmtQty(used, unit)}${Math.abs(used - mi.quantityIssued) > 0.001 ? ` of ${fmtQty(mi.quantityIssued, unit)}` : ""}`,
       // Loose: the stones issued, less any counted back at Final Approval; certified: the stones.
       pcs: mi.diamondKind === "certified" ? (packs.length || undefined)
         : mi.piecesIssued ? Math.max(0, mi.piecesIssued - (mi.finishReturnedPcs ?? 0)) : undefined,
-      source: srcPurchase ? supplierText(srcPurchase) : mi.source === "stock" ? "Our stock" : mi.source === "factoryPool" ? "Factory's holding" : mi.source === "melt" ? "Melted piece" : mi.source === "transfer" ? "Transfer" : "—",
+      source: srcPurchase ? supplierText(srcPurchase) : mi.source === "stock" ? "Our stock" : mi.source === "factoryPool" ? "Factory's holding" : mi.source === "melt" ? "Melted piece" : mi.source === "transfer" ? "Transfer" : mi.source === "client" ? "Client's own" : "—",
       sourceSub: [srcPurchase ? brokerText(srcPurchase) : undefined, mi.factoryId ? `to ${factory?.name || "factory"}` : "sold with the order"].filter(Boolean).join(" · "),
       costInr: srcPurchase?.totalInr ?? spec?.amountInr, dueInr: srcPurchase ? purchasePending(srcPurchase) : 0, labourDueInr: issuancePending(mi),
       status, tone, purchase: srcPurchase, issuance: mi,
