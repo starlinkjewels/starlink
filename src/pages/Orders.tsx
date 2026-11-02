@@ -30,7 +30,8 @@ import { confirmBox } from "@/lib/confirm";
 import { toast } from "sonner";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { usePagination } from "@/hooks/usePagination";
-import { exportProductsCsv, exportProductsPdf, exportProfitCsv } from "@/lib/productExport";
+import { exportProductsPdf } from "@/lib/productExport";
+import { exportOrdersXlsx } from "@/lib/xlsxExport";
 import { BulkDispatchDialog, BulkDeliverDialog } from "@/components/BulkDispatchDialog";
 import { BulkInvoiceDialog } from "@/components/BulkInvoiceDialog";
 import { AssignOrdersDialog } from "@/components/AssignOrder";
@@ -498,8 +499,9 @@ export function OrdersPage() {
     { label: "Share — product PDF or link", icon: Share2, hint: "Photos, video, details, the price you set — a page a piece or a line sheet",
       onSelect: () => { if (exportRows.length > 150) { toast.error("Tick up to 150 pieces to share at once"); return; } setSharing(exportRows); } },
     { label: "PDF", icon: FileText, hint: "Order sheet — weights, totals, paid, due", onSelect: () => exportProductsPdf(db, exportRows, exportName(), exportSubject()) },
-    { label: "Excel", icon: FileSpreadsheet, hint: "The same sheet, to edit", onSelect: () => exportProductsCsv(db, exportRows, exportName()) },
-    ...(user!.role === "admin" ? [{ label: "Profit — Excel", icon: TrendingUp, hint: "Admin only — never send out", onSelect: () => exportProfitCsv(db, exportRows, exportName()) }] : []),
+    // Real Excel workbooks (.xlsx), styled, with a photo of each piece (lib/xlsxExport.ts).
+    { label: "Excel", icon: FileSpreadsheet, hint: "Photos, details, weights, totals — no cost on it", onSelect: () => { void exportOrdersXlsx(db, exportRows, exportName(), exportSubject()); } },
+    ...(user!.role === "admin" ? [{ label: "Profit — Excel", icon: TrendingUp, hint: "Admin only — every cost, profit, margin · never send out", onSelect: () => { void exportOrdersXlsx(db, exportRows, exportName(), exportSubject(), { withProfit: true }); } }] : []),
   ] : [];
   const mayExport = useMayExport();
   const countText = `${total} order${total !== 1 ? "s" : ""}`;
