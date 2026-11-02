@@ -17,7 +17,7 @@ const g3 = (n: number) => `${Math.round(n * 1000) / 1000} g`;
 /** Cut to what a PDF column holds (about 1.3 mm a letter), so no cell runs into the next. */
 const fit = (s: string, chars: number) => (s.length > chars ? `${s.slice(0, chars - 1).trimEnd()}…` : s);
 
-interface OrderSheet {
+export interface OrderSheet {
   details: [string, string][];
   weights: [string, string][];
   materials: { material: string; detail: string; pcs: string; qty: string; from: string; status: string; cost: string; due: string; duePdf: string }[];
@@ -25,7 +25,8 @@ interface OrderSheet {
   money: [string, string][];
 }
 
-function buildSheet(db: DB, order: Order, opts: { faDone: boolean; withCost: boolean }): OrderSheet {
+/** The order as rows of data — the PDF, the CSV and the Excel workbook (lib/xlsxExport.ts) read the same. */
+export function buildSheet(db: DB, order: Order, opts: { faDone: boolean; withCost: boolean }): OrderSheet {
   const client = db.clients.find(c => c.id === order.clientId);
   const factory = order.assignedFactoryId ? db.factories.find(f => f.id === order.assignedFactoryId) : undefined;
   const pw = pieceWeights(order, db.materialIssuances ?? []);

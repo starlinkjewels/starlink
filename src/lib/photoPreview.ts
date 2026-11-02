@@ -217,3 +217,32 @@ export async function addPreviewsToShares(thumbs: Map<string, string>): Promise<
   }
   return touched.size;
 }
+
+/**
+ * A photo for a spreadsheet (lib/xlsxExport.ts): read the same way as a preview
+ * (Starlink's storage through /api/img), drawn at most `px` on its long side as
+ * a JPEG — a workbook of full-size photos would be enormous. Undefined when it
+ * can't be read; the sheet then simply has no picture there.
+ */
+export async function sheetPicture(url: string, px = 320): Promise<{ base64: string; w: number; h: number } | undefined> {
+  try {
+    const blob = await within(storedBlob(url), 20_000);
+    const src = URL.createObjectURL(blob);
+    try {
+      const img = await new Promise<HTMLImageElement>((resolve, reject) => {
+        const i = new Image();
+        i.onload = () => resolve(i);
+        i.onerror = () => reject(new Error("not a picture"));
+        i.src = src;
+      });
+      const k = Math.min(1, px / Math.max(img.naturalWidth, img.naturalHeight));
+      const w = Math.max(1, Math.round(img.naturalWidth * k)), h = Math.max(1, Math.round(img.naturalHeight * k));
+      const c = document.createElement("canvas");
+      c.width = w; c.height = h;
+      const ctx = c.getContext("2d")!;
+      ctx.fillStyle = "#ffffff"; ctx.fillRect(0, 0, w, h);
+      ctx.drawImage(img, 0, 0, w, h);
+      return { base64: c.toDataURL("image/jpeg", 0.82).split(",")[1], w, h };
+    } finally { URL.revokeObjectURL(src); }
+  } catch { return undefined; }
+}

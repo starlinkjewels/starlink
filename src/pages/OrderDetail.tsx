@@ -43,7 +43,8 @@ import { readyStockOffices, officeLabel, officeOf } from "@/lib/offices";
 import { logItem, whoOf } from "@/lib/readyStockHistory";
 import { finishRecordOf, isReworkIssue } from "@/lib/rework";
 import { orderMaterialLines, type MaterialLine } from "@/lib/orderMaterials";
-import { exportOrderCsv, exportOrderPdf } from "@/lib/orderExport";
+import { exportOrderPdf } from "@/lib/orderExport";
+import { exportOrderXlsx } from "@/lib/xlsxExport";
 import { PIECE_PHOTO_MAX, dropDeletedPicture, followOrderPictures, orderPictures } from "@/lib/readyStockPhotos";
 import { exportAllowed } from "@/lib/access";
 import { useEffect, useRef, useState, type ReactNode } from "react";
@@ -2244,8 +2245,10 @@ function OrderDetailPageBody() {
     // The whole order in a file — costs on the admin's copy only (lib/orderExport.ts).
     { label: "Download order — PDF", icon: FileText, hint: mayExport ? `Details, weights, material and repairs, payments, due${user!.role === "admin" ? " · with costs (admin)" : ""}` : needsAccess("orders", "export"),
       disabled: !mayExport, onSelect: () => exportOrderPdf(db, order, { faDone, withCost: user!.role === "admin" }), show: isStaffUser },
-    { label: "Download order — Excel", icon: FileSpreadsheet, hint: mayExport ? "The same, to edit" : needsAccess("orders", "export"),
-      disabled: !mayExport, onSelect: () => exportOrderCsv(db, order, { faDone, withCost: user!.role === "admin" }), show: isStaffUser },
+    // A real Excel workbook (.xlsx): photos, every detail, materials, payments, the log,
+    // and on the admin's copy Cost & Profit (lib/xlsxExport.ts).
+    { label: "Download order — Excel", icon: FileSpreadsheet, hint: mayExport ? `Photos, details, materials, payments, log${user!.role === "admin" ? " · cost & profit (admin)" : ""}` : needsAccess("orders", "export"),
+      disabled: !mayExport, onSelect: () => { void exportOrderXlsx(db, order, { faDone, withCost: user!.role === "admin" }); }, show: isStaffUser },
     { label: "Edit details", icon: Pencil, hint: editWhy ?? "Type, metal, size, due date, instructions…", disabled: !!editWhy, onSelect: () => setEditOpen(true), show: isStaffUser },
     { label: "Share this piece", icon: Share2, hint: "A product PDF or a link — photos, video, details, a price you set", onSelect: () => setSharingPiece(true),
       show: isStaffUser && !isDiamondOnlyOrder(order) },
