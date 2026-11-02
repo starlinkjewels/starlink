@@ -15,7 +15,8 @@ import { OptionListsSettings } from "@/components/OptionListsSettings";
 import { TimelineSettings } from "@/components/TimelineSettings";
 import { OrderLayoutSettings } from "@/components/OrderLayoutSettings";
 import { VideoFixSettings } from "@/components/VideoFixSettings";
-import { ListOrdered, LayoutList, Film } from "lucide-react";
+import { PhotoPreviewSettings } from "@/components/PhotoPreviewSettings";
+import { ListOrdered, LayoutList, Film, Images } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useUrlState } from "@/hooks/useUrlState";
 import { SettingsSearch } from "@/components/settings-search/SettingsSearch";
@@ -784,6 +785,7 @@ export function SettingsPage() {
     { id: "timeline", label: "Production Timeline", icon: ListOrdered, show: isAdmin },
     { id: "orderpage", label: "Order page", icon: LayoutList, show: isAdmin },
     { id: "videos", label: "Videos", icon: Film, show: isAdmin },
+    { id: "previews", label: "Photo previews", icon: Images, show: isAdmin },
     { id: "companies", label: "Companies", icon: Building2, show: isAdmin },
     { id: "materials", label: "Materials", icon: Layers, show: isAdmin },
     { id: "brand", label: "Brand Studio", icon: Sparkles, show: isAdmin },
@@ -1543,6 +1545,7 @@ export function SettingsPage() {
       {activeId === "timeline" && <TimelineSettings />}
       {activeId === "orderpage" && <OrderLayoutSettings />}
       {activeId === "videos" && <VideoFixSettings />}
+      {activeId === "previews" && <PhotoPreviewSettings />}
 
       {/* The business's own dropdown choices — admin only */}
       {activeId === "lists" && <OptionListsSettings />}

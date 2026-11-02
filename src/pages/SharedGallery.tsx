@@ -5,11 +5,13 @@ import { doc, getDoc } from "firebase/firestore";
 import { db as fsdb } from "@/lib/firebase";
 import type { Share, ShareItem, ShareFolder } from "@/lib/db";
 import { SHARE_MAIN_SITE, shareIsExpired, loadShareItems } from "@/lib/share";
+import { SHARE_DATA_ID } from "@/lib/pure/shareHtml";
+import { VideoPoster } from "@/components/VideoPoster";
 import { BrandLogo } from "@/components/BrandLogo";
 import { PieceShareView } from "@/components/PieceShareView";
 import { useBrand, brandName } from "@/lib/brand";
 import { motion, AnimatePresence } from "framer-motion";
-import { Image as ImageIcon, Video, Play, Download, X, ChevronLeft, ChevronRight, Loader2, Camera, Clock, Folder, ChevronRight as Crumb } from "lucide-react";
+import { Image as ImageIcon, Video, Play, Download, X, ChevronLeft, ChevronRight, Loader2, Camera, Clock, Folder, FileText, ChevronRight as Crumb } from "lucide-react";
 
 async function downloadOne(fileUrl: string, filename: string) {
   try {
@@ -72,36 +74,68 @@ function Lightbox({ items, startIndex, onClose }: { items: ShareItem[]; startInd
   );
 }
 
+/**
+ * The share as the server wrote it into the page (src/lib/pure/shareHtml.ts —
+ * api/share.ts, the shareMeta function): no database round trip at all. Its
+ * items are null when the folder is too big to write in; then they're read.
+ */
+function embeddedShare(id: string | undefined): { share: Share; items: ShareItem[] | null } | null {
+  try {
+    const el = typeof document !== "undefined" ? document.getElementById(SHARE_DATA_ID) : null;
+    const data = el?.textContent ? JSON.parse(el.textContent) as { id?: string; share?: Share; items?: ShareItem[] | null } : null;
+    return data && data.id === id && data.share ? { share: { ...data.share, id: id! }, items: data.items ?? null } : null;
+  } catch { return null; }
+}
+
+/** The sub-folder a link opens (?f=<folder>), as the path down to it. */
+function pathTo(folders: ShareFolder[] | undefined, fid: string | null): ShareFolder[] {
+  const out: ShareFolder[] = [];
+  for (let f = fid ? folders?.find(x => x.id === fid) : undefined; f; f = f.parentId ? folders?.find(x => x.id === f!.parentId) : undefined) out.unshift(f);
+  return out;
+}
+
 export function SharedGalleryPage() {
   const { id } = useParams();
   const brand = useBrand();
-  const [share, setShare] = useState<Share | null>(null);
-  const [status, setStatus] = useState<"loading" | "ok" | "missing" | "expired">("loading");
+  // Written into the page by the server: shown at once — what the visitor already sees.
+  const [first] = useState(() => embeddedShare(id));
+  const [share, setShare] = useState<Share | null>(first?.share ?? null);
+  const [status, setStatus] = useState<"loading" | "ok" | "missing" | "expired">(
+    first && first.items ? (shareIsExpired(first.share) ? "expired" : "ok") : "loading");
   const [lightbox, setLightbox] = useState<number | null>(null);
   const [downloading, setDownloading] = useState(false);
-  const [allItems, setAllItems] = useState<ShareItem[]>([]);
-  // Which sub-folder the visitor is looking at (null = the shared folder itself).
-  const [path, setPath] = useState<ShareFolder[]>([]);
+  const [allItems, setAllItems] = useState<ShareItem[]>(first?.items ?? []);
+  // Which sub-folder the visitor is looking at (null = the shared folder itself) — a
+  // folder's own link (?f=) opens on it.
+  const [path, setPath] = useState<ShareFolder[]>(() =>
+    pathTo(first?.share.folders, typeof window !== "undefined" ? new URLSearchParams(window.location.search).get("f") : null));
 
   useEffect(() => {
+    if (first?.items) return; // all of it came with the page
     let alive = true;
     (async () => {
       try {
-        const snap = await getDoc(doc(fsdb, "shares", id!));
-        if (!alive) return;
-        if (snap.exists()) {
-          const s = snap.data() as Share;
-          setShare(s);
-          // Big folders are split across shares/{id}/items/{n} — pull them all in
-          // so the visitor sees the whole folder, not just the first page.
-          const full = await loadShareItems({ ...s, id: id! });
+        let s = first?.share ?? null;
+        if (!s) {
+          const snap = await getDoc(doc(fsdb, "shares", id!));
           if (!alive) return;
-          setAllItems(full);
-          setStatus(shareIsExpired(s) ? "expired" : "ok");
-        } else setStatus("missing");
-      } catch { if (alive) setStatus("missing"); }
+          if (!snap.exists()) { setStatus("missing"); return; }
+          s = snap.data() as Share;
+          setShare(s);
+          setPath(pathTo(s.folders, new URLSearchParams(window.location.search).get("f")));
+        }
+        // The first page is on screen at once; a big folder's other pages
+        // (shares/{id}/items/{n}) follow, read all together.
+        setAllItems(s.items ?? []);
+        setStatus(shareIsExpired(s) ? "expired" : "ok");
+        if ((s.pageCount ?? 0) > 0) {
+          const full = await loadShareItems({ ...s, id: id! });
+          if (alive) setAllItems(full);
+        }
+      } catch { if (alive && !first) setStatus("missing"); }
     })();
     return () => { alive = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
 
   // An expired link sends the visitor to the company's main website.
@@ -218,13 +252,13 @@ export function SharedGalleryPage() {
             {subFolders.length > 0 && (
               <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-auto-photos gap-3 sm:gap-4 mb-6">
                 {subFolders.map(f => {
-                  const cover = allItems.find(it => it.folderId === f.id && it.type === "image");
+                  const cover = allItems.find(it => it.folderId === f.id && (it.type === "image" || (it.type === "video" && !!it.thumb)));
                   return (
                     <button key={f.id} onClick={() => setPath([...path, f])}
                       className="rounded-2xl overflow-hidden border border-border/60 bg-white shadow-sm text-left hover:shadow-md transition-shadow">
                       <div className="aspect-square bg-secondary/30 overflow-hidden">
                         {cover
-                          ? <img src={cover.url} alt={f.name} loading="lazy" decoding="async" className="w-full h-full object-cover" />
+                          ? <img src={cover.thumb || cover.url} alt={f.name} loading="lazy" decoding="async" className="w-full h-full object-cover" />
                           : <div className="w-full h-full grid place-items-center"><Folder className="h-10 w-10 text-slate-300" /></div>}
                       </div>
                       <div className="px-2.5 pt-2 pb-2">
@@ -247,14 +281,13 @@ export function SharedGalleryPage() {
                 {items.map((it, i) => (
                   <motion.div key={i} whileTap={{ scale: 0.97 }} className="relative rounded-2xl overflow-hidden border border-border/60 bg-white shadow-sm flex flex-col">
                     <button onClick={() => setLightbox(i)} className="block w-full aspect-square bg-secondary/30 overflow-hidden relative">
+                      {/* The small copy in the grid (the original opens full size); a video, a still from it. */}
                       {it.type === "image"
-                        ? <img src={it.url} alt={it.name} loading="lazy" decoding="async" className="w-full h-full object-cover" />
-                        : <div className="w-full h-full flex items-center justify-center bg-gradient-to-br from-slate-100 to-slate-200"><Video className="h-10 w-10 text-slate-400" /></div>}
-                      {it.type === "video" && (
-                        <div className="absolute inset-0 flex items-center justify-center">
-                          <div className="h-12 w-12 rounded-full bg-black/40 flex items-center justify-center"><Play className="h-6 w-6 text-white ml-0.5" /></div>
-                        </div>
-                      )}
+                        ? <img src={it.thumb || it.url} alt={it.name} {...(i < 8 ? { fetchPriority: "high" as const } : { loading: "lazy" as const })} decoding="async" className="w-full h-full object-cover" />
+                        : it.type === "video"
+                        ? <VideoPoster src={it.url} poster={it.thumb} alt={it.name} />
+                        // A document (PDF, sheet…) in the folder: its own tile, never read as a video.
+                        : <div className="w-full h-full flex items-center justify-center bg-gradient-to-br from-slate-100 to-slate-200"><FileText className="h-10 w-10 text-slate-400" /></div>}
                       <div className="absolute top-2 left-2">
                         <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[10px] font-medium bg-black/50 text-white backdrop-blur-sm">
                           {it.type === "video" ? <Video className="h-2.5 w-2.5" /> : <ImageIcon className="h-2.5 w-2.5" />}{it.type}

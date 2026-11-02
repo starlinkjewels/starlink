@@ -916,6 +916,9 @@ export interface CatalogItem {
   name: string;
   type: CatalogItemType;
   data: string; // Firebase Storage download URL
+  /** A small copy for the grid (~480px JPEG; for a video, a still from it) —
+   *  the original (`data`) is what opens, downloads and is shared. lib/photoPreview.ts */
+  thumb?: string;
   mime?: string; // original content type — set for "file" items (pdf, xls, zip…)
   createdBy: string; // userId
   createdAt: string;
@@ -932,6 +935,9 @@ export interface ProductPhotoItem {
   name: string;
   type: "image" | "video";
   url: string; // Firebase Storage download URL
+  /** A small copy for the grid (~480px JPEG; for a video, a still from it) —
+   *  the original (`url`) is what opens, downloads and is shared. lib/photoPreview.ts */
+  thumb?: string;
   createdBy: string; // userId
   createdAt: string;
 }
@@ -951,6 +957,8 @@ export interface ShareFolder {
 export interface ShareItem {
   type: CatalogItemType; // "image" | "video"
   url: string;
+  /** A small copy of the photo (~480px) for the grid — the original opens full size. */
+  thumb?: string;
   name: string;
   folder?: string;   // originating sub-folder name, for grouping/labels
   folderId?: string; // which ShareFolder it belongs to; absent = the root
@@ -2908,14 +2916,26 @@ async function persist() {
     // which surfaced to staff as "Couldn't save your last change". Commit in
     // chunks instead so any size of change goes through.
     const CHUNK = 450;
-    for (let i = 0; i < opsList.length; i += CHUNK) {
-      const batch = writeBatch(fsdb);
-      for (const op of opsList.slice(i, i + CHUNK)) {
-        if (op.kind === "set") batch.set(doc(fsdb, op.col, op.id), op.data);
-        else batch.delete(doc(fsdb, op.col, op.id));
+    // …and by size: one request may carry at most 10 MiB, and a few big records
+    // (a shared folder holds hundreds of photos) passed that long before 450
+    // writes. A new batch starts at ~8 MB. Same order as ever.
+    const MAX_BYTES = 8_000_000;
+    const sizeOf = (op: (typeof opsList)[number]) => {
+      if (op.kind !== "set") return 100;
+      try { return JSON.stringify(op.data).length; } catch { return 1000; }
+    };
+    let batch = writeBatch(fsdb), inBatch = 0, bytes = 0;
+    for (const op of opsList) {
+      const size = sizeOf(op);
+      if (inBatch > 0 && (inBatch >= CHUNK || bytes + size > MAX_BYTES)) {
+        await batch.commit();
+        batch = writeBatch(fsdb); inBatch = 0; bytes = 0;
       }
-      await batch.commit();
+      if (op.kind === "set") batch.set(doc(fsdb, op.col, op.id), op.data);
+      else batch.delete(doc(fsdb, op.col, op.id));
+      inBatch++; bytes += size;
     }
+    if (inBatch > 0) await batch.commit();
     // The role index is bookkeeping, not user data. Commit it separately and
     // swallow any failure: if the rules reject it, the data above is already
     // safely written, and an admin session reconciles the index later.

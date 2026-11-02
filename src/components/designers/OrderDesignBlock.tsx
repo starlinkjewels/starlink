@@ -9,6 +9,7 @@ import { MoreMenu } from "@/components/MoreMenu";
 import { Button } from "@/components/ui/button";
 import { AssignDesignerSheet } from "./AssignDesigner";
 import { CadJobSheet } from "./CadJobSheet";
+import { VideoPoster } from "@/components/VideoPoster";
 
 /**
  * The order's CAD designer, inside its CAD Design card (staff only): who has
@@ -84,7 +85,10 @@ export function OrderDesignBlock({ order, canAssign }: { order: Order; canAssign
             <span key={f.id} className="h-16 w-16 shrink-0 rounded-lg overflow-hidden border border-border/70 bg-white grid place-items-center" title={f.name}>
               {f.kind === "image" ? <img src={f.url} alt={f.name} loading="lazy" className="h-full w-full object-cover" />
                 : f.kind === "model" ? <Box className="h-6 w-6 text-primary" />
-                : f.kind === "video" ? <Film className="h-6 w-6 text-primary" />
+                : f.kind === "video" ? <span className="relative block h-full w-full">
+                    <VideoPoster src={f.url} alt={f.name} showPlay={false} />
+                    <span className="absolute inset-0 grid place-items-center text-white"><Film className="h-5 w-5 drop-shadow" /></span>
+                  </span>
                 : <FileText className="h-6 w-6 text-muted-foreground" />}
             </span>
           ))}

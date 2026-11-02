@@ -36,6 +36,7 @@ import { readyStockDeleteBlocker } from "@/lib/readyStockGuards";
 import { builtFrom, orderPicturesPlan, piecePhotosBehind, takeOrderPictures } from "@/lib/readyStockPhotos";
 import { needsAccess } from "@/lib/actionHints";
 import { zoomable } from "@/components/ImageViewer";
+import { VideoPoster } from "@/components/VideoPoster";
 
 /** How each kind of history line looks. */
 const KIND: Record<ReadyStockEventKind, { icon: LucideIcon; tone: string; label: string }> = {
@@ -326,7 +327,10 @@ function PieceBody({ item }: { item: ReadyStockItem }) {
                   className={`relative h-16 w-16 sm:h-20 sm:w-20 shrink-0 rounded-xl overflow-hidden bg-white grid place-items-center transition-shadow ${i === at ? "ring-2 ring-primary" : "ring-1 ring-border/60 hover:ring-primary/50"}`}>
                   {m.kind === "image"
                     ? <img src={m.src} alt="" loading="lazy" className="w-full h-full object-contain" />
-                    : <span className="w-full h-full bg-black/80 text-white grid place-items-center"><Play className="h-5 w-5 fill-current" /></span>}
+                    : <span className="relative block w-full h-full">
+                        <VideoPoster src={m.src} showPlay={false} />
+                        <span className="absolute inset-0 grid place-items-center text-white"><Play className="h-5 w-5 fill-current drop-shadow" /></span>
+                      </span>}
                 </button>
               ))}
             </div>

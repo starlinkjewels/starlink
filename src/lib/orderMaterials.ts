@@ -9,7 +9,7 @@ import type { DB, MaterialIssuance, Order, Purchase } from "./db";
 import { fmtDate } from "./db";
 import { bagNoOf, bagNoOfPurchase } from "./diamondBags";
 import { fmtMoneyInr, issuancePending, issuanceUsed, purchasePending } from "./manufacturing";
-import { diamondSpec, fmtQty, isOtherMaterial, materialName, materialUnit, purchaseQty, type MaterialKey } from "./materials";
+import { diamondSpec, fmtQty, isOtherMaterial, materialName, materialUnit, purchaseQty, type MaterialKey, type MaterialUnit } from "./materials";
 import { finishRecordOf, isReworkIssue } from "./rework";
 
 export interface MaterialLine {
@@ -19,6 +19,12 @@ export interface MaterialLine {
   title: string;
   detail?: string;
   qty: string;
+  /** What the line put on the order, for the table's total: the figure the Qty
+   *  column leads with, its unit, and which material ("gold", "" for stones, a
+   *  material's name) — totals never add grams of gold to grams of another metal.
+   *  Only an ISSUE carries it: a bill alone (bought for the order) may be the same
+   *  stone issued again from stock, and a repair has its own +/− figures. */
+  amount?: { n: number; unit: MaterialUnit; of: string };
   /** Stones (or pieces) — beside the carats, not lost in the detail line. */
   pcs?: number;
   source: string;
@@ -113,6 +119,8 @@ export function orderMaterialLines(db: DB, order: Order, faDone: boolean): Mater
       // before Final Approval read as "Oct of 1.58ct".)
       qty: mi.status === "open" && used <= 0.0005 ? fmtQty(mi.quantityIssued, unit)
         : `${fmtQty(used, unit)}${Math.abs(used - mi.quantityIssued) > 0.001 ? ` of ${fmtQty(mi.quantityIssued, unit)}` : ""}`,
+      amount: { n: mi.status === "open" && used <= 0.0005 ? mi.quantityIssued : used, unit,
+        of: mi.material === "gold" ? "gold" : mi.material === "diamond" ? "" : materialName(db.settings, mi.material) },
       // Loose: the stones issued, less any counted back at Final Approval; certified: the stones.
       pcs: mi.diamondKind === "certified" ? (packs.length || undefined)
         : mi.piecesIssued ? Math.max(0, mi.piecesIssued - (mi.finishReturnedPcs ?? 0)) : undefined,

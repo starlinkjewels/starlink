@@ -45,10 +45,12 @@ import { updateCatalogItem, folderPath, folderPath as folderPathText, moveCatalo
 import { loadDb, updateDb, uid } from "@/lib/db";
 import type { CatalogFolder, CatalogItem } from "@/lib/db";
 import { ShareFolderButton } from "@/components/ShareFolderButton";
-import { findShare } from "@/lib/share";
+import { findShare, reorderSharedFolders } from "@/lib/share";
 import { useDb } from "@/hooks/useDb";
 import { uploadDataUrl, uploadFile } from "@/lib/storage";
 import { imageForUpload, keepsOriginal } from "@/lib/images";
+import { makePreview } from "@/lib/photoPreview";
+import { VideoPoster } from "@/components/VideoPoster";
 import { useAuth } from "@/lib/auth";
 import { VirtualGrid } from "@/components/VirtualGrid";
 import {
@@ -278,12 +280,15 @@ function Lightbox({
                 ${i === idx ? "border-white scale-110" : "border-white/20 opacity-50"}`}
             >
               {it.type === "image" ? (
-                <img src={it.data} alt="" className="w-full h-full object-cover" />
+                <img src={it.thumb || it.data} alt="" className="w-full h-full object-cover" />
+              ) : it.type === "video" ? (
+                <span className="relative block w-full h-full">
+                  <VideoPoster src={it.data} poster={it.thumb} showPlay={false} />
+                  <span className="absolute inset-0 grid place-items-center"><Play className="h-4 w-4 text-white drop-shadow" /></span>
+                </span>
               ) : (
                 <div className="w-full h-full bg-slate-700 flex items-center justify-center">
-                  {it.type === "file"
-                    ? <FileText className="h-4 w-4 text-white" />
-                    : <Play className="h-4 w-4 text-white" />}
+                  <FileText className="h-4 w-4 text-white" />
                 </div>
               )}
             </button>
@@ -398,26 +403,20 @@ function ItemCard({
         aria-label={picking ? `${picked ? "Untick" : "Tick"} ${item.name}` : undefined}
         className="block w-full aspect-square bg-secondary/30 overflow-hidden relative"
       >
+        {/* The small copy when there is one — the original opens. */}
         {item.type === "image" ? (
           <img
-            src={item.data}
+            src={item.thumb || item.data}
             alt={item.name}
             loading="lazy"
             decoding="async"
             className="w-full h-full object-cover"
           />
+        ) : item.type === "video" ? (
+          <VideoPoster src={item.data} poster={item.thumb} alt={item.name} />
         ) : (
           <div className="w-full h-full flex items-center justify-center bg-gradient-to-br from-slate-100 to-slate-200">
-            {item.type === "file"
-              ? <FileText className="h-10 w-10 text-slate-400" />
-              : <Video className="h-10 w-10 text-slate-400" />}
-          </div>
-        )}
-        {item.type === "video" && (
-          <div className="absolute inset-0 flex items-center justify-center">
-            <div className="h-12 w-12 rounded-full bg-black/40 flex items-center justify-center">
-              <Play className="h-6 w-6 text-white ml-0.5" />
-            </div>
+            <FileText className="h-10 w-10 text-slate-400" />
           </div>
         )}
         {picking && <div className="absolute top-2 left-2 z-10"><PickTick on={!!picked} /></div>}
@@ -611,6 +610,8 @@ function ArrangeFoldersSheet({ open, onClose, onSaved, folders, title }: {
           const f = db.catalogFolders.find((x) => x.id === id);
           if (f) f.order = i;
         });
+        // Links already shared show the folders in this order too.
+        reorderSharedFolders(db);
       });
       toast.success("Folder order saved");
       onSaved(); // the grid shows the new order at once
@@ -1340,7 +1341,8 @@ export function CatalogPage() {
         delete f.bannerUrl;
       } else {
         f.bannerItemId = item.id;
-        f.bannerUrl = item.data;
+        // Only the folder's card shows it — its small copy when it has one.
+        f.bannerUrl = item.thumb || item.data;
       }
     });
   }
@@ -1469,12 +1471,16 @@ export function CatalogPage() {
               setUploadProgress({ done, total: all.length, pct }));
         // A copy every browser and device plays — made on the server (lib/webVideo.ts).
         if (isVideo) requestPlayable(data);
+        // A small copy for the grid, beside the original (lib/photoPreview.ts) —
+        // none when it can't be made; the upload never waits on it failing.
+        const thumb = isImage || isVideo ? await makePreview(file, `catalog/${folderId}`) : undefined;
         const newItem: CatalogItem = {
           id: uid("ci_"),
           folderId,
           name: file.name,
           type: isImage ? "image" : isVideo ? "video" : "file",
           data,
+          thumb,
           mime: isImage || isVideo ? undefined : (file.type || undefined),
           createdBy: user!.id,
           createdAt: new Date().toISOString(),
@@ -1661,7 +1667,7 @@ export function CatalogPage() {
         <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-auto-photos gap-3 sm:gap-4">
           {subfolders.map((folder) => {
             const count = folderCounts[folder.id] ?? null;
-            const coverUrl = folder.bannerUrl ?? folderThumbs[folder.id]?.data;
+            const coverUrl = folder.bannerUrl ?? (folderThumbs[folder.id]?.thumb || folderThumbs[folder.id]?.data);
             const isRenaming = renamingId === folder.id;
             return (
               <motion.div key={folder.id} whileTap={{ scale: 0.97 }} className="relative">
@@ -1766,14 +1772,14 @@ export function CatalogPage() {
               </div>
             )}
             {thumbs.length === 1 && (
-              <img src={thumbs[0].data} alt="" className="w-full h-full object-cover" />
+              <img src={thumbs[0].thumb || thumbs[0].data} alt="" className="w-full h-full object-cover" />
             )}
             {thumbs.length >= 2 && (
               <div
                 className={`w-full h-full grid gap-0.5 ${thumbs.length >= 4 ? "grid-cols-2 grid-rows-2" : "grid-cols-2"}`}
               >
                 {thumbs.map((it) => (
-                  <img key={it.id} src={it.data} alt="" className="w-full h-full object-cover" />
+                  <img key={it.id} src={it.thumb || it.data} alt="" className="w-full h-full object-cover" />
                 ))}
               </div>
             )}
@@ -2171,7 +2177,7 @@ export function CatalogPage() {
               <FavoritesFolderCard />
               {subfolders.map((folder) => {
                 const count = folderCounts[folder.id] ?? null;
-                const coverUrl = folder.bannerUrl ?? folderThumbs[folder.id]?.data;
+                const coverUrl = folder.bannerUrl ?? (folderThumbs[folder.id]?.thumb || folderThumbs[folder.id]?.data);
                 const isRenaming = renamingId === folder.id;
                 return (
                   <motion.div key={folder.id} whileTap={{ scale: 0.97 }} className="relative">

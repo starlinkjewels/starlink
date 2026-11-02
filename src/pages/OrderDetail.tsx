@@ -78,7 +78,7 @@ import { OtherMaterialSelect, StockGradeInput, useOtherMaterials } from "@/compo
 import { coField, companyOf, companyOfOrder, workCompanyOf, companyById, companiesOf, hasCompanies } from "@/lib/companies";
 import { CompanyBadge } from "@/components/CompanyFields";
 import { OrderLabels } from "@/components/autopilot/OrderLabels";
-import { isOtherMaterial, materialDef, materialName, materialUnit, fmtQty, purchaseQty, type MaterialKey } from "@/lib/materials";
+import { isOtherMaterial, materialDef, materialName, materialUnit, fmtQty, purchaseQty, type MaterialKey, type MaterialUnit } from "@/lib/materials";
 import { ActionSheet } from "@/components/ActionSheet";
 import { DataTable, CellMain, CellAmount, CellTag, type DataColumn } from "@/components/DataTable";
 import { StatStrip } from "@/components/TableToolbar";
@@ -4038,7 +4038,22 @@ The piece then takes ours — add them from stock or buy them, as for any order.
                 {/* The same table as everywhere: search, count, View and Export in its one toolbar row. */}
                 <DataTable id="order-materials" noun="material" rows={rows} columns={columns} rowKey={r => r.id}
                   searchText={r => [r.title, r.detail, r.source, r.sourceSub, r.status].filter(Boolean).join(" ")} searchPlaceholder="Search materials"
-                  exportName={`Materials-${order.orderNumber}`} rowHref={r => r.href} details={false} rowActions={r => r.actions} />
+                  exportName={`Materials-${order.orderNumber}`} rowHref={r => r.href} details={false} rowActions={r => r.actions}
+                  // What was issued to the order, in all: stones, then each material's carats or grams on
+                  // its own ("1.04 ct · 3.37 g gold") — a bill alone or a repair is not added in.
+                  totals={{
+                    pcs: rs => { const n = rs.reduce((t, r) => t + (r.amount && r.pcs != null ? r.pcs : 0), 0); return n ? n.toLocaleString() : "—"; },
+                    qty: rs => {
+                      const by = new Map<string, { n: number; unit: MaterialUnit; of: string }>();
+                      for (const r of rs) {
+                        if (!r.amount || !(r.amount.n > 0)) continue;
+                        const k = `${r.amount.of}|${r.amount.unit}`;
+                        const cur = by.get(k) ?? { n: 0, unit: r.amount.unit, of: r.amount.of };
+                        cur.n += r.amount.n; by.set(k, cur);
+                      }
+                      return by.size ? [...by.values()].map(x => `${fmtQty(Math.round(x.n * 1000) / 1000, x.unit)}${x.of ? ` ${x.of}` : ""}`).join(" · ") : "—";
+                    },
+                  }} />
               </div>
             );
           })()}

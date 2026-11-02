@@ -8,6 +8,8 @@
 // The share is read from the database as anyone may read it (a share is
 // public); the photo is offered small (Vercel resizes it), since WhatsApp skips
 // a large one. Anything missing or unreadable: the page as it always was.
+import { SHARE_EMBED_MAX, withSharePage, type StaticShare, type StaticShareItem } from "../src/lib/pure/shareHtml";
+
 export const config = { runtime: "edge" };
 
 const DB = "https://firestore.googleapis.com/v1/projects/starlinkjewels109/databases/diamondflow/documents";
@@ -28,7 +30,7 @@ function plain(v: FsValue | undefined): unknown {
 }
 
 interface Piece { id: string; name: string; sku?: string; type?: string; metal?: string; karat?: string; diamondCt?: number; price?: number; photos?: string[]; cad?: string }
-interface ShareDoc { title?: string; note?: string; kind?: string; pieces?: Piece[]; brand?: { name?: string }; showPrice?: boolean; expiresAt?: string; count?: number; items?: { url?: string; type?: string }[] }
+interface ShareDoc extends StaticShare { title?: string; note?: string; kind?: string; pieces?: Piece[]; brand?: { name?: string }; showPrice?: boolean; expiresAt?: string; count?: number; items?: StaticShareItem[] }
 
 const esc = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 const money = (n: number) => `$${n.toLocaleString("en-US", { maximumFractionDigits: 2 })}`;
@@ -71,9 +73,29 @@ export default async function handler(req: Request): Promise<Response> {
     `<meta name="twitter:card" content="${image ? "summary_large_image" : "summary"}" />`,
     `<meta name="twitter:title" content="${esc(title)}" />`,
   ].join("\n    ");
+  // The folder itself, drawn into the page with its data (src/lib/pure/shareHtml.ts):
+  // the visitor sees it at once. A big folder's other pages are read here too, all
+  // together; past SHARE_EMBED_MAX items the app reads them itself, as before.
+  let items: StaticShareItem[] | null = null;
+  if (share.kind !== "readyStock") {
+    try {
+      const pages = Math.max(0, Number(share.pageCount) || 0);
+      if ((share.count ?? 0) <= SHARE_EMBED_MAX) {
+        const rest = await Promise.all(Array.from({ length: pages }, async (_, n) => {
+          const r = await fetch(`${DB}/shares/${encodeURIComponent(id)}/items/${n}`);
+          if (!r.ok) throw new Error("page");
+          return ((plain({ mapValue: { fields: (await r.json()).fields } }) as { items?: StaticShareItem[] }).items ?? []);
+        }));
+        items = [...(share.items ?? []), ...rest.flat()];
+      }
+    } catch { items = null; /* the app reads them itself */ }
+  }
+  // Drawing it must never cost the link: anything odd in the data, the page as it always was.
+  try { html = withSharePage(html, { id, share, items, brand, folderId: url.searchParams.get("f") ?? undefined }); } catch { /* the app draws it */ }
   html = html
-    .replace(/<title>[^<]*<\/title>/, `<title>${esc(title)} — ${esc(brand)}</title>`)
-    .replace(/<meta name="description" content="[^"]*"\s*\/?>/, `<meta name="description" content="${esc(line || brand)}" />`)
-    .replace("</head>", `    ${tags}\n  </head>`);
-  return new Response(html, { status: 200, headers: { "content-type": "text/html; charset=utf-8", "cache-control": "public, max-age=300" } });
+    // Function replacements: a "$&" in a share's name must never be read as a pattern.
+    .replace(/<title>[^<]*<\/title>/, () => `<title>${esc(title)} — ${esc(brand)}</title>`)
+    .replace(/<meta name="description" content="[^"]*"\s*\/?>/, () => `<meta name="description" content="${esc(line || brand)}" />`)
+    .replace("</head>", () => `    ${tags}\n  </head>`);
+  return new Response(html, { status: 200, headers: { "content-type": "text/html; charset=utf-8", "cache-control": "public, max-age=60" } });
 }

@@ -38,17 +38,38 @@ function descendantFolderIds(folders: CatalogFolder[], rootId: string): string[]
   return out;
 }
 
+/** Folders in the order set in "Arrange folders" (each folder's `order` among the
+ *  ones beside it); never-arranged folders after, in the order they came. The
+ *  same rule as the Catalog page, so a shared link shows them as we do. */
+export function arrangedFolders<F extends { order?: number }>(folders: F[]): F[] {
+  return folders.map((f, i) => ({ f, i })).sort((a, b) => (a.f.order ?? Infinity) - (b.f.order ?? Infinity) || a.i - b.i).map(x => x.f);
+}
+
 /** The shared subtree as a flat folder list. The shared folder itself becomes
  *  the root (parentId null) so the public page can render breadcrumbs. */
 function subtreeFolders(folders: CatalogFolder[], rootId: string): ShareFolder[] {
   const ids = new Set(descendantFolderIds(folders, rootId));
-  return folders
+  return arrangedFolders(folders)
     .filter(f => ids.has(f.id) && f.id !== rootId)
     .map(f => ({
       id: f.id,
       name: f.name,
       parentId: (f.parentId ?? null) === rootId ? null : (f.parentId ?? null),
     }));
+}
+
+/**
+ * Folders re-arranged after a link was made: every Catalog link puts its folders
+ * in the new order too (inside an updateDb) — no new snapshot of the photos, so
+ * nothing else in the link changes.
+ */
+export function reorderSharedFolders(d: { shares?: Share[]; catalogFolders?: CatalogFolder[] }): void {
+  const rank = new Map(arrangedFolders(d.catalogFolders ?? []).map((f, i) => [f.id, i]));
+  for (const s of d.shares ?? []) {
+    if (s.kind !== "catalog" || !s.folders?.length) continue;
+    const next = s.folders.map((f, i) => ({ f, i })).sort((a, b) => (rank.get(a.f.id) ?? Infinity) - (rank.get(b.f.id) ?? Infinity) || a.i - b.i).map(x => x.f);
+    if (next.some((f, i) => f !== s.folders![i])) s.folders = next;
+  }
 }
 
 export function shareUrl(id: string): string {
@@ -74,6 +95,7 @@ export function buildProductPhotoItems(folderId: string): ShareSnapshot {
     .map(i => ({
       type: i.type,
       url: i.url,
+      ...(i.thumb ? { thumb: i.thumb } : {}), // the small copy for the grid (lib/photoPreview.ts)
       name: i.name,
       folder: nameById.get(i.folderId),
       folderId: i.folderId === folderId ? undefined : i.folderId,
@@ -96,6 +118,7 @@ export async function buildCatalogItems(folderId: string): Promise<ShareSnapshot
         out.push({
           type: it.type,
           url: it.data,
+          ...(it.thumb ? { thumb: it.thumb } : {}), // the small copy for the grid (lib/photoPreview.ts)
           name: it.name,
           folder: nameById.get(fid),
           folderId: fid === folderId ? undefined : fid,
@@ -113,12 +136,9 @@ const pageRef = (shareId: string, n: number) => doc(fsdb, "shares", shareId, "it
 /** Read every item of a share, following its extra pages. Used by the public
  *  viewer, which has no login and only its own share doc to go on. */
 export async function loadShareItems(share: Share): Promise<ShareItem[]> {
-  const out = [...(share.items ?? [])];
-  for (let n = 0; n < (share.pageCount ?? 0); n++) {
-    const snap = await getDoc(pageRef(share.id, n));
-    if (snap.exists()) out.push(...((snap.data() as { items?: ShareItem[] }).items ?? []));
-  }
-  return out;
+  // All the pages asked for together (they used to come one after another), kept in order.
+  const pages = await Promise.all(Array.from({ length: share.pageCount ?? 0 }, (_, n) => getDoc(pageRef(share.id, n))));
+  return [...(share.items ?? []), ...pages.flatMap(snap => (snap.exists() ? (snap.data() as { items?: ShareItem[] }).items ?? [] : []))];
 }
 
 /**
@@ -151,7 +171,9 @@ export async function saveShare(args: {
   // Pages first: if one of these fails, the share doc still points at the
   // snapshot it had before rather than at pages that were never written.
   for (let n = 0; n < rest.length; n++) {
-    await setDoc(pageRef(id, n), { items: rest[n] });
+    // Without its empty fields (an item of the shared folder itself has folderId
+    // undefined) — Firestore refuses a page that carries one.
+    await setDoc(pageRef(id, n), { items: JSON.parse(JSON.stringify(rest[n])) as ShareItem[] });
   }
   // A refresh that shrank the folder leaves orphan pages behind — drop them, or
   // the viewer would keep showing deleted media.
