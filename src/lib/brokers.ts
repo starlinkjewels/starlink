@@ -56,7 +56,10 @@ export function brokerHandovers(db: Pick<DB, "lockerTransactions">, brokerId: st
 
 /** Payments made to a broker (account entries tagged to them). */
 export function brokerPayments(db: Pick<DB, "lockerTransactions">, brokerId: string) {
-  return (db.lockerTransactions ?? []).filter(t => t.refType === "brokerPayment" && t.refId === brokerId && t.type === "expense");
+  // In rupees, as his account is kept: one paid from another currency's account counts the
+  // rupees it settled (partyAmountInr), not the dollars that left the account.
+  return (db.lockerTransactions ?? []).filter(t => t.refType === "brokerPayment" && t.refId === brokerId && t.type === "expense")
+    .map(t => (t.partyAmountInr != null ? { ...t, amountInr: t.partyAmountInr } : t));
 }
 
 export interface BrokerAccount {
@@ -170,7 +173,9 @@ export interface BillBrokerage {
   amount: string;
   paidBy: "us" | "supplier";
 }
-export const emptyBillBrokerage = (): BillBrokerage => ({ brokerId: "", pct: "", amount: "", paidBy: "us" });
+// A new purchase bill starts on "Supplier pays" — how most bills here are brokered
+// (client's choice, 2026-11-02). Saved bills keep what they were saved with.
+export const emptyBillBrokerage = (): BillBrokerage => ({ brokerId: "", pct: "", amount: "", paidBy: "supplier" });
 
 /** The bill's brokerage in ₹: the amount typed, or the % of the bill. */
 export function billBrokerageInr(b: BillBrokerage, billTotalInr: number): number {

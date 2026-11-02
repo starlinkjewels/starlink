@@ -9,6 +9,7 @@ import { StatStrip, type TableFilter } from "@/components/TableToolbar";
 import { DataTable, CellAmount, CellDate, type DataColumn } from "@/components/DataTable";
 import { type MoreAction } from "@/components/MoreMenu";
 import { SectionTitle } from "@/components/SectionTitle";
+import { useStickyFilter } from "@/hooks/useStickyFilter";
 
 export interface InvoiceBlock {
   id: string;
@@ -181,7 +182,9 @@ export function ClientInvoiceLedger({
   creditActions?: (c: InvoiceBlock["credits"][number], b: InvoiceBlock) => MoreAction[];
 }) {
   const [q, setQ] = useState("");
-  const [only, setOnly] = useState<"all" | "due" | "paid">("all");
+  // Outstanding or settled — stays as it was left (this browser, this person,
+  // every client's statement alike) until cleared. One choice: the two together are all.
+  const [only, setOnly] = useStickyFilter<"all" | "due" | "paid">("clientStatement.status", "all");
 
   const filtered = useMemo(() => {
     const ql = q.trim().toLowerCase();

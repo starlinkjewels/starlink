@@ -36,14 +36,18 @@ import { StockLotsTable } from "@/components/StockLotsTable";
 import { ListSelect, CertGradeFields } from "@/components/LotFields";
 import { StatStrip, type TableFilter } from "@/components/TableToolbar";
 import { listOf } from "@/lib/optionLists";
+import { useStickyFilter } from "@/hooks/useStickyFilter";
+import { selList, selOn } from "@/lib/filterSel";
 
 export function StockSectionPage() {
   const { section } = useParams<{ section: string }>();
   const db = useDb();
   if (section === "certified") return <CertifiedSection />;
-  if (section === "gold" || section === "diamond") return <MaterialSection material={section} />;
+  // Keyed by material: going straight from one material's page to another's starts
+  // afresh, so each reads its own remembered filters (never the last one's).
+  if (section === "gold" || section === "diamond") return <MaterialSection key={section} material={section} />;
   // Any other material (Settings → Materials), by its id.
-  if (isOtherMaterial(section) && materialDef(db.settings, section)) return <MaterialSection material={section} />;
+  if (isOtherMaterial(section) && materialDef(db.settings, section)) return <MaterialSection key={section} material={section} />;
   return (
     <div className="text-center py-20 text-muted-foreground">
       Unknown stock section. <Link to="/stock" className="text-primary underline">Back to Stock</Link>
@@ -59,8 +63,9 @@ function MaterialSection({ material }: { material: MaterialKey }) {
   // What the history below shows: one bag (purity), every bag of one size, or everything.
   const [selected, setSelected] = useState<{ keys: string[]; label: string } | null>(null);
   const selectedBucket = selected?.label ?? null;
-  const [filterFrom, setFilterFrom] = useState("");
-  const [filterTo, setFilterTo] = useState("");
+  // The movement dates stay as they were left (this browser, this person), one pair per material.
+  const [filterFrom, setFilterFrom] = useStickyFilter(`stock.${material}.history.from`, "");
+  const [filterTo, setFilterTo] = useStickyFilter(`stock.${material}.history.to`, "");
 
   // Balance derived from the FULL (unfiltered) movement ledger, so it always
   // reflects the true current total — the date filter below only narrows which
@@ -414,13 +419,15 @@ function CertifiedSection() {
   const [editRate, setEditRate] = useState("");
   const [savingPacket, setSavingPacket] = useState(false);
   // Filters on the stones in stock — by what a buyer asks for.
-  const [fShape, setFShape] = useState("");
-  const [fColor, setFColor] = useState("");
-  const [fClarity, setFClarity] = useState("");
-  const [fLab, setFLab] = useState("");
-  const [fSize, setFSize] = useState("");
-  const [histFrom, setHistFrom] = useState("");
-  const [histTo, setHistTo] = useState("");
+  // They stay as they were left (this browser, this person) until cleared, and
+  // each can hold several choices (lib/filterSel.ts).
+  const [fShape, setFShape] = useStickyFilter("stock.certified.shape", "");
+  const [fColor, setFColor] = useStickyFilter("stock.certified.colour", "");
+  const [fClarity, setFClarity] = useStickyFilter("stock.certified.clarity", "");
+  const [fLab, setFLab] = useStickyFilter("stock.certified.lab", "");
+  const [fSize, setFSize] = useStickyFilter("stock.certified.size", "");
+  const [histFrom, setHistFrom] = useStickyFilter("stock.certified.history.from", "");
+  const [histTo, setHistTo] = useStickyFilter("stock.certified.history.to", "");
 
   const [sp, setSp] = useSearchParams();
   const multiCo = useMultiCo();
@@ -811,18 +818,19 @@ function CertifiedSection() {
   const certOpts = (pick: (p: DiamondPacket) => string | undefined) =>
     [...new Set(allInStockPackets.map(p => (pick(p) || "").trim()))].sort((a, b) => a.localeCompare(b, undefined, { numeric: true }))
       .map(v => ({ value: v || "__none", label: v || "Not recorded" }));
-  const want = (w: string, have?: string) => !w || (w === "__none" ? !(have || "").trim() : (have || "").trim() === w);
-  const band = SIZE_BANDS.find(b => b.key === fSize);
+  // Several ticked: a stone matching any of them ("__none" = not recorded).
+  const want = (w: string, have?: string) => !selOn(w) || selList(w).some(x => (x === "__none" ? !(have || "").trim() : (have || "").trim() === x));
+  const bands = SIZE_BANDS.filter(b => selList(fSize).includes(b.key));
   const certShown = allInStockPackets.filter(p => want(fShape, p.shape) && want(fColor, p.color) && want(fClarity, p.clarity)
-    && want(fLab, p.certificateLab) && (!band || (p.carat >= band.min && p.carat < band.max)));
-  const certFiltered = !!(fShape || fColor || fClarity || fLab || fSize);
+    && want(fLab, p.certificateLab) && (!bands.length || bands.some(band => p.carat >= band.min && p.carat < band.max)));
+  const certFiltered = [fShape, fColor, fClarity, fLab, fSize].some(selOn);
   const certFilters: TableFilter[] = [
-    { kind: "select", label: "Shape", value: fShape, onChange: setFShape, options: certOpts(p => p.shape), allLabel: "All shapes" },
-    { kind: "select", label: "Size", value: fSize, onChange: setFSize, allLabel: "All sizes",
+    { kind: "select", label: "Shape", multi: true, value: fShape, onChange: setFShape, options: certOpts(p => p.shape), allLabel: "All shapes" },
+    { kind: "select", label: "Size", multi: true, value: fSize, onChange: setFSize, allLabel: "All sizes",
       options: SIZE_BANDS.filter(b => allInStockPackets.some(p => p.carat >= b.min && p.carat < b.max)).map(b => ({ value: b.key, label: b.label })) },
-    { kind: "select", label: "Colour", value: fColor, onChange: setFColor, options: certOpts(p => p.color), allLabel: "All colours" },
-    { kind: "select", label: "Clarity", value: fClarity, onChange: setFClarity, options: certOpts(p => p.clarity), allLabel: "All clarities" },
-    { kind: "select", label: "Lab", value: fLab, onChange: setFLab, options: certOpts(p => p.certificateLab), allLabel: "All labs" },
+    { kind: "select", label: "Colour", multi: true, value: fColor, onChange: setFColor, options: certOpts(p => p.color), allLabel: "All colours" },
+    { kind: "select", label: "Clarity", multi: true, value: fClarity, onChange: setFClarity, options: certOpts(p => p.clarity), allLabel: "All clarities" },
+    { kind: "select", label: "Lab", multi: true, value: fLab, onChange: setFLab, options: certOpts(p => p.certificateLab), allLabel: "All labs" },
   ];
 
   return (

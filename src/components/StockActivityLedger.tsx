@@ -31,6 +31,8 @@ import { materialName, materialUnit, purchaseQty, materialDefs, diamondSpec, pur
 import { companyOf, companiesOf, hasCompanies } from "@/lib/companies";
 import { oneLine } from "@/components/MoneyEntryEditor";
 import { bagNoOf, bagNoOfPurchase } from "@/lib/diamondBags";
+import { useStickyFilter } from "@/hooks/useStickyFilter";
+import { selHas, selList, selOn, selText } from "@/lib/filterSel";
 
 const ISSUE_ADMIN_ONLY = "Only an admin can change this";
 const STOCK_ADMIN_ONLY = "Only an admin can change stock";
@@ -78,14 +80,16 @@ export function StockActivityLedger({ onTotals }: { onTotals?: (t: LedgerTotals)
   const { user } = useAuth();
   const can = useCan();
   const [q, setQ] = useState("");
-  const [from, setFrom] = useState("");
-  const [to, setTo] = useState("");
-  const [kind, setKind] = useState("");
-  const [material, setMaterial] = useState("");
-  const [company, setCompany] = useState("");
-  const [billFilter, setBillFilter] = useState("");
-  // One party — a supplier (bought from, or sold to), a factory, a buyer.
-  const [party, setParty] = useState("");
+  // The filters stay as they were left until cleared; entry, material, company
+  // and party can hold several choices (lib/filterSel.ts).
+  const [from, setFrom] = useStickyFilter("stock-activity.from", "");
+  const [to, setTo] = useStickyFilter("stock-activity.to", "");
+  const [kind, setKind] = useStickyFilter("stock-activity.entry", "");
+  const [material, setMaterial] = useStickyFilter("stock-activity.material", "");
+  const [company, setCompany] = useStickyFilter("stock-activity.company", "");
+  const [billFilter, setBillFilter] = useStickyFilter("stock-activity.bill", "");
+  // Parties — a supplier (bought from, or sold to), a factory, a buyer.
+  const [party, setParty] = useStickyFilter("stock-activity.party", "");
   const [editing, setEditing] = useState<Purchase | null>(null);
   const [removingId, setRemovingId] = useState<string | null>(null);
   const [editingIssuance, setEditingIssuance] = useState<MaterialIssuance | null>(null);
@@ -315,13 +319,15 @@ export function StockActivityLedger({ onTotals }: { onTotals?: (t: LedgerTotals)
   }
 
   const ql = q.trim().toLowerCase();
+  const mats = selList(material);
   const rows = all
     .filter(r => {
       if (!inDateRange(r.date, from, to)) return false;
-      if (kind && r.kind !== kind) return false;
-      if (material && !r.mats.includes(material)) return false;
-      if (company && r.co !== company) return false;
-      if (party && r.party !== party) return false;
+      if (!selHas(kind, r.kind)) return false;
+      // A bill holding any of the ticked materials.
+      if (mats.length && !mats.some(m => r.mats.includes(m))) return false;
+      if (hasCompanies(db.settings) && !selHas(company, r.co)) return false;
+      if (!selHas(party, r.party)) return false;
       // Purchases entered before the bill number was required — the ones that
       // still need tying back to a chitthi.
       if (billFilter === "none" && r.billNo) return false;
@@ -334,7 +340,7 @@ export function StockActivityLedger({ onTotals }: { onTotals?: (t: LedgerTotals)
     })
     .sort((a, b) => +new Date(b.date) - +new Date(a.date));
 
-  const filtered = !!(ql || from || to || kind || material || billFilter || company || party);
+  const filtered = !!(ql || from || to || selOn(kind) || selOn(material) || billFilter || selOn(company) || selOn(party));
   // Everyone on the ledger, for the Party filter.
   const parties = [...new Set(all.map(r => r.party).filter(x => x && x !== "—"))].sort((a, b) => a.localeCompare(b));
 
@@ -367,7 +373,9 @@ export function StockActivityLedger({ onTotals }: { onTotals?: (t: LedgerTotals)
     title: "Buy & Assign — Activity",
     subjectLines: [
       `${rows.length} entr${rows.length !== 1 ? "ies" : "y"} · ${rangeLabel(from, to)}`,
-      [kind && `Entry: ${kind}`, material && `Material: ${material}`, ql && `Search: "${q.trim()}"`]
+      [selOn(kind) && `Entry: ${selText(kind, k => k, "", 5)}`,
+        selOn(material) && `Material: ${selText(material, m => materialName(db.settings, m), "", 4)}`,
+        ql && `Search: "${q.trim()}"`]
         .filter(Boolean).join(" · ") || "All entries",
       `Report Generated: ${new Date().toLocaleDateString("en-IN", { month: "long", day: "numeric", year: "numeric" })}`,
     ],
@@ -532,16 +540,16 @@ export function StockActivityLedger({ onTotals }: { onTotals?: (t: LedgerTotals)
           q, onQ: setQ, placeholder: "Search bill no., party, material, remark…",
           from, to, onFrom: setFrom, onTo: setTo,
           selects: [
-            { label: "Party", value: party, onChange: setParty, allLabel: "All parties",
+            { label: "Party", value: party, onChange: setParty, allLabel: "All parties", multi: true,
               options: parties.map(x => ({ value: x, label: x })) },
-            { label: "Entry", value: kind, onChange: setKind,
+            { label: "Entry", value: kind, onChange: setKind, multi: true,
               options: ["Purchase", "Opening stock", "Assigned to factory", "Diamond sold", "Sold to supplier"].map(k => ({ value: k, label: k })) },
-            { label: "Material", value: material, onChange: setMaterial,
+            { label: "Material", value: material, onChange: setMaterial, multi: true,
               options: [{ value: "gold", label: "Gold" }, { value: "diamond", label: "Diamond" },
                 ...materialDefs(db.settings).map(m => ({ value: m.id, label: m.name }))] },
             { label: "Bill", value: billFilter, onChange: setBillFilter, allLabel: "Any bill",
               options: [{ value: "none", label: "No bill number" }] },
-            ...(hasCompanies(db.settings) ? [{ label: "Company", value: company, onChange: setCompany,
+            ...(hasCompanies(db.settings) ? [{ label: "Company", value: company, onChange: setCompany, multi: true,
               options: companiesOf(db.settings).map(c => ({ value: c.id, label: c.name })) }] : []),
           ],
           onPdf: exportPdf, onCsv: exportCsv,

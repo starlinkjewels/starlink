@@ -614,7 +614,8 @@ export function DataTable<T>({
       ) : (<>
       {/* relative: the hidden column labels are placed inside this box, so
           they can't widen the page past a phone's screen. */}
-      <div ref={boxRef} className={`dt-box relative ${maxHeight || wide.over ? "overflow-x-auto" : "overflow-x-clip"} rounded-xl border border-border/60 bg-white ${wide.over ? "dt-over" : ""} ${wide.over && !wide.start ? "dt-scrolled" : ""} ${wide.over && !wide.end ? "dt-more" : ""}`} style={maxHeight ? { maxHeight, overflowY: "auto" } : undefined}>
+      {/* data-keep-scroll: a wide or tall table's own scroll comes back on Back too (hooks/useBackNav). */}
+      <div ref={boxRef} data-keep-scroll={st ? `dt:${st}` : undefined} className={`dt-box relative ${maxHeight || wide.over ? "overflow-x-auto" : "overflow-x-clip"} rounded-xl border border-border/60 bg-white ${wide.over ? "dt-over" : ""} ${wide.over && !wide.start ? "dt-scrolled" : ""} ${wide.over && !wide.end ? "dt-more" : ""}`} style={maxHeight ? { maxHeight, overflowY: "auto" } : undefined}>
         <table className="w-full text-sm">
           <thead className={`bg-secondary/40 ${maxHeight ? "sticky top-0 z-10" : ""}`}>
             <tr className="border-b border-border/60">

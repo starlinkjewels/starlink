@@ -52,7 +52,8 @@ export function copyFields(o: Order) {
     orderValue: o.amount || 0,
     shippingCharge: o.shippingCharge || 0,
     certificate: (o.certificate ? "yes" : "no") as "yes" | "no",
-    certificateFee: o.certificate ? o.certificateFee || 0 : 0,
+    // The form takes the fee in rupees (what the lab charges); an older order kept only dollars — left to type.
+    certificateFee: o.certificate ? o.certificateFeeInr || 0 : 0,
     stoneSpec: { shape: sp.shape || "Round", type: sp.type ?? "", mm: sp.mm ?? "", size: sp.size ?? "", color: sp.color ?? "", clarity: sp.clarity ?? "" },
     // Whose material: a repeat of the client's piece is usually made the same way.
     csGold: !!o.clientSupplied?.gold,

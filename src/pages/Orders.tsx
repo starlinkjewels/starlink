@@ -41,6 +41,8 @@ import { InvoiceBadge, needsInvoice } from "@/components/InvoiceBadge";
 import { PaginationBar } from "@/components/PaginationBar";
 import type { Order, MaterialIssuance } from "@/lib/db";
 import { useUrlState } from "@/hooks/useUrlState";
+import { useStickyFilter } from "@/hooks/useStickyFilter";
+import { selHas, selList, selOn, selText } from "@/lib/filterSel";
 import { zoomable } from "@/components/ImageViewer";
 import { orderPictures } from "@/lib/readyStockPhotos";
 
@@ -96,13 +98,19 @@ export function OrdersPage() {
   const [sp] = useSearchParams();
   // Kept in the address: Back from a record returns to the list as it was left.
   const [q, setQ] = useUrlState("q");
-  const [status, setStatus] = useState<string>(sp.get("status") ?? "all");
-  const [clientFilter, setClientFilter] = useState<string>("all");
+  // The filters stay as they were left (this browser, this person) until cleared —
+  // each can hold several choices (lib/filterSel.ts). A link that names a status
+  // (?status=delayed from the Dashboard) shows it for this visit only.
+  const [storedStatus, setStoredStatus] = useStickyFilter("orders.status", "all");
+  const [linkStatus, setLinkStatus] = useState<string | null>(sp.get("status"));
+  const status = linkStatus ?? storedStatus;
+  const setStatus = (v: string) => { setLinkStatus(null); setStoredStatus(v); };
+  const [clientFilter, setClientFilter] = useStickyFilter("orders.client", "all");
   // The admin can look at one person's orders: assigned to them, or for a
   // client they manage — the same rule as their own Orders page.
-  const [employeeFilter, setEmployeeFilter] = useState<string>("all");
+  const [employeeFilter, setEmployeeFilter] = useStickyFilter("orders.employee", "all");
   // Which of our companies — shown once there is more than one.
-  const [companyFilter, setCompanyFilter] = useState<string>("all");
+  const [companyFilter, setCompanyFilter] = useStickyFilter("orders.company", "all");
   const multiCo = hasCompanies(db.settings);
   const isStaff = user!.role !== "client";
   const can = useCan();
@@ -140,25 +148,35 @@ export function OrdersPage() {
   const noDiamondCount = useMemo(() => [...tracks.values()].filter(diamondsMissing).length, [tracks]);
 
   const orders = useMemo(() => {
+    // Several statuses ticked show an order matching any of them.
+    const statuses = selList(status);
     // Deleted orders are off every list; the admin's "Deleted" filter is the one place they show (to restore one).
-    let list = status === "deleted" ? currentUserOrders(db, user!, { withDeleted: true }).filter(o => !!o.deletedAt) : currentUserOrders(db, user!);
-    // Pending = waiting for approval (the Dashboard's tile counts the same).
-    if (status === "Pending") list = list.filter(o => o.status === "Waiting");
-    // Shipped work that nobody has billed yet — the whole point of the badge,
-    // gathered into one list instead of spotted by scrolling.
-    else if (status === "uninvoiced") list = list.filter(o => needsInvoice(o) && !findInvoiceForOrder(db.invoices, o.id));
-    // Pieces the client sent back — whole orders or some of their pieces.
-    else if (status === "returned") list = list.filter(o => !!o.returns?.length);
-    // In production past the business's limit, longest first.
-    else if (status === "delayed") list = list.filter(o => tracks.get(o.id)?.delayed);
-    // Being made, its diamonds asked for and not yet sent to the factory.
-    else if (status === "nodiamonds") list = list.filter(o => diamondsMissing(tracks.get(o.id) ?? null));
-    else if (status !== "all") list = list.filter(o => o.status === status);
-    if (clientFilter !== "all") list = list.filter(o => o.clientId === clientFilter);
-    if (companyFilter !== "all") list = list.filter(o => companyOfOrder(db, o) === companyFilter);
-    if (employeeFilter !== "all" && user!.role === "admin") {
-      const managed = new Set(db.clients.filter(c => c.accountManagerId === employeeFilter).map(c => c.id));
-      list = list.filter(o => o.assignedEmployeeId === employeeFilter || managed.has(o.clientId));
+    const withDeleted = statuses.includes("deleted") && user!.role === "admin";
+    let list = withDeleted ? currentUserOrders(db, user!, { withDeleted: true }) : currentUserOrders(db, user!);
+    const statusMatch = (o: Order, st: string): boolean => {
+      if (st === "deleted") return !!o.deletedAt;
+      if (o.deletedAt) return false;
+      // Pending = waiting for approval (the Dashboard's tile counts the same).
+      if (st === "Pending") return o.status === "Waiting";
+      // Shipped work that nobody has billed yet — the whole point of the badge,
+      // gathered into one list instead of spotted by scrolling.
+      if (st === "uninvoiced") return needsInvoice(o) && !findInvoiceForOrder(db.invoices, o.id);
+      // Pieces the client sent back — whole orders or some of their pieces.
+      if (st === "returned") return !!o.returns?.length;
+      // In production past the business's limit, longest first.
+      if (st === "delayed") return !!tracks.get(o.id)?.delayed;
+      // Being made, its diamonds asked for and not yet sent to the factory.
+      if (st === "nodiamonds") return diamondsMissing(tracks.get(o.id) ?? null);
+      return o.status === st;
+    };
+    if (statuses.length) list = list.filter(o => statuses.some(st => statusMatch(o, st)));
+    if (selOn(clientFilter)) list = list.filter(o => selHas(clientFilter, o.clientId));
+    // Only while the Company filter is shown — a remembered one from when there were several never hides orders.
+    if (isStaff && multiCo && selOn(companyFilter)) list = list.filter(o => selHas(companyFilter, companyOfOrder(db, o)));
+    const people = selList(employeeFilter);
+    if (people.length && user!.role === "admin") {
+      const managedBy = new Map(db.clients.filter(c => c.accountManagerId).map(c => [c.id, c.accountManagerId!]));
+      list = list.filter(o => people.some(p => o.assignedEmployeeId === p || managedBy.get(o.clientId) === p));
     }
     // Commas separate alternatives: "1090, 1091" means either, not both. A
     // handful of order or design numbers read off a list can be pasted in as
@@ -182,10 +200,10 @@ export function OrdersPage() {
     ));
     // A copy: for the admin with no filter, `list` is the store's own array,
     // and sorting it in place reordered every other page's lists too.
-    if (status === "delayed" || status === "nodiamonds") return [...list].sort((a, b) => (tracks.get(b.id)?.days ?? 0) - (tracks.get(a.id)?.days ?? 0));
+    if (statuses.length && statuses.every(st => st === "delayed" || st === "nodiamonds")) return [...list].sort((a, b) => (tracks.get(b.id)?.days ?? 0) - (tracks.get(a.id)?.days ?? 0));
     return [...list].sort((a, b) => +new Date(b.createdAt) - +new Date(a.createdAt));
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [db, dbVersion, user, q, status, clientFilter, employeeFilter, companyFilter, tracks]);
+  }, [db, dbVersion, user, q, status, clientFilter, employeeFilter, companyFilter, tracks, multiCo, isStaff]);
 
   const { paged, page, setPage, totalPages, total, start, end } = usePagination(orders, PAGE_SIZE);
 
@@ -397,7 +415,8 @@ export function OrdersPage() {
       { label: "Stamping", value: o.stamping },
       { label: "Engraving", value: o.engraving?.text ? `“${o.engraving.text}” (${o.engraving.font === "script" ? "script" : "block"} letters)` : undefined },
       !!o.otherMetal && { label: "Second metal", value: `${o.otherMetal}${o.otherMetalWeight ? ` · ${o.otherMetalWeight} g` : ""}${o.otherMetalPurity ? ` · ${o.otherMetalPurity}‰` : ""}` },
-      !!o.certificate && { label: "Certificate", value: o.certificateFee ? `Yes · ${fmtMoney(o.certificateFee)}` : "Yes" },
+      // The lab's rupees are ours to see; the client sees the dollars they are billed.
+      !!o.certificate && { label: "Certificate", value: o.certificateFee ? `Yes · ${fmtMoney(o.certificateFee)}${isStaff && o.certificateFeeInr ? ` (₹${o.certificateFeeInr.toLocaleString("en-IN")})` : ""}` : "Yes" },
       { label: "Delivery time", value: o.deliveryTime },
       !!o.dispatchedAt && { label: "Dispatched", value: fmtDate(o.dispatchedAt) },
       !!o.deliveredAt && { label: "Delivered", value: fmtDate(o.deliveredAt) },
@@ -426,14 +445,14 @@ export function OrdersPage() {
   const exportName = () => {
     if (chosen.length) return `Products-Selected-${chosen.length}`;
     // The product sheet goes to customers, so it never names who handled the work.
-    const who = clientFilter === "all" ? "" : `-${(db.clients.find(c => c.id === clientFilter)?.companyName ?? "").replace(/\s+/g, "_")}`;
-    return `Products${who}${status === "all" ? "" : `-${status.replace(/\s+/g, "_")}`}`;
+    const who = !selOn(clientFilter) ? "" : `-${selText(clientFilter, id => db.clients.find(c => c.id === id)?.companyName).replace(/[\s,]+/g, "_")}`;
+    return `Products${who}${!selOn(status) ? "" : `-${selList(status).join("-").replace(/\s+/g, "_")}`}`;
   };
   const exportSubject = () => (chosen.length
     ? [`${chosen.length} selected piece${chosen.length !== 1 ? "s" : ""}`]
     : [
-        clientFilter === "all" ? "All clients" : db.clients.find(c => c.id === clientFilter)?.companyName,
-        status === "all" ? "All status" : status === "uninvoiced" ? "Shipped, not invoiced" : status,
+        selText(clientFilter, id => db.clients.find(c => c.id === id)?.companyName, "All clients", 3),
+        selText(status, st => (st === "uninvoiced" ? "Shipped, not invoiced" : st), "All status", 3),
         q.trim() ? `Search: "${q.trim()}"` : "",
       ]).filter(Boolean).join(" · ");
 
@@ -441,7 +460,7 @@ export function OrdersPage() {
   // Filters button in whichever view is open. "" in a filter means "all".
   const pick = (set: (v: string) => void) => (v: string) => set(v || "all");
   const filters: TableFilter[] = [
-    { kind: "select", label: "Status", value: status === "all" ? "" : status, onChange: pick(setStatus), allLabel: "All status",
+    { kind: "select", label: "Status", multi: true, value: status === "all" ? "" : status, onChange: pick(setStatus), allLabel: "All status",
       options: [
         ...(isStaff ? [{ value: "uninvoiced", label: "Not invoiced (shipped)" }] : []),
         { value: "returned", label: "Returned by client" },
@@ -453,11 +472,11 @@ export function OrdersPage() {
         // "Waiting" is the one for approval (an old ?status=Pending link still lands there).
         ...["Waiting", "Approved", "In Production", "Ready", "Dispatched", "Delivered", "Rejected"].map(s => ({ value: s, label: s === "Waiting" ? "Waiting — for approval" : s })),
       ] },
-    ...(isStaff ? [{ kind: "select" as const, label: "Client", value: clientFilter === "all" ? "" : clientFilter, onChange: pick(setClientFilter), allLabel: "All clients",
+    ...(isStaff ? [{ kind: "select" as const, label: "Client", multi: true, value: clientFilter === "all" ? "" : clientFilter, onChange: pick(setClientFilter), allLabel: "All clients",
       options: db.clients.filter(c => worksOnClientId(db, user, c.id)).sort((a, b) => a.companyName.localeCompare(b.companyName)).map(c => ({ value: c.id, label: c.companyName })) }] : []),
-    ...(isStaff && multiCo ? [{ kind: "select" as const, label: "Company", value: companyFilter === "all" ? "" : companyFilter, onChange: pick(setCompanyFilter), allLabel: "All companies",
+    ...(isStaff && multiCo ? [{ kind: "select" as const, label: "Company", multi: true, value: companyFilter === "all" ? "" : companyFilter, onChange: pick(setCompanyFilter), allLabel: "All companies",
       options: companiesOf(db.settings).map(c => ({ value: c.id, label: c.name })) }] : []),
-    ...(user!.role === "admin" ? [{ kind: "select" as const, label: "Employee", value: employeeFilter === "all" ? "" : employeeFilter, onChange: pick(setEmployeeFilter), allLabel: "All employees",
+    ...(user!.role === "admin" ? [{ kind: "select" as const, label: "Employee", multi: true, value: employeeFilter === "all" ? "" : employeeFilter, onChange: pick(setEmployeeFilter), allLabel: "All employees",
       options: db.users.filter(u => (u.role === "employee" || u.role === "admin") && u.status !== "inactive")
         .sort((a, b) => a.name.localeCompare(b.name))
         .map(u => ({ value: u.id, label: `${u.name}${u.role === "admin" ? " (admin)" : ""}` })) }] : []),

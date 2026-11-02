@@ -598,7 +598,11 @@ export interface Order {
   productVideo?: string;
   // Certificate
   certificate?: boolean;
-  certificateFee?: number; // editable per order
+  certificateFee?: number; // editable per order — in $, as it goes on the client's bill
+  /** The certificate fee as the lab charges it, in rupees, and the rate (₹ per $1) it was
+   *  turned into certificateFee at. Unset on orders whose fee was typed in dollars. */
+  certificateFeeInr?: number;
+  certificateRate?: number;
   /** The order this one was duplicated from (New Order → Duplicate), when it was. */
   copiedFromId?: string;
   /**
@@ -1211,6 +1215,10 @@ export interface LockerTransaction {
    *  1 `from` = `rate` `to` (same on both legs). Rupees and dollars still carry
    *  exchangeRate as well; read either with rateOf() in lib/currency.ts. */
   fx?: FxQuote;
+  /** Paid from an account in another currency to a party kept in rupees (a supplier,
+   *  a factory, a designer, a broker): the rupees it settled. amountInr stays in the
+   *  account's currency; the rate it was paid at is on exchangeRate / fx. */
+  partyAmountInr?: number;
   note?: string;
   recordedBy: string; // userId
   createdAt: string;

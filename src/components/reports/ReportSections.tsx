@@ -38,6 +38,7 @@ import { IfExport } from "@/components/IfExport";
 import { PageHeader } from "@/components/PageHeader";
 import { ExportMenu, FilterChips, FiltersButton, StatStrip, type TableExport, type TableFilter } from "@/components/TableToolbar";
 import { useMayExport } from "@/hooks/useCan";
+import { selHas, selList, selOn, selText } from "@/lib/filterSel";
 
 /* Local YYYY-MM-DD key (matches how the rest of the app displays dates) so a
    purchase near midnight IST lands on the calendar day staff expect. */
@@ -126,7 +127,7 @@ export interface ReportSectionsProps {
   show?: SectionKey[];
   /** The Reports page's date range — every section follows it (each can still be narrowed). */
   period?: { from: string; to: string };
-  /** The Reports page's client filter. */
+  /** The Reports page's client filter — one client or several (lib/filterSel.ts). */
   clientId?: string;
   /** Narrows every order-based section further — the Reports page's employee filter. */
   scope?: (o: Order) => boolean;
@@ -162,9 +163,10 @@ export function ReportSections({ embedded = false, show, period, clientId, scope
   const clearFilters = () => {
     setClientFilter("all"); setDateFrom(""); setDateTo("");
   };
-  const hasFilters = clientFilter !== "all" || !!dateFrom || !!dateTo;
+  const hasFilters = selOn(clientFilter) || !!dateFrom || !!dateTo;
+  const clientWords = (all = "All clients") => selText(clientFilter, id => clients.find(c => c.id === id)?.companyName, all, 3);
   const pageFilters: TableFilter[] = [
-    { kind: "select", label: "Client", value: clientFilter === "all" ? "" : clientFilter, onChange: v => setClientFilter(v || "all"),
+    { kind: "select", label: "Client", multi: true, value: clientFilter === "all" ? "" : clientFilter, onChange: v => setClientFilter(v || "all"),
       allLabel: "All Clients", options: clients.map(c => ({ value: c.id, label: c.companyName })) },
     { kind: "date", from: dateFrom, to: dateTo, onChange: (f, t) => { setDateFrom(f); setDateTo(t); } },
   ];
@@ -772,8 +774,8 @@ export function ReportSections({ embedded = false, show, period, clientId, scope
   /* ── filtered data ── */
   const filtered = useMemo(() => {
     let list = [...myOrders];
-    if (canSeeAll && clientFilter !== "all") {
-      list = list.filter(o => o.clientId === clientFilter);
+    if (canSeeAll && selOn(clientFilter)) {
+      list = list.filter(o => selHas(clientFilter, o.clientId));
     }
     // Compare on the LOCAL calendar date so orders near midnight (IST) land in the
     // right day and a "To" date includes same-day orders.
@@ -968,7 +970,7 @@ export function ReportSections({ embedded = false, show, period, clientId, scope
     doc.text(`Generated: ${new Date().toLocaleString("en-IN", { day: "numeric", month: "short", year: "numeric", hour: "numeric", minute: "2-digit" }).replace(/\bSept\b/, "Sep")}`, 20, 30);
     if (hasFilters) {
       const filterDesc = [
-        clientFilter !== "all" && `Client: ${clients.find(c=>c.id===clientFilter)?.companyName}`,
+        selOn(clientFilter) && `${selList(clientFilter).length > 1 ? "Clients" : "Client"}: ${clientWords()}`,
         dateFrom && `From: ${dateFrom}`,
         dateTo   && `To: ${dateTo}`,
       ].filter(Boolean).join(" | ");
@@ -1580,7 +1582,7 @@ export function ReportSections({ embedded = false, show, period, clientId, scope
       {/* ── Client-wise breakdown (admin / employee) ── */}
       {vis("clients") && canSeeAll && byClient.length > 0 && (
         <div className="card-luxe p-4 sm:p-5">
-          <SectionTitle className="mb-4" title={clientFilter === "all" ? "Client-wise Summary" : `Orders — ${clients.find(c=>c.id===clientFilter)?.companyName}`} />
+          <SectionTitle className="mb-4" title={selList(clientFilter).length !== 1 ? "Client-wise Summary" : `Orders — ${clientWords()}`} />
 
           {/* One table at every size — on a phone it scrolls sideways with the
               client held in view. */}

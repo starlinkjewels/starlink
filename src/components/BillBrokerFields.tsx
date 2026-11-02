@@ -81,8 +81,9 @@ export function BillBrokerFields({ value, onChange, billTotalInr, className = ""
       {value.brokerId && (
         <>
           <div className="flex gap-1 p-1 bg-secondary rounded-xl" role="radiogroup" aria-label="Who pays the brokerage">
-            <button type="button" role="radio" aria-checked={value.paidBy === "us"} onClick={() => onChange({ ...value, paidBy: "us" })} className={seg(value.paidBy === "us")}>We pay</button>
+            {/* Supplier pays first — the usual way here, and a new bill's default. */}
             <button type="button" role="radio" aria-checked={value.paidBy === "supplier"} onClick={() => onChange({ ...value, paidBy: "supplier" })} className={seg(value.paidBy === "supplier")}>Supplier pays</button>
+            <button type="button" role="radio" aria-checked={value.paidBy === "us"} onClick={() => onChange({ ...value, paidBy: "us" })} className={seg(value.paidBy === "us")}>We pay</button>
           </div>
           <p className="text-[11px] text-muted-foreground">
             {sale

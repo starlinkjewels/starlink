@@ -189,7 +189,8 @@ export function OrderBoard({ orders, actions, tracks }: { orders: Order[]; actio
         {rejected > 0 && <span>{rejected} rejected order{rejected !== 1 ? "s are" : " is"} not on the board.</span>}
       </div>
 
-      <div className="flex gap-3 overflow-x-auto pb-3 -mx-1 px-1 snap-x">
+      {/* data-keep-scroll: Back from an order returns to the same stage and card (hooks/useBackNav). */}
+      <div data-keep-scroll="order-board" className="flex gap-3 overflow-x-auto pb-3 -mx-1 px-1 snap-x">
         {/* "Order Submitted" is done the moment an order is placed, so nothing
             waits in it — shown only if an older order somehow does. */}
         {cols.filter(c => c !== "Order Submitted" || (byCol.get(c)?.length ?? 0) > 0).map(col => {
@@ -220,7 +221,7 @@ export function OrderBoard({ orders, actions, tracks }: { orders: Order[]; actio
                 </div>
                 <p className="text-[10px] text-muted-foreground mt-0.5">{columnHint(col)}</p>
               </div>
-              <div className="p-2 space-y-2 overflow-y-auto flex-1">
+              <div data-keep-scroll={`order-board:${col}`} className="p-2 space-y-2 overflow-y-auto flex-1">
                 {shown.map(o => {
                   const locked = blockedFor(o);
                   const client = db.clients.find(c => c.id === o.clientId);

@@ -7,6 +7,8 @@ import { fmtMoneyInr } from "@/lib/manufacturing";
 import { KIND_LABEL, STATUS_LABEL, STATUS_TONE, designerOf, isOpenJob, jobPayState } from "@/lib/designers";
 import { DataTable, CellMain, CellTag, CellAmount, CellDate, type DataColumn } from "@/components/DataTable";
 import { CadJobSheet } from "./CadJobSheet";
+import { useStickyFilter } from "@/hooks/useStickyFilter";
+import { selList } from "@/lib/filterSel";
 
 /**
  * Design jobs as one table — Design Studio (every designer) and a designer's
@@ -17,13 +19,16 @@ export function CadJobsTable({ id, jobs, showDesigner, exportName, emptyText }: 
 }) {
   const db = useDb();
   const [open, setOpen] = useState<string | null>(null);
-  const [status, setStatus] = useState("");
+  // Stays as it was left until cleared; several can be ticked — a design
+  // matching any of them shows ("In hand" and "Late" are groups of statuses).
+  const [status, setStatus] = useStickyFilter(`cad-jobs.${id}.status`, "");
+  const statuses = selList(status);
   // What is still to pay on each approved freelance design (per designer, worked out once).
   const pay = new Map<string, { due: number; paid: number }>();
   for (const x of db.designers ?? []) if (x.kind === "freelance") for (const [k, v] of jobPayState(db, x)) pay.set(k, v);
   const today = new Date().toISOString().slice(0, 10);
   const late = (j: CadJob) => isOpenJob(j) && j.status !== "submitted" && !!j.dueDate && j.dueDate < today;
-  const rows = jobs.filter(j => !status || (status === "open" ? isOpenJob(j) : status === "late" ? late(j) : j.status === status));
+  const rows = jobs.filter(j => !statuses.length || statuses.some(st => (st === "open" ? isOpenJob(j) : st === "late" ? late(j) : j.status === st)));
   const name = (j: CadJob) => designerOf(db, j.designerId)?.name ?? "Designer";
 
   const cols: DataColumn<CadJob>[] = [
@@ -60,7 +65,7 @@ export function CadJobsTable({ id, jobs, showDesigner, exportName, emptyText }: 
         searchText={j => [j.orderNumber, j.brief.piece, j.brief.designNo, name(j), STATUS_LABEL[j.status]].filter(Boolean).join(" ")}
         searchPlaceholder="Search designs"
         filters={[{
-          kind: "select", label: "Status", value: status, onChange: setStatus, allLabel: "All designs",
+          kind: "select", label: "Status", value: status, onChange: setStatus, allLabel: "All designs", multi: true,
           options: [
             { value: "open", label: "In hand" }, { value: "late", label: "Late" },
             ...(["assigned", "working", "submitted", "changes", "approved", "cancelled"] as const).map(s => ({ value: s, label: STATUS_LABEL[s] })),

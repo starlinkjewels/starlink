@@ -14,6 +14,8 @@ import { DataTable, CellMain, CellTag, CellAmount, type DataColumn } from "@/com
 import { StatStrip, type TableFilter } from "@/components/TableToolbar";
 import { SectionTitle } from "@/components/SectionTitle";
 import { useUrlState } from "@/hooks/useUrlState";
+import { useStickyFilter } from "@/hooks/useStickyFilter";
+import { selList, selOn } from "@/lib/filterSel";
 import { BagPanel } from "@/components/BagPanel";
 import { ArrowRightLeft, Coins, FolderOpen, Gem, Hash, Layers, Package, Printer, Wallet, X } from "lucide-react";
 
@@ -101,13 +103,16 @@ export function StockLotsTable({ material, companyId, selected, onSelect }: {
     try { localStorage.setItem(VIEW_KEY, v); } catch { /* private window */ }
     onSelect(null);
   };
-  const [shape, setShape] = useState(ALL);
-  const [variety, setVariety] = useState(ALL);
-  const [type, setType] = useState(ALL);
-  const [mm, setMm] = useState(ALL);
-  const [size, setSize] = useState(ALL);
-  const [color, setColor] = useState(ALL);
-  const [clarity, setClarity] = useState(ALL);
+  // The filters stay as they were left (this browser, this person) until cleared —
+  // one set per material, so a gem's filter never narrows the diamond table — and
+  // each can hold several choices (lib/filterSel.ts).
+  const [shape, setShape] = useStickyFilter(`stock-lots.${material}.shape`, ALL);
+  const [variety, setVariety] = useStickyFilter(`stock-lots.${material}.stone`, ALL);
+  const [type, setType] = useStickyFilter(`stock-lots.${material}.type`, ALL);
+  const [mm, setMm] = useStickyFilter(`stock-lots.${material}.mm`, ALL);
+  const [size, setSize] = useStickyFilter(`stock-lots.${material}.sieve`, ALL);
+  const [color, setColor] = useStickyFilter(`stock-lots.${material}.colour`, ALL);
+  const [clarity, setClarity] = useStickyFilter(`stock-lots.${material}.clarity`, ALL);
   // Loose diamonds: a bag (or every bag of one size) open in the side panel.
   const [panel, setPanel] = useState<{ keys: string[]; label?: string; start: "view" | "move" | "recount" } | null>(null);
 
@@ -142,17 +147,18 @@ export function StockLotsTable({ material, companyId, selected, onSelect }: {
     const vals = [...new Set(rows.map(r => pick(r) || ""))].sort(sizeOrder);
     return vals.map(v => ({ value: v || "__none", label: v || none }));
   };
-  const match = (want: string, have?: string) => want === ALL || (want === "__none" ? !have : have === want);
+  // Several ticked: a lot matching any of them ("__none" = the part not recorded).
+  const match = (want: string, have?: string) => !selOn(want) || selList(want).some(w => (w === "__none" ? !have : have === w));
   const shown = rows.filter(r => match(shape, r.shape) && match(variety, r.variety) && match(type, r.type) && match(mm, r.mm) && match(size, r.size) && match(color, r.color) && match(clarity, r.clarity));
 
   const filters: TableFilter[] = lotLike ? [
-    ...(gem ? [{ kind: "select" as const, label: "Stone", value: variety, onChange: setVariety, options: opts(r => r.variety), allLabel: "All stones" }] : []),
-    { kind: "select", label: "Shape", value: shape, onChange: setShape, options: opts(r => r.shape), allLabel: "All shapes" },
-    { kind: "select", label: "Type", value: type, onChange: setType, options: opts(r => r.type), allLabel: "All types" },
-    { kind: "select", label: "MM", value: mm, onChange: setMm, options: opts(r => r.mm), allLabel: "All mm" },
-    { kind: "select", label: "Sieve", value: size, onChange: setSize, options: opts(r => r.size), allLabel: "All sieves" },
-    { kind: "select", label: "Colour", value: color, onChange: setColor, options: opts(r => r.color), allLabel: "All colours" },
-    { kind: "select", label: gem ? "Grade" : "Clarity", value: clarity, onChange: setClarity, options: opts(r => r.clarity), allLabel: gem ? "All grades" : "All clarities" },
+    ...(gem ? [{ kind: "select" as const, label: "Stone", multi: true, value: variety, onChange: setVariety, options: opts(r => r.variety), allLabel: "All stones" }] : []),
+    { kind: "select", label: "Shape", multi: true, value: shape, onChange: setShape, options: opts(r => r.shape), allLabel: "All shapes" },
+    { kind: "select", label: "Type", multi: true, value: type, onChange: setType, options: opts(r => r.type), allLabel: "All types" },
+    { kind: "select", label: "MM", multi: true, value: mm, onChange: setMm, options: opts(r => r.mm), allLabel: "All mm" },
+    { kind: "select", label: "Sieve", multi: true, value: size, onChange: setSize, options: opts(r => r.size), allLabel: "All sieves" },
+    { kind: "select", label: "Colour", multi: true, value: color, onChange: setColor, options: opts(r => r.color), allLabel: "All colours" },
+    { kind: "select", label: gem ? "Grade" : "Clarity", multi: true, value: clarity, onChange: setClarity, options: opts(r => r.clarity), allLabel: gem ? "All grades" : "All clarities" },
   ] : [];
 
   // In the order a diamond office keeps its bags: shape, then mm, then sieve, then grade.
@@ -261,7 +267,8 @@ export function StockLotsTable({ material, companyId, selected, onSelect }: {
   const totalPcs = pcsKnown.reduce((s, r) => s + (r.pcs ?? 0), 0);
   const totalValue = shown.reduce((s, r) => s + (r.value ?? 0), 0);
   const unpriced = shown.filter(r => r.value == null).length;
-  const filtered = shape !== ALL || variety !== ALL || type !== ALL || mm !== ALL || size !== ALL || color !== ALL || clarity !== ALL;
+  // Only the filters this material shows count (a sticky one from a hidden filter never would).
+  const filtered = lotLike && [shape, variety, type, mm, size, color, clarity].some(selOn);
   const noBag = diamond ? rows.filter(r => !r.bag) : [];
   const isStaff = user?.role === "admin" || user?.role === "employee";
   const coName = hasCompanies(db.settings) && companyId !== "all" ? companyById(db.settings, companyId).name : undefined;

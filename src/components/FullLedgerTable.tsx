@@ -7,6 +7,8 @@ import { Search, Download, X } from "lucide-react";
 import { IfExport } from "@/components/IfExport";
 import { ExportMenu, FilterChips, FiltersButton, type TableFilter } from "@/components/TableToolbar";
 import { SectionTitle } from "@/components/SectionTitle";
+import { useStickyFilter } from "@/hooks/useStickyFilter";
+import { selHas, selOn } from "@/lib/filterSel";
 
 /** One movement in one material — the shape a ledger line actually has. */
 export interface MovementRow {
@@ -37,17 +39,22 @@ const cell = (n: number, money?: boolean) => (money ? rs(n) : w3(n));
  * column reads the same way and works at any number of materials.
  */
 export function FullLedgerTable({
-  rows, title, caption, onExport,
+  rows, title, caption, onExport, filterKey,
 }: {
   rows: MovementRow[];
   title: string;
   caption?: string;
   onExport?: () => void;
+  /** Where the filters are remembered; the title without it. */
+  filterKey?: string;
 }) {
   const [q, setQ] = useState("");
-  const [from, setFrom] = useState("");
-  const [to, setTo] = useState("");
-  const [mat, setMat] = useState("all");
+  // The dates and materials stay as they were left until cleared; several
+  // materials can be ticked — each line's balance is its own material's.
+  const place = `full-ledger.${filterKey ?? title.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`;
+  const [from, setFrom] = useStickyFilter(`${place}.from`, "");
+  const [to, setTo] = useStickyFilter(`${place}.to`, "");
+  const [mat, setMat] = useStickyFilter(`${place}.material`, "all");
 
   const materials = useMemo(() => [...new Set(rows.map(r => r.material))], [rows]);
 
@@ -56,7 +63,7 @@ export function FullLedgerTable({
     const fromD = from ? new Date(`${from}T00:00:00`) : null;
     const toD = to ? new Date(`${to}T23:59:59.999`) : null;
     return rows.filter(r => {
-      if (mat !== "all" && r.material !== mat) return false;
+      if (!selHas(mat, r.material)) return false;
       if (r.id !== "opening") {
         const d = new Date(r.date);
         if (fromD && d < fromD) return false;
@@ -68,15 +75,15 @@ export function FullLedgerTable({
   }, [rows, q, from, to, mat]);
 
   const { paged, page, setPage, totalPages, start, end } = usePagination(filtered, 15);
-  const active = !!q.trim() || !!from || !!to || mat !== "all";
+  const active = !!q.trim() || !!from || !!to || selOn(mat);
 
-  // The dates and (with more than one) the material, behind one Filters
-  // button; every change starts again from the first page.
+  // The dates and (with more than one, or one chosen) the material, behind one
+  // Filters button; every change starts again from the first page.
   const filters: TableFilter[] = [
     { kind: "date", from, to, onChange: (f, t) => { setFrom(f); setTo(t); setPage(1); } },
   ];
-  if (materials.length > 1) filters.push({
-    kind: "select", label: "Material", allLabel: "All", value: mat === "all" ? "" : mat,
+  if (materials.length > 1 || selOn(mat)) filters.push({
+    kind: "select", label: "Material", allLabel: "All", value: mat === "all" ? "" : mat, multi: true,
     onChange: v => { setMat(v || "all"); setPage(1); },
     options: materials.map(m => ({ value: m, label: m })),
   });

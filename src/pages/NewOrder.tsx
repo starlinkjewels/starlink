@@ -30,7 +30,7 @@ import { metalHasKarats as hasKarats, metalColour } from "@/lib/metals";
 import { choicesOf, listOf } from "@/lib/optionLists";
 import { receiptForAdvance } from "@/lib/receipts";
 import { ccy, ccySymbol, fmtCcy, rateText, roundCcy, tableRate } from "@/lib/currency";
-import { useSuggestedRate } from "@/components/CurrencyFields";
+import { RateInput, useSuggestedRate } from "@/components/CurrencyFields";
 import { sendMail, orderReceivedEmail, MARKETING_EMAIL } from "@/lib/email";
 import { useDb } from "@/hooks/useDb";
 import { adminIds, notifyUsers } from "@/lib/notify";
@@ -194,6 +194,13 @@ function NewOrderForm() {
   const [stockLevels, setStockLevels] = useState<StockLevels | null>(null);
   // Staff-only, like the stock it reports; a client placing an order never sees it.
   useEffect(() => (isClient ? undefined : subscribeStockLevels(setStockLevels)), [isClient]);
+  // The certificate fee is typed in rupees (what the lab charges) and billed in dollars at this rate (₹ per $1).
+  const [certRate, setCertRate] = useState<number | "">("");
+  // Staff type the fee in rupees (what the lab charges) with the rate; a client
+  // placing their own order types it in dollars, as before — no rupees, no rate.
+  const certTyped = f.certificate === "yes" ? Number(f.certificateFee) || 0 : 0;
+  const certInr = isClient ? 0 : certTyped;
+  const certUsd = isClient ? certTyped : certInr > 0 && Number(certRate) > 0 ? Math.round((certInr / Number(certRate)) * 100) / 100 : 0;
   const availableGold = f.productKarats ? (stockLevels?.gold?.[f.productKarats] ?? 0) : null;
   const goldShort = availableGold !== null && Number(f.estimatedNetWeight) > availableGold;
 
@@ -439,6 +446,16 @@ function NewOrderForm() {
       const b = c ? clientMaterialBalance(db, c) : null;
       setCmx({ ...emptyCm(), goldSrc: b && b.goldInHand > 0 ? "theirs" : "later", diaSrc: b && b.diaInHand > 0 ? "theirs" : "later", sendNow: false });
     }
+    // An older order kept its certificate fee in dollars only: it comes across as
+    // rupees at the Settings rate, with that rate — so the copy bills the same dollars
+    // (both changeable). With no rate in Settings it is left to type, and said so.
+    if (!isClient && src.certificate && !src.certificateFeeInr && (src.certificateFee || 0) > 0) {
+      const r = tableRate(db.settings.currencyRates, "USD", "INR");
+      if (r && r > 0) {
+        setF(prev => ({ ...prev, certificateFee: Math.round(src.certificateFee! * r * 100) / 100 }));
+        setCertRate(r);
+      } else toast.info(`${src.orderNumber}'s certificate fee was ${fmtCcy(src.certificateFee!, "USD")} — enter it in rupees, with the rate.`);
+    }
     setCopiedFrom(src);
     if (!clientOk) toast.info(`${db.clients.find(c => c.id === src.clientId)?.companyName ?? "That client"} isn't in your client list — choose the client.`);
   }, [db.orders]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -511,6 +528,7 @@ function NewOrderForm() {
       requestAnimationFrame(() => { for (const x of fixes) if (scrollToFix(x.key)) return; });
       return;
     }
+    if (certInr > 0 && !(Number(certRate) > 0)) { toast.error("Certificate fee: enter the rate (₹ for $1) — the client is billed in dollars"); return; }
     const needSpecs = kind === "piece" && !isDiamondOnly && !isReadyStockSale;
     // Gross is the whole piece, net the metal only: an estimate that says
     // otherwise is a typing slip, and it would carry onto every card and band.
@@ -619,7 +637,9 @@ function NewOrderForm() {
         stamping: f.stamping === "Special Stamp" && f.stampingNote.trim() ? `Special Stamp: ${f.stampingNote.trim()}` : (f.stamping || undefined),
         ...(needSpecs && f.engraving.on && f.engraving.text.trim() ? { engraving: { text: f.engraving.text.trim().slice(0, ENGRAVING_MAX), font: f.engraving.font } } : {}),
         certificate: f.certificate === "yes",
-        certificateFee: f.certificate === "yes" ? (Number(f.certificateFee) || 0) : 0,
+        // Typed in rupees; the client's bill takes it in dollars at the rate.
+        certificateFee: certUsd,
+        ...(certInr > 0 ? { certificateFeeInr: certInr, certificateRate: Number(certRate) } : {}),
         ...(copiedFrom ? { copiedFromId: copiedFrom.id } : {}),
         ...(chargesOf(f.otherCharges).length && !forReadyStock ? { otherCharges: chargesOf(f.otherCharges) } : {}),
         ...(isDiamondOnly ? { stoneSpec: { ...cleanStoneSpec(isGemSale ? f.stoneSpec : { ...f.stoneSpec, type: "" }), ...(stone !== "Diamond" ? { stone } : {}) } } : {}),
@@ -820,7 +840,7 @@ function NewOrderForm() {
   };
 
   const shipping   = Number(f.shippingCharge) || 0;
-  const certFee    = f.certificate === "yes" ? (Number(f.certificateFee) || 0) : 0;
+  const certFee    = certUsd;
   const extraCharges = forReadyStock ? 0 : chargesSum(f.otherCharges);
   const grandTotal = Number(f.orderValue) + shipping + certFee + extraCharges;
   const balanceDue = Math.max(0, grandTotal - Number(f.advanceAmount));
@@ -1403,18 +1423,20 @@ function NewOrderForm() {
                 <BadgeCheck className="h-5 w-5 text-amber-600 shrink-0" />
                 <p className="text-sm font-semibold text-amber-800">Certificate fee</p>
               </div>
+              {/* Staff: in rupees, as the lab charges it — billed to the client in dollars at the rate. A client: dollars. */}
               <div className="relative">
-                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-amber-600 font-medium text-sm">$</span>
+                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-amber-600 font-medium text-sm">{isClient ? "$" : "₹"}</span>
                 <Input
-                  type="number" min={0} step="0.01"
+                  type="number" min={0} step="0.01" aria-label={isClient ? "Certificate fee ($)" : "Certificate fee (₹)"}
                   value={f.certificateFee || ""}
                   onChange={e => set("certificateFee", +e.target.value)}
                   className="rounded-xl h-11 pl-7 border-amber-300 bg-white focus:ring-amber-400/30"
-                  placeholder="0"
+                  placeholder={isClient ? "0" : "0 — what the lab charges, in ₹"}
                 />
               </div>
+              {certInr > 0 && <RateInput id="cert-rate" from="USD" to="INR" value={certRate} onChange={setCertRate} />}
               <p className="text-xs text-amber-700">
-                This fee will be added to the order total and shown separately on the invoice.
+                {isClient ? "Added to the order total and shown separately on the invoice." : certUsd > 0 ? `₹${certInr.toLocaleString("en-IN")} = $${certUsd.toFixed(2)} — added to the order total and shown separately on the invoice.` : "Typed in rupees; the client's bill shows it in dollars at the rate."}
               </p>
             </div>
           )}

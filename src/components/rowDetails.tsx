@@ -3,6 +3,7 @@ import { Link } from "react-router-dom";
 import { fmtDate, fmtMoney, type DB, type LockerTransaction } from "@/lib/db";
 import { ccy, fmtCcy, rateOf, rateText } from "@/lib/currency";
 import { transferLegs } from "@/lib/moneyEntries";
+import { fmtMoneyInr } from "@/lib/manufacturing";
 import type { ModuleKey } from "@/lib/modules";
 
 /**
@@ -99,6 +100,15 @@ export function lockerTxnDetails(
       { label: t.type === "transfer_out" ? "Sent to" : "Came from", value: lockerLabel(db, otherId) },
       !!other && otherCcy !== own && { label: t.type === "transfer_out" ? "Arrived as" : "Left as", value: fmtCcy(other.amountInr, otherCcy) },
       !!r && { label: "Rate", value: rateText(from, to, r) },
+    );
+  }
+
+  // Paid to a party kept in rupees from an account in another currency: the rupees it settled, and the rate.
+  if (t.partyAmountInr != null) {
+    const r = own !== "INR" ? rateOf(t, own, "INR") : undefined;
+    out.push(
+      { label: "Settled on their account", value: fmtMoneyInr(t.partyAmountInr) },
+      !!r && { label: "Rate", value: rateText(own, "INR", r) },
     );
   }
 

@@ -8,6 +8,8 @@ import { StatStrip } from "@/components/TableToolbar";
 import { SectionTitle } from "@/components/SectionTitle";
 import { filled, when, type Detail } from "@/components/rowDetails";
 import type { MoreAction } from "@/components/MoreMenu";
+import { useStickyFilter } from "@/hooks/useStickyFilter";
+import { selHas, selOn } from "@/lib/filterSel";
 
 export interface StatementRow {
   id: string;
@@ -102,9 +104,13 @@ export function StatementLedger({
   details?: (row: StatementRow) => Detail[];
 }) {
   const [q, setQ] = useState("");
-  const [from, setFrom] = useState("");
-  const [to, setTo] = useState("");
-  const [kind, setKind] = useState("all");
+  // The dates and the type stay as they were left until cleared — one setting
+  // per kind of statement (a supplier's, an employee's salary), whose types are
+  // the same from one party to the next. Several types can be ticked.
+  const place = `statement.${title.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`;
+  const [from, setFrom] = useStickyFilter(`${place}.from`, "");
+  const [to, setTo] = useStickyFilter(`${place}.to`, "");
+  const [kind, setKind] = useStickyFilter(`${place}.type`, "all");
 
   const kinds = useMemo(
     () => [...new Set(rows.map(r => r.kind).filter((k): k is string => !!k))].sort(),
@@ -117,7 +123,7 @@ export function StatementLedger({
     const toD = to ? new Date(`${to}T23:59:59.999`) : null;
     return rows.filter(r => {
       if (r.pinned) return true; // an opening balance is context, never filtered away
-      if (kind !== "all" && r.kind !== kind) return false;
+      if (!selHas(kind, r.kind)) return false;
       const d = new Date(r.date);
       if (fromD && d < fromD) return false;
       if (toD && d > toD) return false;
@@ -126,7 +132,7 @@ export function StatementLedger({
     });
   }, [rows, q, from, to, kind]);
 
-  const active = !!q.trim() || !!from || !!to || kind !== "all";
+  const active = !!q.trim() || !!from || !!to || selOn(kind);
   const totalDebit = filtered.reduce((s, r) => s + r.debit, 0);
   const totalCredit = filtered.reduce((s, r) => s + r.credit, 0);
   // A salary ledger only ever pays out — an empty credit label drops the column
@@ -185,7 +191,9 @@ export function StatementLedger({
           {...ledgerTable({
             q, onQ: setQ, placeholder: billColumn ? "Search particulars or bill no.…" : "Search particulars or reference…",
             from, to, onFrom: setFrom, onTo: setTo,
-            selects: kinds.length > 1 ? [{ label: "Type", allLabel: "All types", value: kind === "all" ? "" : kind,
+            // Kept on show while a type is chosen — a choice carried over from
+            // another statement must still be seen, and cleared.
+            selects: kinds.length > 1 || selOn(kind) ? [{ label: "Type", allLabel: "All types", value: kind === "all" ? "" : kind, multi: true,
               onChange: v => setKind(v || "all"), options: kinds.map(k => ({ value: k, label: k })) }] : [],
           })}
           // Clears the type too, even while its dropdown is hidden, as Reset did.

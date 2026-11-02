@@ -34,6 +34,8 @@ import { lockerTxnDetails } from "@/components/rowDetails";
 import { PageHeader, ScrollRow } from "@/components/PageHeader";
 import { StatStrip } from "@/components/TableToolbar";
 import { SectionTitle } from "@/components/SectionTitle";
+import { useStickyFilter } from "@/hooks/useStickyFilter";
+import { selHas, selOn } from "@/lib/filterSel";
 
 /** Bare, signed number for PDF cells — the statement names its currency once
  *  at the top, and jsPDF can't draw ₹ anyway. */
@@ -75,10 +77,13 @@ export function LockerPage() {
     return !!want && db.lockers.some(l => l.id === want && l.active === false);
   });
   const [showExport, setShowExport] = useState(false);
-  const [filterFrom, setFilterFrom] = useState("");
-  const [filterTo, setFilterTo] = useState("");
-  // The ledger narrows by category (in or out is the green or red mark on each line).
-  const [filterCat, setFilterCat] = useState("");
+  // The ledger's filters stay as they were left until cleared — the same for
+  // every account (its categories are the same words on each).
+  const [filterFrom, setFilterFrom] = useStickyFilter("locker.from", "");
+  const [filterTo, setFilterTo] = useStickyFilter("locker.to", "");
+  // The ledger narrows by category — several can be ticked (in or out is the
+  // green or red mark on each line).
+  const [filterCat, setFilterCat] = useStickyFilter("locker.category", "");
   // "Record entry" — one form for every entry (components/LockerEntrySheet).
   const [entryOpen, setEntryOpen] = useState(false);
   // Repairing an income row that was typed in as a loose entry when it was
@@ -238,11 +243,12 @@ export function LockerPage() {
 
   const filterFromDate = filterFrom ? new Date(filterFrom + "T00:00:00") : null;
   const filterToDate = filterTo ? new Date(filterTo + "T23:59:59.999") : null;
-  const filtersActive = !!filterFrom || !!filterTo || !!filterCat;
+  const catOn = selOn(filterCat);
+  const filtersActive = !!filterFrom || !!filterTo || catOn;
   // Filters narrow what's SHOWN — the running balance below is always computed
   // from the full, unfiltered history, so a filtered view still shows each
   // entry's true balance-at-the-time, like a bank statement search does.
-  const filteredTxns = txns.filter(t => inDateRange(t.createdAt, filterFromDate, filterToDate) && (!filterCat || categoryOf(t) === filterCat));
+  const filteredTxns = txns.filter(t => inDateRange(t.createdAt, filterFromDate, filterToDate) && selHas(filterCat, categoryOf(t)));
   // The categories this account's entries are in, for the filter — with how many each.
   const catCounts = new Map<string, number>();
   for (const t of txns) catCounts.set(categoryOf(t), (catCounts.get(categoryOf(t)) ?? 0) + 1);
@@ -261,7 +267,7 @@ export function LockerPage() {
   // A date range picked (no category): the day's cash check — what the account
   // held when the range began, what came in and went out within it, and what it
   // held at its end. Opening + in − out = closing, for those dates.
-  const rangeOn = (!!filterFrom || !!filterTo) && !filterCat;
+  const rangeOn = (!!filterFrom || !!filterTo) && !catOn;
   const rFrom = filterFrom ? new Date(`${filterFrom}T00:00:00`) : null;
   const rTo = filterTo ? new Date(`${filterTo}T23:59:59.999`) : null;
   const inRange = (t: (typeof txns)[number]) => (!rFrom || new Date(t.createdAt) >= rFrom) && (!rTo || new Date(t.createdAt) <= rTo);
@@ -491,7 +497,7 @@ export function LockerPage() {
           <DataTable
             filters={[
               { kind: "date", from: filterFrom, to: filterTo, onChange: (f, t) => { setFilterFrom(f); setFilterTo(t); } },
-              { kind: "select", label: "Category", allLabel: "All categories", value: filterCat,
+              { kind: "select", label: "Category", allLabel: "All categories", value: filterCat, multi: true,
                 onChange: v => setFilterCat(v), options: catOptions },
             ]}
             onClearFilters={() => { setFilterFrom(""); setFilterTo(""); setFilterCat(""); }}

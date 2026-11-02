@@ -16,6 +16,8 @@ import { filled, linkList, lockerTxnDetails, recorded, refLink, type Detail } fr
 import { downloadCsv, downloadLedgerPdf } from "@/lib/ledgerExport";
 import { inDateRange, ledgerTable, rangeLabel } from "@/components/LedgerFilters";
 import { StatStrip } from "@/components/TableToolbar";
+import { useStickyFilter } from "@/hooks/useStickyFilter";
+import { selHas, selOn, selText } from "@/lib/filterSel";
 import { SectionTitle } from "@/components/SectionTitle";
 
 /** The section's heading — the tab's own name, in the same words. */
@@ -69,11 +71,13 @@ export function MoneyLedger({ kind }: { kind: EntryKind }) {
   const navigate = useNavigate();
   const expenseRight = useExpenseRights();
   const [q, setQ] = useState("");
-  const [from, setFrom] = useState("");
-  const [to, setTo] = useState("");
-  const [party, setParty] = useState("");
-  const [acct, setAcct] = useState("");
-  const [dir, setDir] = useState("");
+  // The filters stay as they were left, per tab, until cleared; party and
+  // account can hold several choices (lib/filterSel.ts).
+  const [from, setFrom] = useStickyFilter(`money-ledger.${kind}.from`, "");
+  const [to, setTo] = useStickyFilter(`money-ledger.${kind}.to`, "");
+  const [party, setParty] = useStickyFilter(`money-ledger.${kind}.party`, "");
+  const [acct, setAcct] = useStickyFilter(`money-ledger.${kind}.account`, "");
+  const [dir, setDir] = useStickyFilter(`money-ledger.${kind}.direction`, "");
   // Correcting a payment or account entry (the shared panel), or an expense
   // (its own panel — every field, not only the money).
   const [editing, setEditing] = useState<MoneyEntry | null>(null);
@@ -90,15 +94,15 @@ export function MoneyLedger({ kind }: { kind: EntryKind }) {
   const ql = q.trim().toLowerCase();
   const rows = all.filter(e => {
     if (!inDateRange(e.date, from, to)) return false;
-    if (party && e.party !== party) return false;
-    if (acct && (e.lockerId ?? "") !== acct) return false;
+    if (!selHas(party, e.party)) return false;
+    if (!selHas(acct, e.lockerId ?? "")) return false;
     if (dir && e.direction !== dir) return false;
     return !ql || e.party.toLowerCase().includes(ql)
       || (e.against ?? "").toLowerCase().includes(ql)
       || (e.voucherNo ?? "").toLowerCase().includes(ql)
       || (e.note ?? "").toLowerCase().includes(ql);
   });
-  const filtered = !!(ql || from || to || party || acct || dir);
+  const filtered = !!(ql || from || to || selOn(party) || selOn(acct) || dir);
 
   // Each currency totalled on its own — rupees and dollars are never added up.
   const totalOut = sumByCcy(rows.filter(r => r.direction === "out"), r => r.amount, r => r.currency);
@@ -130,8 +134,8 @@ export function MoneyLedger({ kind }: { kind: EntryKind }) {
     title: TITLES[kind],
     subjectLines: [
       `${rows.length} entr${rows.length !== 1 ? "ies" : "y"} · ${rangeLabel(from, to)}`,
-      [party && `${PARTY_LABEL[kind]}: ${party}`,
-        acct && `Account: ${db.lockers.find(l => l.id === acct)?.name ?? acct}`,
+      [selOn(party) && `${PARTY_LABEL[kind]}: ${selText(party, p => p, "", 4)}`,
+        selOn(acct) && `Account: ${selText(acct, id => db.lockers.find(l => l.id === id)?.name, "", 4)}`,
         dir && (dir === "out" ? "Money out only" : "Money in only"),
         ql && `Search: "${q.trim()}"`].filter(Boolean).join(" · ") || "All entries",
       `Report Generated: ${new Date().toLocaleDateString("en-IN", { month: "long", day: "numeric", year: "numeric" })}`,
@@ -304,9 +308,9 @@ export function MoneyLedger({ kind }: { kind: EntryKind }) {
           q, onQ: setQ, placeholder: "Search party, voucher, bill, remark…",
           from, to, onFrom: setFrom, onTo: setTo,
           selects: [
-            { label: PARTY_LABEL[kind], value: party, onChange: setParty,
+            { label: PARTY_LABEL[kind], value: party, onChange: setParty, multi: true,
               options: parties.map(p => ({ value: p, label: p })) },
-            { label: "Account", value: acct, onChange: setAcct,
+            { label: "Account", value: acct, onChange: setAcct, multi: true,
               options: db.lockers.map(l => ({ value: l.id, label: l.name })) },
             { label: "Direction", value: dir, onChange: setDir,
               options: [{ value: "out", label: "Money out" }, { value: "in", label: "Money in" }] },

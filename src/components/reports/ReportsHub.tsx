@@ -18,6 +18,8 @@ import { TeamTab } from "./TeamTab";
 import { ProductionTab } from "./ProductionTab";
 import { PurchasesTab } from "./PurchasesTab";
 import type { ReportCtx } from "./context";
+import { useStickyFilter } from "@/hooks/useStickyFilter";
+import { selHas, selList, selOn, selText } from "@/lib/filterSel";
 
 type TabKey = "overview" | "sales" | "clients" | "team" | "production" | "purchases" | "orders";
 
@@ -38,13 +40,21 @@ export function ReportsHub() {
   const isAdmin = user?.role === "admin";
 
   const [period, setPeriodRaw] = useState<Period>(() => read("reports-period", presetPeriod("last12")));
-  const [clientId, setClientId] = useState("all");
+  // The filters stay as they were left (this browser, this person) until cleared.
+  // Clients can be several at once (lib/filterSel.ts) — every tab reads them as a
+  // set. Company and employee stay one at a time: the figures behind them
+  // (factory work, purchases by month, stock ledgers, the Team tab) take one.
+  const [clientId, setClientId] = useStickyFilter("reports.client", "all");
   // Employee-wise analysis — the admin's. An employee's own Reports already
   // cover only their own work, so they have nothing to choose here.
-  const [employeeId, setEmployeeId] = useState("all");
+  const [employeeId, setEmployeeId] = useStickyFilter("reports.employee", "all");
   // Which of our companies — shown once there is more than one.
-  const [companyId, setCompanyId] = useState("all");
+  const [storedCompanyId, setCompanyId] = useStickyFilter("reports.company", "all");
   const multiCo = hasCompanies(db.settings);
+  // A remembered company since removed (or only one company now) reads as all.
+  const companyId = multiCo && companiesOf(db.settings).some(c => c.id === storedCompanyId) ? storedCompanyId : "all";
+  const clientsChosen = selList(clientId);
+  const clientName = (id: string) => db.clients.find(c => c.id === id)?.companyName;
   const coClients = useMemo(() => new Set(companyId === "all" ? [] : db.clients.filter(c => companyIdOfClient(c) === companyId).map(c => c.id)),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [companyId, version]);
@@ -79,14 +89,14 @@ export function ReportsHub() {
   const empScope = emp ? (o: { assignedEmployeeId?: string; clientId: string }) => o.assignedEmployeeId === emp.id || empClients.has(o.clientId) : undefined;
   // An order is its company's — fixed when it was placed, in-house builds included.
   const orders = useMemo(
-    () => allOrders.filter(o => (clientId === "all" || o.clientId === clientId) && (!empScope || empScope(o))
+    () => allOrders.filter(o => selHas(clientId, o.clientId) && (!empScope || empScope(o))
       && (companyId === "all" || companyOfOrder(db, o) === companyId)),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [allOrders, clientId, emp?.id, empClients, companyId, coClients],
   );
-  // Whose money counts: the chosen client, or every client this employee looks after.
+  // Whose money counts: the chosen clients, or every client this employee looks after.
   const scopeClients = useMemo(() => {
-    if (clientId !== "all") return new Set([clientId]);
+    if (selOn(clientId)) return new Set(selList(clientId));
     if (!emp && companyId === "all") return undefined;
     let ids = emp ? new Set([...empClients, ...orders.map(o => o.clientId)]) : new Set(db.clients.map(c => c.id));
     if (companyId !== "all") ids = new Set([...ids].filter(id => coClients.has(id)));
@@ -101,7 +111,7 @@ export function ReportsHub() {
     companyId: companyId === "all" ? undefined : companyId,
     version,
     fileTag: [period.from || "start", period.to || "today"].join("_to_")
-      + (clientId !== "all" ? `_${(db.clients.find(c => c.id === clientId)?.companyName ?? "client").replace(/\W+/g, "-")}` : "")
+      + (clientsChosen.length ? `_${selText(clientId, id => clientName(id) ?? "client").replace(/\W+/g, "-")}` : "")
       + (emp && isAdmin ? `_${emp.name.replace(/\W+/g, "-")}` : ""),
   };
   const combinedScope = empScope || companyId !== "all"
@@ -116,13 +126,16 @@ export function ReportsHub() {
   // what is on shown as chips. The period stays in view: it is never "off".
   const clientOpts = clients.map(c => ({ value: c.id, label: c.companyName }));
   // A client chosen before the company or person changed still names itself.
-  if (clientId !== "all" && !clientOpts.some(o => o.value === clientId)) clientOpts.push({ value: clientId, label: db.clients.find(c => c.id === clientId)?.companyName ?? "Client" });
+  for (const id of clientsChosen) if (!clientOpts.some(o => o.value === id)) clientOpts.push({ value: id, label: clientName(id) ?? "Client" });
+  const staffOpts = staff.map(u => ({ value: u.id, label: `${u.name}${u.role === "admin" ? " (admin)" : ""}` }));
+  // A remembered person since made inactive still names themself (and can be cleared).
+  if (employeeId !== "all" && !staffOpts.some(o => o.value === employeeId)) staffOpts.push({ value: employeeId, label: db.users.find(u => u.id === employeeId)?.name ?? "Employee" });
   const filters: TableFilter[] = [
     ...(multiCo ? [{ kind: "select" as const, label: "Company", value: companyId === "all" ? "" : companyId, onChange: (v: string) => setCompanyId(v || "all"),
       allLabel: "All companies", options: companiesOf(db.settings).map(c => ({ value: c.id, label: c.name })) }] : []),
     ...(isAdmin ? [{ kind: "select" as const, label: "Employee", value: employeeId === "all" ? "" : employeeId, onChange: (v: string) => setEmployeeId(v || "all"),
-      allLabel: "Whole team", options: staff.map(u => ({ value: u.id, label: `${u.name}${u.role === "admin" ? " (admin)" : ""}` })) }] : []),
-    { kind: "select", label: "Client", value: clientId === "all" ? "" : clientId, onChange: v => setClientId(v || "all"), allLabel: "All clients", options: clientOpts },
+      allLabel: "Whole team", options: staffOpts }] : []),
+    { kind: "select", label: "Client", multi: true, value: clientId === "all" ? "" : clientId, onChange: v => setClientId(v || "all"), allLabel: "All clients", options: clientOpts },
   ];
   const clearFilters = () => { setCompanyId("all"); setEmployeeId("all"); setClientId("all"); };
 
@@ -132,7 +145,7 @@ export function ReportsHub() {
         title="Reports & Analytics"
         subtitle={<>
           {periodLabel(period)}{ctx.prev ? ` · compared with ${periodLabel(ctx.prev)}` : ""}
-          {clientId !== "all" ? ` · ${db.clients.find(c => c.id === clientId)?.companyName}` : ""}
+          {clientsChosen.length ? ` · ${selText(clientId, clientName, "All clients", 3)}` : ""}
           {emp && isAdmin ? ` · ${emp.name}'s work` : ""}
           {companyId !== "all" ? ` · ${companyById(db.settings, companyId).name}` : ""}
         </>}

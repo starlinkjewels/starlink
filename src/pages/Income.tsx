@@ -3,6 +3,8 @@ import { DataTable, CellTag, CellAmount, CellDate, type DataColumn } from "@/com
 import { useAuth } from "@/lib/auth";
 import { fmtMoney, fmtDate, orderTotal, currentUserOrders, worksOnClientId } from "@/lib/db";
 import { useDb } from "@/hooks/useDb";
+import { useStickyFilter } from "@/hooks/useStickyFilter";
+import { selHas, selOn } from "@/lib/filterSel";
 import { Link, useNavigate } from "react-router-dom";
 import {
   CreditCard, Receipt, Trash2, Pencil, FileText, FileSpreadsheet, Eye,
@@ -65,9 +67,11 @@ export function IncomePage() {
 
   /* Filters */
   const [curTab, setCurTab] = useState<CurrencyCode>("USD");
-  const [dateFrom, setDateFrom] = useState("");
-  const [dateTo, setDateTo]     = useState("");
-  const [clientFilter, setClientFilter] = useState("all");
+  // The filters stay as they were left (this browser, this person) until
+  // cleared; Client can hold several (lib/filterSel.ts).
+  const [dateFrom, setDateFrom] = useStickyFilter("passbook.from", "");
+  const [dateTo, setDateTo]     = useStickyFilter("passbook.to", "");
+  const [clientFilter, setClientFilter] = useStickyFilter("passbook.client", "all");
 
   /* Correcting a client payment. It is corrected or cancelled through its
      RECEIPT (src/lib/receipts.ts), never by changing the advance on its own:
@@ -180,7 +184,7 @@ export function IncomePage() {
       const d = toDateStr(r.date);
       if (dateFrom && d < dateFrom) return false;
       if (dateTo   && d > dateTo)   return false;
-      if (clientFilter !== "all" && r.clientId !== clientFilter) return false;
+      if (!selHas(clientFilter, r.clientId)) return false;
       return true;
     });
   }, [tabRows, dateFrom, dateTo, clientFilter]);
@@ -199,7 +203,7 @@ export function IncomePage() {
     ? []
     : db.clients.filter(c => worksOnClientId(db, user, c.id)).sort((a, b) => a.companyName.localeCompare(b.companyName));
 
-  const hasActiveFilter = dateFrom || dateTo || clientFilter !== "all";
+  const hasActiveFilter = dateFrom || dateTo || selOn(clientFilter);
   const clearFilters = () => { setDateFrom(""); setDateTo(""); setClientFilter("all"); };
 
   // The dates, and (for staff) the client — behind the table's one Filters button.
@@ -207,7 +211,7 @@ export function IncomePage() {
     { kind: "date", from: dateFrom, to: dateTo, onChange: (f, t) => { setDateFrom(f); setDateTo(t); } },
   ];
   if (!isClient) filters.push({
-    kind: "select", label: "Client", allLabel: "All Clients", value: clientFilter === "all" ? "" : clientFilter,
+    kind: "select", label: "Client", allLabel: "All Clients", multi: true, value: clientFilter === "all" ? "" : clientFilter,
     onChange: v => setClientFilter(v || "all"),
     options: clients.map(c => ({ value: c.id, label: c.companyName })),
   });

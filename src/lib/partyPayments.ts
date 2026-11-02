@@ -7,12 +7,34 @@
 // (lib/receipts.ts createReceipt). Refunds are in lib/clientRefunds.ts.
 import { uid, fmtMoney, type DB, type Expense } from "./db";
 import { allocateSupplierPaymentFIFO, allocateFactoryChargePaymentFIFO } from "./manufacturing";
-import { ccy, rateFields, roundCcy } from "./currency";
+import { ccy, rateFields, roundCcy, type CurrencyCode, type FxQuote } from "./currency";
 
 const r2 = (n: number) => Math.round(n * 100) / 100;
 
-/** What every payment carries: the account, the amount (in its currency), who and when. */
-export interface MoneyArgs { lockerId: string; amount: number; note?: string; userId: string; at: string }
+/** What every payment carries: the account, the amount (in its currency), who and when.
+ *  `rate`: ₹ for one unit of the account's currency — only for a party kept in rupees
+ *  paid from an account in another currency (see payInRupees). */
+export interface MoneyArgs { lockerId: string; amount: number; note?: string; userId: string; at: string; rate?: number }
+
+/**
+ * A payment to a party kept in rupees (a supplier, a factory, a designer, a broker):
+ * the rupees it settles, and what its account row carries. From a rupee account,
+ * exactly as always — the amount, in rupees. From an account in another currency
+ * (a dollar bank account), the amount × the rate: the row stays in that currency
+ * (amountInr = what left the account), with the rate and the rupees it settled
+ * (partyAmountInr). Refused without a rate — a guess here would be a wrong bill.
+ */
+export function payInRupees(d: DB, a: { lockerId?: string; amount: number; rate?: number }): {
+  inr: number; row: { currency: CurrencyCode; partyAmountInr?: number; fx?: FxQuote; exchangeRate?: number };
+} {
+  const l = a.lockerId ? d.lockers.find(x => x.id === a.lockerId) : undefined;
+  const cur = ccy(l?.currency);
+  if (cur === "INR") return { inr: a.amount, row: { currency: "INR" } };
+  const rate = Number(a.rate);
+  if (!(rate > 0)) throw new Error(`Enter the rate — ₹ for 1 ${cur}`);
+  const inr = r2(a.amount * rate);
+  return { inr, row: { currency: cur, partyAmountInr: inr, ...rateFields(cur, "INR", rate) } };
+}
 
 /**
  * Pay a supplier from a rupee account: against one bill, oldest bills first, or
@@ -23,7 +45,9 @@ export function writeSupplierPayment(d: DB, a: MoneyArgs & { supplierId: string;
   const s = d.suppliers.find(x => x.id === a.supplierId);
   if (!s) return;
   const note = a.note?.trim() || undefined;
-  const { lockerId, amount: amt, userId, at: now, supplierId, target } = a;
+  const { lockerId, userId, at: now, supplierId, target } = a;
+  // The rupees it settles (from a dollar account: amount × rate).
+  const { inr: amt, row } = payInRupees(d, a);
   const supplierPurchases = d.purchases.filter(p => p.supplierId === supplierId);
   // The bill it settles, when one is named and is theirs.
   let billId: string | undefined;
@@ -61,11 +85,21 @@ export function writeSupplierPayment(d: DB, a: MoneyArgs & { supplierId: string;
   }
   if (!d.lockerTransactions) d.lockerTransactions = [];
   d.lockerTransactions.push({
-    id: uid("ltx_"), lockerId, type: "expense", amountInr: amt, currency: "INR",
+    id: uid("ltx_"), lockerId, type: "expense", amountInr: row.partyAmountInr != null ? a.amount : amt, ...row,
     category: `Supplier Payment — ${s.name}`, refType: "purchase",
     refId: billId,
+    // From another currency's account: tied to its payment by id, never by amount ($ ≠ ₹).
+    ...(row.partyAmountInr != null ? { paymentId: firstLegOf(d, supplierPurchases.flatMap(p => p.payments ?? []), d.supplierPayments, supplierId, lockerId, now) } : {}),
     note, recordedBy: userId, createdAt: now,
   });
+}
+
+/** The first record a payment made at `now` from `lockerId` wrote (a bill's payment, else an advance). */
+function firstLegOf(_d: DB, legs: { id: string; lockerId?: string; createdAt: string }[],
+  advances: { id: string; lockerId?: string; createdAt: string; supplierId?: string; factoryId?: string }[] | undefined,
+  partyId: string, lockerId: string, now: string): string | undefined {
+  return legs.find(x => x.createdAt === now && x.lockerId === lockerId)?.id
+    ?? (advances ?? []).find(x => x.createdAt === now && x.lockerId === lockerId && (x.supplierId === partyId || x.factoryId === partyId))?.id;
 }
 
 /** Money back FROM a supplier (a refund, a return) into a rupee account. */
@@ -88,7 +122,9 @@ export function writeFactoryPayment(d: DB, a: MoneyArgs & { factoryId: string; t
   const f = d.factories.find(x => x.id === a.factoryId);
   if (!f) return;
   const note = a.note?.trim() || undefined;
-  const { lockerId, amount: amt, userId, at: now, factoryId, target } = a;
+  const { lockerId, userId, at: now, factoryId, target } = a;
+  // The rupees it settles (from a dollar account: amount × rate).
+  const { inr: amt, row } = payInRupees(d, a);
   const factoryIssuances = d.materialIssuances.filter(i => i.factoryId === factoryId);
   // The job it pays, when one is named and is theirs ("__advance" kept as before).
   let jobRef: string | undefined = target === "__advance" ? target : undefined;
@@ -124,9 +160,11 @@ export function writeFactoryPayment(d: DB, a: MoneyArgs & { factoryId: string; t
   }
   if (!d.lockerTransactions) d.lockerTransactions = [];
   d.lockerTransactions.push({
-    id: uid("ltx_"), lockerId, type: "expense", amountInr: amt, currency: "INR",
+    id: uid("ltx_"), lockerId, type: "expense", amountInr: row.partyAmountInr != null ? a.amount : amt, ...row,
     category: `Making Charges — ${f.name}`, refType: "materialIssuance",
     refId: jobRef,
+    // From another currency's account: tied to its payment by id, never by amount ($ ≠ ₹).
+    ...(row.partyAmountInr != null ? { paymentId: firstLegOf(d, factoryIssuances.flatMap(i => i.makingCharges?.payments ?? []), d.factoryPayments, factoryId, lockerId, now) } : {}),
     note, recordedBy: userId, createdAt: now,
   });
 }
@@ -171,9 +209,11 @@ export function writeBrokerPayment(d: DB, a: Omit<MoneyArgs, "lockerId"> & {
   const txnId = a.txnId ?? uid("ltx_");
   const lines = a.lines.filter(x => x.amount > 0);
   if (a.amount > 0 && a.lockerId) {
+    // From a dollar account: the row in dollars, with the rupees it gave him (the lines are in rupees).
+    const { row } = payInRupees(d, { lockerId: a.lockerId, amount: a.amount, rate: a.rate });
     if (!d.lockerTransactions) d.lockerTransactions = [];
     d.lockerTransactions.push({
-      id: txnId, lockerId: a.lockerId, type: "expense", amountInr: a.amount, currency: "INR",
+      id: txnId, lockerId: a.lockerId, type: "expense", amountInr: a.amount, ...row,
       category: `Paid to broker ${broker.name}${lines.length ? ` — ${lines.length} bill${lines.length === 1 ? "" : "s"}` : ""}`,
       refType: "brokerPayment", refId: broker.id,
       note: note || undefined, recordedBy: a.userId, createdAt: a.at,
@@ -273,9 +313,11 @@ export function writeDesignerPayment(d: DB, a: MoneyArgs & { designerId: string;
   if (!designer) throw new Error("That designer is not there any more");
   if (!(a.amount > 0)) throw new Error("Enter the amount");
   const job = a.cadJobId ? (d.cadJobs ?? []).find(j => j.id === a.cadJobId && j.designerId === designer.id) : undefined;
+  // From a dollar account: the row in dollars, with the rupees it paid (their account is in rupees).
+  const { row } = payInRupees(d, a);
   if (!d.lockerTransactions) d.lockerTransactions = [];
   d.lockerTransactions.push({
-    id: uid("ltx_"), lockerId: a.lockerId, type: "expense", amountInr: a.amount, currency: "INR",
+    id: uid("ltx_"), lockerId: a.lockerId, type: "expense", amountInr: a.amount, ...row,
     category: `Designer Payment — ${designer.name}${job ? ` — ${job.orderNumber}` : ""}`,
     refType: "designerPayment", refId: designer.id,
     ...(job ? { cadJobId: job.id } : {}),

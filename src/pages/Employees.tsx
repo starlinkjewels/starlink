@@ -14,6 +14,7 @@ import { PageHeader, TabBar, ViewSwitch } from "@/components/PageHeader";
 import { FilterChips, FiltersButton, StatStrip, type TableFilter } from "@/components/TableToolbar";
 import { hasCompanies } from "@/lib/companies";
 import { useDb } from "@/hooks/useDb";
+import { useStickyFilter } from "@/hooks/useStickyFilter";
 import { auth, isAdminEmail, createAuthUser } from "@/lib/firebase";
 import { sendPasswordResetEmail } from "firebase/auth";
 import { authErrorMessage } from "@/lib/authErrors";
@@ -52,7 +53,9 @@ export function EmployeesPage() {
   const db = useDb();
   // The month the table's salary and orders are for ("2026-10"), or every month.
   const thisMonth = new Date().toISOString().slice(0, 7);
-  const [period, setPeriod] = useState<string>(thisMonth);
+  // Stays as it was left (this browser, this person) until cleared — back to
+  // this month, whichever month that is then. One month, or all time.
+  const [period, setPeriod] = useStickyFilter("employees.month", thisMonth);
   // The month the salary paid and orders taken are for — under Filters, with the rest
   // (this month is the start, so it doesn't count as a filter that is on).
   const monthFilter = (): TableFilter[] => [{

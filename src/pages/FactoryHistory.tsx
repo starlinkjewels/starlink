@@ -34,6 +34,9 @@ import { decreaseStockSelfHealing, increaseStock } from "@/lib/stock";
 import { ActionSheet } from "@/components/ActionSheet";
 import { PayFactorySheet } from "@/components/party/PayFactorySheet";
 import { lastPayLocker, rememberPayLocker } from "@/components/party/payLocker";
+import { useRupeePay } from "@/components/RupeePay";
+import { writeFactoryPayment } from "@/lib/partyPayments";
+import { fmtCcy } from "@/lib/currency";
 import { joinDots } from "@/components/party/joinDots";
 import { Button } from "@/components/ui/button";
 import { AsyncButton } from "@/components/AsyncButton";
@@ -363,13 +366,16 @@ function FactoryHistoryPageBody() {
   const closeAction = () => setActiveIssuance(a => ({ ...a, open: false }));
   // Shown in the Pay panel's footer only; the save looks the locker up afresh.
   const payFromLocker = db.lockers.find(l => l.id === payLockerId);
+  // Any account: from one in another currency (a dollar account) the rate turns
+  // the amount into the rupees on their books (components/RupeePay.tsx).
+  const fx = useRupeePay(payLockerId, Number(payAmount) || 0, `${factory.name}'s`, () => setPayAmount(""));
 
   const openAction = (issuanceId: string, action: IssuanceAction) => {
     setActiveIssuance({ id: issuanceId, action, open: true });
     setPieceQty(""); setPieceCount("1"); setChargeAmount(""); setPayAmount(""); setPayDate(todayLocal());
-    // The account this person last paid from, while it is still a rupee account in use.
+    // The account this person last paid from, while it is still in use.
     const last = lastPayLocker(user?.id);
-    setPayLockerId(db.lockers.some(l => l.id === last && l.active !== false && (l.currency || "INR") === "INR") ? last : "");
+    setPayLockerId(db.lockers.some(l => l.id === last && l.active !== false) ? last : "");
     setReturnQty(""); setReturnNote(""); setReturnPcs("");
   };
 
@@ -426,25 +432,20 @@ function FactoryHistoryPageBody() {
     if (!payLockerId) { toast.error("Choose which locker this payment came from"); return; }
     if (!payDate) { toast.error("Choose the date"); return; }
     if (payDate > todayLocal()) { toast.error("A payment can't be dated after today"); return; }
+    if (fx.problem) { toast.error(fx.problem); return; }
     const payLocker = db.lockers.find(l => l.id === payLockerId);
     if (payLocker && amt > lockerBalance(payLocker, db.lockerTransactions) &&
         !(await confirmBox(`This payment of ${fmtLockerAmount(amt, payLocker.currency)} is more than ${payLocker.name}'s balance of ${fmtLockerAmount(lockerBalance(payLocker, db.lockerTransactions), payLocker.currency)}. The locker will go negative — continue only if a deposit is still missing.`))) return;
     // The picked day (at the time of entry), on the payment and its account entry alike.
     const at = stampFor(payDate);
-    updateDb(d => {
-      const mi = d.materialIssuances.find(x => x.id === issuance.id);
-      if (!mi) return;
-      if (!mi.makingCharges.payments) mi.makingCharges.payments = [];
-      mi.makingCharges.payments.push({ id: uid("fpay_"), amountInr: amt, lockerId: payLockerId, recordedBy: user!.id, createdAt: at });
-      if (!d.lockerTransactions) d.lockerTransactions = [];
-      d.lockerTransactions.push({
-        id: uid("ltx_"), lockerId: payLockerId, type: "expense", amountInr: amt,
-        category: `Making Charges — ${factory.name}`, refType: "materialIssuance", refId: issuance.id,
-        recordedBy: user!.id, createdAt: at,
-      });
-    });
+    // The same write as every other factory payment (lib/partyPayments.ts), against
+    // this job — a dollar account's rupees at the rate given (fx).
+    updateDb(d => writeFactoryPayment(d, {
+      factoryId: factory.id, lockerId: payLockerId, amount: amt, target: issuance.id,
+      userId: user!.id, at, ...fx.args,
+    }));
     rememberPayLocker(user?.id, payLockerId);
-    toast.success("Payment recorded");
+    toast.success(`Payment recorded · ${fx.text}`);
     closeAction();
   };
 
@@ -1454,7 +1455,7 @@ function FactoryHistoryPageBody() {
           );
         } else if (action === "pay") {
           footer = (
-            <PanelFooter label="Paying" value={fmtMoneyInr(Number(payAmount) || 0)}
+            <PanelFooter label="Paying" value={fx.text}
               sub={payFromLocker ? `${payFromLocker.name} holds ${fmtLockerAmount(lockerBalance(payFromLocker, db.lockerTransactions), payFromLocker.currency)}` : undefined}>
               {cancel}
               <AsyncButton onClick={() => payCharge(mi)} className="btn-hero rounded-xl h-10">Save</AsyncButton>
@@ -1470,7 +1471,7 @@ function FactoryHistoryPageBody() {
               </div>
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <Label className="text-xs">Amount (₹)</Label>
+                  <Label className="text-xs">Amount ({fx.foreign ? fx.cur : "₹"})</Label>
                   <Input type="number" min={1} value={payAmount} onChange={e => setPayAmount(e.target.value)} autoFocus className="rounded-xl h-10 mt-1" placeholder="0" aria-label="Amount" />
                 </div>
                 <div>
@@ -1478,19 +1479,25 @@ function FactoryHistoryPageBody() {
                   <Input type="date" value={payDate} max={todayLocal()} onChange={e => setPayDate(e.target.value)} className="rounded-xl h-10 mt-1" aria-label="Date" />
                 </div>
               </div>
-              {pending > 0 && Number(payAmount) !== pending && (
-                <button type="button" onClick={() => setPayAmount(String(pending))}
-                  className="-mt-1 inline-flex items-center h-7 px-2.5 rounded-full border border-primary/30 bg-primary/5 text-xs font-medium text-primary hover:bg-primary/10">
-                  Full amount · {fmtMoneyInr(pending)}
-                </button>
-              )}
+              {(() => {
+                // From a dollar account: the pending rupees in dollars, once the rate is in.
+                const inCur = fx.foreign ? (fx.rate > 0 ? Math.round(pending / fx.rate * 100) / 100 : 0) : pending;
+                if (!(pending > 0) || !(inCur > 0) || Number(payAmount) === inCur) return null;
+                return (
+                  <button type="button" onClick={() => setPayAmount(String(inCur))}
+                    className="-mt-1 inline-flex items-center h-7 px-2.5 rounded-full border border-primary/30 bg-primary/5 text-xs font-medium text-primary hover:bg-primary/10">
+                    Full amount · {fmtMoneyInr(pending)}{fx.foreign ? ` = ${fmtCcy(inCur, fx.cur)}` : ""}
+                  </button>
+                );
+              })()}
               <div>
                 <Label className="text-xs">From account</Label>
                 <Select value={payLockerId} onValueChange={addNew("locker", setPayLockerId)}>
-                  <SelectTrigger className="h-10 rounded-xl mt-1" aria-label="From account"><SelectValue placeholder="Choose a rupee account" /></SelectTrigger>
-                  <SelectContent>{db.lockers.filter(l => l.active !== false && (l.currency || "INR") === "INR").map(l => <SelectItem key={l.id} value={l.id}>{l.name}</SelectItem>)}<AddNewItem kind="locker" /></SelectContent>
+                  <SelectTrigger className="h-10 rounded-xl mt-1" aria-label="From account"><SelectValue placeholder="Choose an account" /></SelectTrigger>
+                  <SelectContent>{db.lockers.filter(l => l.active !== false).map(l => <SelectItem key={l.id} value={l.id}>{l.name}{(l.currency || "INR") !== "INR" ? ` (${l.currency})` : ""}</SelectItem>)}<AddNewItem kind="locker" /></SelectContent>
                 </Select>
               </div>
+              {fx.box}
             </div>
           );
         } else if (action === "return" && mi.diamondKind === "certified") {

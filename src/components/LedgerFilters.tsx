@@ -12,6 +12,8 @@ export interface LedgerSelect {
   options: { value: string; label: string }[];
   /** What "none chosen" reads as; "All <label>" without it. */
   allLabel?: string;
+  /** More than one can be ticked — read the value with lib/filterSel.ts selHas. */
+  multi?: boolean;
 }
 
 /** Is this row inside the chosen range? A blank end of the range is open. */
@@ -55,7 +57,7 @@ export function ledgerTable(o: {
     search: { value: o.q, onChange: o.onQ, placeholder: o.placeholder },
     filters: [
       { kind: "date", from: o.from, to: o.to, onChange: (f, t) => { o.onFrom(f); o.onTo(t); } },
-      ...selects.map((s): TableFilter => ({ kind: "select", label: s.label, value: s.value, onChange: s.onChange, options: s.options, allLabel: s.allLabel })),
+      ...selects.map((s): TableFilter => ({ kind: "select", label: s.label, value: s.value, onChange: s.onChange, options: s.options, allLabel: s.allLabel, multi: s.multi })),
     ],
     onClearFilters: () => { o.onFrom(""); o.onTo(""); selects.forEach(s => s.onChange("")); },
     exports: [

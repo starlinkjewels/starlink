@@ -5,8 +5,8 @@ import { updateDb, uid, todayLocal, stampFor, fmtDate } from "@/lib/db";
 import { useDb } from "@/hooks/useDb";
 import { useAuth } from "@/lib/auth";
 import { allocateOldestFirst, brokerAccount, brokerPendingBills } from "@/lib/brokers";
-import { fmtMoneyInr, lockerBalance, purchasePending } from "@/lib/manufacturing";
-import { ccy } from "@/lib/currency";
+import { fmtMoneyInr, fmtLockerAmount, lockerBalance, purchasePending } from "@/lib/manufacturing";
+import { useRupeePay } from "@/components/RupeePay";
 import { confirmBox } from "@/lib/confirm";
 import { sheetFrame, type Frame } from "@/components/SheetFrame";
 import { writeBrokerPayment } from "@/lib/partyPayments";
@@ -61,7 +61,7 @@ export function PayBrokerSheet({ open, onOpenChange, brokerId: fixedId, lockerId
   const account = broker ? brokerAccount(db, broker) : null;
   const bills = useMemo(() => (broker ? brokerPendingBills(db, broker.id) : []), [db, broker]);
   const supplierName = (id: string) => db.suppliers.find(s => s.id === id)?.name ?? "Supplier";
-  const lockers = db.lockers.filter(l => l.active !== false && ccy(l.currency) === "INR");
+  const lockers = db.lockers.filter(l => l.active !== false);
 
   const brokerageOwed = account ? Math.max(0, account.due) : 0;
   const held = account?.held ?? 0;
@@ -69,7 +69,13 @@ export function PayBrokerSheet({ open, onOpenChange, brokerId: fixedId, lockerId
   const brokeragePart = withBrokerage ? brokerageOwed : 0;
   // What to give the broker now: the bills ticked and the brokerage, less what he already holds.
   const suggested = Math.max(0, r2(settled + brokeragePart - held));
-  const amt = amountTyped ? Number(amount) || 0 : suggested;
+  // Everything here is in rupees (his bills, his brokerage, what he holds). From an
+  // account in another currency (a dollar account) the amount given is in that
+  // currency, and the rate makes it rupees (components/RupeePay.tsx): the
+  // suggestion shows in dollars, and `amt` below is always the rupees he gets.
+  const fx = useRupeePay(lockerId, rate => amountTyped ? Number(amount) || 0 : rate > 0 ? r2(suggested / rate) : 0, `${broker?.name ?? "the broker"}'s`, () => { setAmount(""); setAmountTyped(false); });
+  const amtGiven = fx.amount; // in the account's currency — what leaves it
+  const amt = fx.foreign ? fx.inr : amtGiven;
   const leftWithBroker = r2(amt + held - settled - brokeragePart);
   // Bills ticked beyond what he has (given now + held): he would pay suppliers from his own pocket.
   const billsShort = r2(settled - amt - held);
@@ -79,7 +85,7 @@ export function PayBrokerSheet({ open, onOpenChange, brokerId: fixedId, lockerId
   const tickAll = () => setAlloc(Object.fromEntries(bills.map(p => [p.id, String(r2(purchasePending(p)))])));
   // Type the money given, and let it settle the oldest bills first (after the brokerage).
   const settleOldest = () => {
-    const pool = r2((Number(amount) || 0) + held - brokeragePart);
+    const pool = r2(amt + held - brokeragePart);
     const { alloc: a } = allocateOldestFirst(bills, Math.max(0, pool));
     setAlloc(Object.fromEntries(Object.entries(a).map(([k, v]) => [k, String(v)])));
   };
@@ -95,13 +101,14 @@ export function PayBrokerSheet({ open, onOpenChange, brokerId: fixedId, lockerId
     }
     if (amt < 0) { toast.error("Enter a valid amount"); return; }
     if (amt <= 0 && settled <= 0) { toast.error("Enter what you give the broker, or tick the bills he paid from what he holds"); return; }
+    if (fx.problem && amtGiven > 0) { toast.error(fx.problem); return; }
+    if (fx.problem && !amountTyped && suggested > 0) { toast.error(fx.problem); return; }
     const locker = amt > 0 ? db.lockers.find(l => l.id === lockerId) : undefined;
     if (amt > 0 && !locker) { toast.error("Choose which account it was paid from"); return; }
-    if (locker && ccy(locker.currency) !== "INR") { toast.error("Brokers are paid in rupees — choose an INR account"); return; }
-    if (billsShort > 0.5 && !(await confirmBox(`The bills ticked come to ${fmtMoneyInr(settled)}, but ${broker.name} gets ${fmtMoneyInr(amt)}${held ? ` and holds ${fmtMoneyInr(held)}` : ""}. He would pay ${fmtMoneyInr(billsShort)} from his own pocket, and you will owe him that — continue?`))) return;
+    if (billsShort > 0.5 && !(await confirmBox(`The bills ticked come to ${fmtMoneyInr(settled)}, but ${broker.name} gets ${amt > 0 ? fx.text : fmtMoneyInr(0)}${held ? ` and holds ${fmtMoneyInr(held)}` : ""}. He would pay ${fmtMoneyInr(billsShort)} from his own pocket, and you will owe him that — continue?`))) return;
     if (locker) {
       const bal = lockerBalance(locker, db.lockerTransactions);
-      if (amt > bal && !(await confirmBox(`This payment of ${fmtMoneyInr(amt)} is more than ${locker.name}'s balance of ${fmtMoneyInr(bal)}.\n\nThe account will go negative — continue only if you're sure a deposit is still missing.`))) return;
+      if (amtGiven > bal && !(await confirmBox(`This payment of ${fmtLockerAmount(amtGiven, locker.currency)} is more than ${locker.name}'s balance of ${fmtLockerAmount(bal, locker.currency)}.\n\nThe account will go negative — continue only if you're sure a deposit is still missing.`))) return;
     }
     setSaving(true);
     try {
@@ -109,10 +116,10 @@ export function PayBrokerSheet({ open, onOpenChange, brokerId: fixedId, lockerId
       const txnId = uid("ltx_");
       const lines = bills.filter(p => Number(alloc[p.id] ?? 0) > 0);
       updateDb(d => writeBrokerPayment(d, {
-        brokerId: broker.id, lockerId: amt > 0 ? locker?.id : undefined, amount: amt, txnId, note, userId: user!.id, at,
+        brokerId: broker.id, lockerId: amt > 0 ? locker?.id : undefined, amount: amt > 0 ? amtGiven : 0, txnId, note, userId: user!.id, at, ...fx.args,
         lines: lines.map(p => ({ purchaseId: p.id, amount: Number(alloc[p.id]) })),
       }));
-      toast.success(`${amt > 0 ? `${fmtMoneyInr(amt)} to ${broker.name}` : `From what ${broker.name} holds`}${lines.length ? ` · ${lines.length} bill${lines.length === 1 ? "" : "s"} settled` : ""}`);
+      toast.success(`${amt > 0 ? `${fx.text} to ${broker.name}` : `From what ${broker.name} holds`}${lines.length ? ` · ${lines.length} bill${lines.length === 1 ? "" : "s"} settled` : ""}`);
       reset();
       onOpenChange(false);
     } finally { setSaving(false); }
@@ -125,7 +132,7 @@ export function PayBrokerSheet({ open, onOpenChange, brokerId: fixedId, lockerId
         <div className="flex items-end justify-between gap-3 flex-wrap">
           <div className="min-w-0">
             <p className="text-[10px] uppercase tracking-wider text-muted-foreground">Giving the broker</p>
-            <p className="font-display text-xl font-bold tabular-nums leading-tight text-destructive">{fmtMoneyInr(amt)}</p>
+            <p className="font-display text-xl font-bold tabular-nums leading-tight text-destructive">{fx.text}</p>
             {broker && (settled > 0 || brokeragePart > 0) && (
               <p className="text-[11px] text-muted-foreground">
                 Bills {fmtMoneyInr(settled)}{brokeragePart ? ` + brokerage ${fmtMoneyInr(brokeragePart)}` : ""}{held ? ` − held ${fmtMoneyInr(Math.min(held, settled + brokeragePart))}` : ""}
@@ -209,9 +216,9 @@ export function PayBrokerSheet({ open, onOpenChange, brokerId: fixedId, lockerId
 
         <div className="grid grid-cols-2 gap-3">
           <div>
-            <Label htmlFor="pb-amount" className="text-xs">Amount given to the broker (₹)</Label>
+            <Label htmlFor="pb-amount" className="text-xs">Amount given to the broker ({fx.foreign ? fx.cur : "₹"})</Label>
             <div className="flex gap-2 mt-1">
-              <Input id="pb-amount" type="number" min={0} value={amountTyped ? amount : (suggested ? String(suggested) : "")}
+              <Input id="pb-amount" type="number" min={0} value={amountTyped ? amount : (amtGiven ? String(amtGiven) : "")}
                 onChange={e => { setAmount(e.target.value); setAmountTyped(e.target.value !== ""); }}
                 className="rounded-xl h-10" placeholder="0" />
               {bills.length > 0 && amountTyped && (
@@ -225,15 +232,16 @@ export function PayBrokerSheet({ open, onOpenChange, brokerId: fixedId, lockerId
             <Input id="pb-date" type="date" value={date} onChange={e => setDate(e.target.value)} className="rounded-xl h-10 mt-1" />
           </div>
         </div>
-        {amt > 0 && !fixedLocker && (
+        {(amt > 0 || fx.foreign) && !fixedLocker && (
           <div>
             <Label className="text-xs">Paid from</Label>
             <Select value={lockerId} onValueChange={addNew("locker", setLockerId)}>
               <SelectTrigger className="h-10 rounded-xl mt-1"><SelectValue placeholder="Choose account" /></SelectTrigger>
-              <SelectContent>{lockers.map(l => <SelectItem key={l.id} value={l.id}>{l.name}</SelectItem>)}<AddNewItem kind="locker" /></SelectContent>
+              <SelectContent>{lockers.map(l => <SelectItem key={l.id} value={l.id}>{l.name}{(l.currency || "INR") !== "INR" ? ` (${l.currency})` : ""}</SelectItem>)}<AddNewItem kind="locker" /></SelectContent>
             </Select>
           </div>
         )}
+        {fx.box}
         <Input value={note} onChange={e => setNote(e.target.value)} className="rounded-xl h-10" placeholder="Note (optional)" />
       </div>
     ),
