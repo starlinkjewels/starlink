@@ -12,6 +12,11 @@ export async function updateCatalogItem(id: string, patch: Partial<Pick<CatalogI
   await updateDoc(doc(fsdb, "catalogItems", id), clean);
 }
 
+/** An item's small preview (lib/photoPreview.ts): that one field, nothing else. */
+export async function setCatalogItemThumb(id: string, thumb: string): Promise<void> {
+  await updateDoc(doc(fsdb, "catalogItems", id), { thumb });
+}
+
 /**
  * Many items into one folder (Catalog → Select → Move): only each item's
  * folderId changes, in batches well under Firestore's 500 writes.

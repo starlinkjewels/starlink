@@ -11,6 +11,8 @@ import { useDb } from "@/hooks/useDb";
 import { uploadDataUrl, uploadFile, deleteByUrl } from "@/lib/storage";
 import { compressImage as compressImg, canUploadOriginal, PRODUCT_PHOTO_MAX, PRODUCT_PHOTO_QUALITY } from "@/lib/images";
 import { downloadAsZip } from "@/lib/zipDownload";
+import { makePreview } from "@/lib/photoPreview";
+import { VideoPoster } from "@/components/VideoPoster";
 import { ShareFolderButton } from "@/components/ShareFolderButton";
 import { toast } from "sonner";
 import { Folder, ChevronRight, Image as ImageIcon, Video, Play, Download, X, Camera, ChevronLeft, FolderPlus, FolderUp, ImagePlus, Trash2, Pencil, Loader2, Check, Package, FolderInput, PenTool } from "lucide-react";
@@ -37,6 +39,13 @@ const putPhoto = (file: File, folder: string) =>
   canUploadOriginal(file)
     ? uploadFile(file, folder)
     : compressImg(file, PRODUCT_PHOTO_MAX, PRODUCT_PHOTO_QUALITY).then(d => uploadDataUrl(d, folder));
+/** The original, then its small copy for the grid beside it (lib/photoPreview.ts) —
+ *  `thumb` left off when that can't be made; the upload stands either way. */
+const putMedia = async (file: File, folder: string): Promise<{ url: string; thumb?: string }> => {
+  const url = file.type.startsWith("video/") ? await uploadFile(file, folder) : await putPhoto(file, folder);
+  const thumb = await makePreview(file, folder);
+  return thumb ? { url, thumb } : { url };
+};
 
 async function downloadOne(fileUrl: string, filename: string) {
   if (!exportAllowed()) return;
@@ -52,7 +61,8 @@ async function downloadOne(fileUrl: string, filename: string) {
   } catch { window.open(fileUrl, "_blank"); }
 }
 
-interface GalleryItem { id: string; type: "image" | "video"; label: string; src: string; filename: string; }
+/** `thumb`: the small copy the grid shows — `src` (the original) opens and downloads. */
+interface GalleryItem { id: string; type: "image" | "video"; label: string; src: string; thumb?: string; filename: string; }
 
 function buildOrderItems(orders: Order[], design: string): GalleryItem[] {
   const items: GalleryItem[] = [];
@@ -96,9 +106,8 @@ function ItemCard({ item, onOpen, onDownload, onDelete, menu }: { item: GalleryI
     <motion.div whileTap={{ scale: 0.97 }} className="relative rounded-2xl overflow-hidden border border-border/60 bg-white shadow-sm flex flex-col group">
       <button onClick={onOpen} className="block w-full aspect-square bg-secondary/30 overflow-hidden relative">
         {item.type === "image"
-          ? <img src={item.src} alt={item.label} loading="lazy" decoding="async" className="w-full h-full object-cover" />
-          : <div className="w-full h-full flex items-center justify-center bg-gradient-to-br from-slate-100 to-slate-200"><Video className="h-10 w-10 text-slate-400" /></div>}
-        {item.type === "video" && <div className="absolute inset-0 flex items-center justify-center"><div className="h-12 w-12 rounded-full bg-black/40 flex items-center justify-center"><Play className="h-6 w-6 text-white ml-0.5" /></div></div>}
+          ? <img src={item.thumb || item.src} alt={item.label} loading="lazy" decoding="async" className="w-full h-full object-cover" />
+          : <VideoPoster src={item.src} poster={item.thumb} alt={item.label} />}
         <div className="absolute top-2 left-2"><span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[10px] font-medium bg-black/50 text-white backdrop-blur-sm">{item.type === "video" ? <Video className="h-2.5 w-2.5" /> : <ImageIcon className="h-2.5 w-2.5" />}{item.type}</span></div>
         <button onClick={e => { e.stopPropagation(); onDownload(); }} className="absolute top-2 right-2 h-8 w-8 rounded-lg bg-white/90 border border-border/60 grid place-items-center text-muted-foreground hover:text-primary shadow-sm" aria-label="Download"><Download className="h-3.5 w-3.5" /></button>
         {onDelete && <button onClick={e => { e.stopPropagation(); onDelete(); }} className="absolute bottom-2 right-2 h-8 w-8 rounded-lg bg-white/90 border border-border/60 grid place-items-center text-destructive hover:bg-destructive/10 shadow-sm opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity" aria-label="Delete"><Trash2 className="h-3.5 w-3.5" /></button>}
@@ -313,8 +322,8 @@ function LibraryView({ isStaff }: { isStaff: boolean }) {
   const path: CatalogFolder[] = [];
   { let cur = currentFolderId; while (cur) { const f = folders.find(x => x.id === cur); if (!f) break; path.unshift(f); cur = f.parentId ?? null; } }
 
-  const gallery: GalleryItem[] = folderItems.map(it => ({ id: it.id, type: it.type, label: it.name, src: it.url, filename: `${it.name || "media"}.${it.type === "video" ? "mp4" : "jpg"}` }));
-  const coverFor = (folderId: string) => allItems.find(i => i.folderId === folderId && i.type === "image")?.url;
+  const gallery: GalleryItem[] = folderItems.map(it => ({ id: it.id, type: it.type, label: it.name, src: it.url, thumb: it.thumb, filename: `${it.name || "media"}.${it.type === "video" ? "mp4" : "jpg"}` }));
+  const coverFor = (folderId: string) => { const c = allItems.find(i => i.folderId === folderId && i.type === "image"); return c?.thumb || c?.url; };
   const childCount = (folderId: string) => folders.filter(f => (f.parentId ?? null) === folderId).length;
   const mediaCount = (folderId: string) => allItems.filter(i => i.folderId === folderId).length;
 
@@ -336,7 +345,8 @@ function LibraryView({ isStaff }: { isStaff: boolean }) {
     if (!(await confirmBox(`Delete folder "${f?.name}" and everything inside it?\n\n${what ? `${what} inside go with it — the files are deleted from storage, and share links to them stop working.` : "It is empty."} This cannot be undone.`))) return;
     const removed = allItems.filter(i => ids.includes(i.folderId));
     updateDb(d => { d.productPhotoFolders = d.productPhotoFolders.filter(x => !ids.includes(x.id)); d.productPhotoItems = d.productPhotoItems.filter(i => !ids.includes(i.folderId)); });
-    for (const it of removed) await deleteByUrl(it.url);
+    // Each file's small copy goes with it (never left behind on its own).
+    for (const it of removed) { await deleteByUrl(it.url); await deleteByUrl(it.thumb); }
     toast.success("Folder deleted");
   };
 
@@ -346,8 +356,8 @@ function LibraryView({ isStaff }: { isStaff: boolean }) {
     if (!imgs.length) { toast.error("Please choose image files"); return; }
     setUploading(true);
     try {
-      const urls = await Promise.all(imgs.map(f => putPhoto(f, `productPhotos/${currentFolderId}`)));
-      updateDb(d => { urls.forEach((u, i) => d.productPhotoItems.unshift({ id: uid("ppi_"), folderId: currentFolderId, name: imgs[i].name.replace(/\.[^.]+$/, "").slice(0, 60) || "Image", type: "image", url: u, createdBy: user!.id, createdAt: new Date().toISOString() } as ProductPhotoItem)); });
+      const urls = await Promise.all(imgs.map(f => putMedia(f, `productPhotos/${currentFolderId}`)));
+      updateDb(d => { urls.forEach((u, i) => d.productPhotoItems.unshift({ id: uid("ppi_"), folderId: currentFolderId, name: imgs[i].name.replace(/\.[^.]+$/, "").slice(0, 60) || "Image", type: "image", ...u, createdBy: user!.id, createdAt: new Date().toISOString() } as ProductPhotoItem)); });
       toast.success(`${urls.length} image${urls.length !== 1 ? "s" : ""} uploaded`);
     } catch { toast.error("Failed to upload images"); }
     setUploading(false);
@@ -358,9 +368,9 @@ function LibraryView({ isStaff }: { isStaff: boolean }) {
     if (file.size > MAX_VIDEO_MB * 1024 * 1024) { toast.error(`Video too large — keep it under ${MAX_VIDEO_MB} MB`); return; }
     setVideoUploading(true);
     try {
-      const url = await uploadFile(file, `productPhotos/${currentFolderId}`);
-      requestPlayable(url);
-      updateDb(d => d.productPhotoItems.unshift({ id: uid("ppi_"), folderId: currentFolderId, name: file.name.replace(/\.[^.]+$/, "").slice(0, 60) || "Video", type: "video", url, createdBy: user!.id, createdAt: new Date().toISOString() } as ProductPhotoItem));
+      const up = await putMedia(file, `productPhotos/${currentFolderId}`);
+      requestPlayable(up.url);
+      updateDb(d => d.productPhotoItems.unshift({ id: uid("ppi_"), folderId: currentFolderId, name: file.name.replace(/\.[^.]+$/, "").slice(0, 60) || "Video", type: "video", ...up, createdBy: user!.id, createdAt: new Date().toISOString() } as ProductPhotoItem));
       toast.success("Video uploaded");
     } catch { toast.error("Failed to upload the video"); }
     setVideoUploading(false);
@@ -414,14 +424,12 @@ function LibraryView({ isStaff }: { isStaff: boolean }) {
       const isVideo = f.type.startsWith("video/");
       if (isVideo && f.size > MAX_VIDEO_MB * 1024 * 1024) { failed.push(f.name); return; }
       try {
-        const url = isVideo
-          ? await uploadFile(f, `productPhotos/${folderId}`)
-          : await putPhoto(f, `productPhotos/${folderId}`);
-        if (isVideo) requestPlayable(url);
+        const up = await putMedia(f, `productPhotos/${folderId}`);
+        if (isVideo) requestPlayable(up.url);
         made.push({
           id: uid("ppi_"), folderId,
           name: f.name.replace(/\.[^.]+$/, "").slice(0, 60) || (isVideo ? "Video" : "Image"),
-          type: isVideo ? "video" : "image", url,
+          type: isVideo ? "video" : "image", ...up,
           createdBy: user!.id, createdAt: new Date().toISOString(),
         } as ProductPhotoItem);
       } catch { failed.push(f.name); }
@@ -453,6 +461,7 @@ function LibraryView({ isStaff }: { isStaff: boolean }) {
     if (!(await confirmBox(`Delete "${it.name}"?\n\nThe ${it.type} file is deleted from storage — gone from this folder, from downloads, and from any share link that shows it. This cannot be undone.`))) return;
     updateDb(d => { d.productPhotoItems = d.productPhotoItems.filter(x => x.id !== id); });
     await deleteByUrl(it.url);
+    await deleteByUrl(it.thumb);
     toast.success(`${it.type === "video" ? "Video" : "Photo"} deleted`);
   };
   const [itemSheet, setItemSheet] = useState<{ item: ProductPhotoItem; mode: "rename" | "move" } | null>(null);

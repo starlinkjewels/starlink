@@ -47,6 +47,7 @@ export const SETTINGS_INDEX: readonly SettingsEntry[] = [
   ] },
   { key: "orderpage", words: ["Order page", "Sections order", "Layout", "Drag to move", "Order header"] },
   { key: "videos", words: ["Videos", "Plays on every browser", "Web video", "iPhone video", "Make playable"] },
+  { key: "previews", words: ["Photo previews", "Make previews", "Thumbnails", "Small copies", "Slow share link", "Video still"] },
   { key: "companies", words: [
     "Companies", "Invoice prefix", "Company logo", "Stamp / seal", "Payment QR", "Bank details",
     "Address & contact", "Bank / wire details",

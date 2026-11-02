@@ -1,6 +1,6 @@
 import React from "react";
 import ReactDOM from "react-dom/client";
-import { BrowserRouter } from "react-router-dom";
+import { BrowserRouter, Route, Routes } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { App } from "./App";
 import { AuthProvider } from "./lib/auth";
@@ -67,9 +67,26 @@ const onStale = (err: unknown, e: Event) => {
 window.addEventListener("error", (e) => onStale(e.error, e));
 window.addEventListener("unhandledrejection", (e) => onStale(e.reason, e));
 
+const root = ReactDOM.createRoot(document.getElementById("root")!);
+// A shared link (/s/:id) is public: no sign-in, no app — just the gallery. The
+// server has usually drawn it into the page already (src/lib/pure/shareHtml.ts);
+// it stays on screen until the gallery's code is here, which then takes over
+// the same view (no "Connecting…" splash in between).
+if (/^\/s\/[^/]+/.test(window.location.pathname)) {
+  void import("./pages/SharedGallery").then(({ SharedGalleryPage }) => root.render(
+    <React.StrictMode>
+      <BrowserRouter>
+        <ErrorBoundary fullScreen>
+          <Routes><Route path="/s/:id" element={<SharedGalleryPage />} /></Routes>
+        </ErrorBoundary>
+        <Toaster position="top-center" richColors />
+      </BrowserRouter>
+    </React.StrictMode>,
+  ));
+} else
 // AuthProvider owns the boot sequence: it shows a splash until Firebase Auth
 // resolves, loads Firestore data only after sign-in, and renders the app.
-ReactDOM.createRoot(document.getElementById("root")!).render(
+root.render(
   <React.StrictMode>
     <QueryClientProvider client={qc}>
       <BrowserRouter>

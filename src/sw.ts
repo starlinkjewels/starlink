@@ -30,7 +30,9 @@ cleanupOutdatedCaches();
 precacheAndRoute(self.__WB_MANIFEST);
 
 // ── SPA navigation fallback (replaces generateSW's navigateFallback) ──
-registerRoute(new NavigationRoute(createHandlerBoundToURL("/index.html")));
+// A shared link (/s/…) goes to the server, which draws the gallery into the page
+// (api/share.ts, the shareMeta function) — never the app's cached copy.
+registerRoute(new NavigationRoute(createHandlerBoundToURL("/index.html"), { denylist: [/^\/s\//] }));
 
 // ── Firebase Storage images — CacheFirst, same rule as the old workbox.runtimeCaching config ──
 registerRoute(

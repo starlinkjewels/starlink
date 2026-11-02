@@ -3,6 +3,7 @@ import { WebVideo } from "@/components/ProductVideo";
 import { ArrowLeft, ChevronDown, Download, Gem, Link2, Loader2, Mail, MessageCircle, Play, Rows3, LayoutList, X } from "lucide-react";
 import { toast } from "sonner";
 import { fmtMoney, type Share, type ShareBrand, type SharePiece } from "@/lib/db";
+import { VideoPoster } from "@/components/VideoPoster";
 import { diamondRows, downloadLineSheetPdf, downloadPiecesPdf, goldRows, metalLine } from "@/lib/piecesPdf";
 
 /*
@@ -184,7 +185,10 @@ function PieceView({ p, brand, link, note }: { p: SharePiece; brand: ShareBrand;
                 <button key={s.url + i} type="button" onClick={() => setCur(i)} aria-label={s.kind === "video" ? "Video" : s.kind === "cad" ? "CAD" : `Photo ${i + 1}`}
                   className={`relative h-16 w-16 shrink-0 rounded-xl overflow-hidden ring-1 transition ${i === cur ? "ring-2 ring-stone-900" : "ring-stone-200 opacity-80 hover:opacity-100"} ${s.kind === "video" ? "bg-black" : "bg-white"}`}>
                   {s.kind === "video"
-                    ? <span className="absolute inset-0 grid place-items-center text-white"><Play className="h-5 w-5 ml-0.5" /></span>
+                    ? <>
+                        <VideoPoster src={s.url} showPlay={false} />
+                        <span className="absolute inset-0 grid place-items-center text-white"><Play className="h-5 w-5 ml-0.5 drop-shadow" /></span>
+                      </>
                     : <img src={s.url} alt="" className="h-full w-full object-contain" />}
                   {s.kind === "cad" && <span className="absolute bottom-0 inset-x-0 bg-black/70 text-white text-[9px] font-semibold text-center">CAD</span>}
                 </button>
