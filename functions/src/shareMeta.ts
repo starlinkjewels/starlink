@@ -9,6 +9,7 @@
 import { onRequest } from "firebase-functions/v2/https";
 import sharp from "sharp";
 import { db } from "./lib/firestoreAdmin";
+import { SHARE_EMBED_MAX, withSharePage, type StaticShare, type StaticShareItem } from "./shared/shareHtml";
 
 const REGION = "asia-south1";
 const SITE = "https://ssdiam.web.app";
@@ -16,13 +17,28 @@ const SITE = "https://ssdiam.web.app";
 const PHOTO_RE = /^https:\/\/firebasestorage\.googleapis\.com\/v0\/b\/diamondflow-35f6e\.firebasestorage\.app\/o\//;
 
 interface Piece { id: string; name: string; sku?: string; metal?: string; karat?: string; diamondCt?: number; price?: number; photos?: string[]; cad?: string }
-interface ShareDoc { title?: string; note?: string; pieces?: Piece[]; brand?: { name?: string }; showPrice?: boolean; expiresAt?: string; count?: number; items?: { url?: string; type?: string }[] }
+interface ShareDoc extends StaticShare { title?: string; note?: string; pieces?: Piece[]; brand?: { name?: string }; showPrice?: boolean; expiresAt?: string; count?: number; items?: StaticShareItem[] }
 
 const esc = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 const money = (n: number) => `$${n.toLocaleString("en-US", { maximumFractionDigits: 2 })}`;
 
-export const shareMeta = onRequest({ region: REGION, invoker: "public", memory: "256MiB", maxInstances: 10, timeoutSeconds: 20 }, async (req, res) => {
-  let html = await (await fetch(`${SITE}/index.html`)).text();
+// The app's page, kept a minute — it used to be fetched again on every open.
+let pageAt = 0, pageHtml = "";
+async function appPage(): Promise<string> {
+  if (pageHtml && Date.now() - pageAt < 60_000) return pageHtml;
+  const r = await fetch(`${SITE}/index.html`);
+  const text = await r.text();
+  // Only a good page is kept — an error page is used once, never for the minute.
+  if (!r.ok || !text.includes('<div id="root">')) return pageHtml || text;
+  pageHtml = text;
+  pageAt = Date.now();
+  return pageHtml;
+}
+
+// One copy kept awake (minInstances 1, owner's choice 2026-11-02): a link opens
+// without waiting 1–3 s for the server to start.
+export const shareMeta = onRequest({ region: REGION, invoker: "public", memory: "256MiB", maxInstances: 10, minInstances: 1, timeoutSeconds: 20 }, async (req, res) => {
+  let html = await appPage();
   const send = (cache: string) => { res.set("Cache-Control", cache); res.set("Content-Type", "text/html; charset=utf-8"); res.status(200).send(html); };
   const id = (req.path.match(/^\/s\/([\w-]{3,80})/) ?? [])[1];
   if (!id) return send("public, max-age=0, must-revalidate");
@@ -53,11 +69,28 @@ export const shareMeta = onRequest({ region: REGION, invoker: "public", memory: 
     `<meta name="twitter:card" content="${image ? "summary_large_image" : "summary"}" />`,
     `<meta name="twitter:title" content="${esc(title)}" />`,
   ].join("\n    ");
+  // The folder itself, drawn into the page with its data (shared/shareHtml.ts): the
+  // visitor sees it at once. A big folder's other pages are read here too, all together;
+  // past SHARE_EMBED_MAX items the app reads them itself, as before.
+  let items: StaticShareItem[] | null = null;
+  if (share.kind !== "readyStock") {
+    try {
+      if ((share.count ?? 0) <= SHARE_EMBED_MAX) {
+        const pages = Math.max(0, Number(share.pageCount) || 0);
+        const rest = await Promise.all(Array.from({ length: pages }, async (_, n) =>
+          ((await db.collection("shares").doc(id).collection("items").doc(String(n)).get()).data() as { items?: StaticShareItem[] } | undefined)?.items ?? []));
+        items = [...(share.items ?? []), ...rest.flat()];
+      }
+    } catch { items = null; /* the app reads them itself */ }
+  }
+  // Drawing it must never cost the link: anything odd in the data, the page as it was.
+  try { html = withSharePage(html, { id, share, items, brand, folderId: typeof req.query.f === "string" ? req.query.f : undefined }); } catch { /* the app draws it */ }
   html = html
-    .replace(/<title>[^<]*<\/title>/, `<title>${esc(title)} — ${esc(brand)}</title>`)
-    .replace(/<meta name="description" content="[^"]*"\s*\/?>/, `<meta name="description" content="${esc(line || brand)}" />`)
-    .replace("</head>", `    ${tags}\n  </head>`);
-  send("public, max-age=300");
+    // Function replacements: a "$&" in a share's name must never be read as a pattern.
+    .replace(/<title>[^<]*<\/title>/, () => `<title>${esc(title)} — ${esc(brand)}</title>`)
+    .replace(/<meta name="description" content="[^"]*"\s*\/?>/, () => `<meta name="description" content="${esc(line || brand)}" />`)
+    .replace("</head>", () => `    ${tags}\n  </head>`);
+  send("public, max-age=60, s-maxage=60");
 });
 
 /** The share's picture, small (640px JPEG) — for a link preview. Only this app's own storage. */
