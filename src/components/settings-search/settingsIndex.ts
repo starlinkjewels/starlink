@@ -29,6 +29,7 @@ export const SETTINGS_INDEX: readonly SettingsEntry[] = [
   ] },
   { key: "pricing", words: [
     "Order value pricing rates", "Diamond rate ($ / ct)", "Metal rate ($ / g)", "Gold rate",
+    "Purchase GST (%)", "GST on purchases", "In bill",
     "Exchange rates for profit (₹ per $1)", "Rupee rate", "Currency rates", "Foreign currency", "Live rates",
     "Who can read your cost figures", "Admin-only cost figures", "Default shipping charge",
     "Cashback % on delivered orders", "Gift card", "Max gift-card use per order", "Redeem",

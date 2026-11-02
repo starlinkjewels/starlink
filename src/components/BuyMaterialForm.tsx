@@ -44,6 +44,8 @@ import { CompanyPicker, useDefaultCompany, useMultiCo } from "@/components/Compa
 import { coField, companyById, workCompanyOf } from "@/lib/companies";
 import { confirmBox } from "@/lib/confirm";
 import { Field, Group, PanelActions, Stat, UnitInput } from "@/components/BillLayout";
+import { Checkbox } from "@/components/ui/checkbox";
+import { cleanGstPct, defaultPurchaseGstPct, gstFields, gstOn, pctText, usdWithGst } from "@/lib/purchaseGst";
 
 const GOLD_PURITIES = ["9K", "10K", "14K", "18K", "22K", "24K"];
 /** Gold, loose or certified diamonds, any other material (Settings → Materials),
@@ -219,6 +221,9 @@ export function BuyMaterialForm({ open, onOpenChange, supplierId: fixedSupplier,
   const [notes, setNotes] = useState("");
   // The broker who brought the bill, if any, and the brokerage (lib/brokers.ts).
   const [brokerage, setBrokerage] = useState<BillBrokerage>(emptyBillBrokerage());
+  // "In bill": bought on a GST bill — each line's GST at the bill's % (lib/purchaseGst.ts).
+  const [gstBill, setGstBill] = useState(false);
+  const [gstPctText, setGstPctText] = useState(() => pctText(defaultPurchaseGstPct(db.settings)));
   // An order's purchase is nearly always its stones, so it starts on a loose diamond.
   const firstKind: BuyKind = fixedOrder ? "loose" : "gold";
   const [lines, setLines] = useState<Line[]>([{ ...emptyLine(), kind: firstKind }]);
@@ -241,7 +246,13 @@ export function BuyMaterialForm({ open, onOpenChange, supplierId: fixedSupplier,
     : Math.round(lineBase(l)));
   const linesTotalInr = lines.reduce((s, l) => s + lineInr(l), 0);
   const roundOffInr = Math.round(Number(roundOff) || 0);
-  const billTotalInr = linesTotalInr + roundOffInr;
+  // GST on each line after its discount; the bill is rounded once, after it.
+  const gstPct = gstBill ? cleanGstPct(gstPctText) : 0;
+  const lineGst = (l: Line) => gstOn(lineInr(l), gstPct);
+  const gstTotalInr = lines.reduce((s, l) => s + lineGst(l), 0);
+  // Brokerage is worked on the bill before GST, as it always was.
+  const preGstTotalInr = linesTotalInr + roundOffInr;
+  const billTotalInr = linesTotalInr + gstTotalInr + roundOffInr;
 
   // The footer's figures, in the bill's currency. Display only: what is saved
   // is still each line's lineInr and the bill's billTotalInr.
@@ -264,6 +275,7 @@ export function BuyMaterialForm({ open, onOpenChange, supplierId: fixedSupplier,
 
   const reset = () => {
     setLines([{ ...emptyLine(), kind: firstKind }]);
+    setGstBill(false);
     setForWhat("stock"); setOrderId("");
     setBillNo(""); setXrate(""); setRoundOff(""); setNotes(""); setBrokerage(emptyBillBrokerage());
   };
@@ -292,6 +304,7 @@ export function BuyMaterialForm({ open, onOpenChange, supplierId: fixedSupplier,
     const brokerProblem = billBrokerageProblem(brokerage);
     if (brokerProblem) { toast.error(brokerProblem); return; }
     if (currency === "USD" && !xrate) { toast.error("Enter the exchange rate"); return; }
+    if (gstBill && !(gstPct > 0)) { toast.error("Enter the GST % — or untick In bill"); return; }
     for (const [i, l] of lines.entries()) {
       const q = Number(l.qty);
       if (l.kind === "ready" && forWhat === "order") { toast.error(`Item ${i + 1}: ready jewellery goes onto Ready Stock — buy it for Stock, not for an order`); return; }
@@ -376,7 +389,8 @@ export function BuyMaterialForm({ open, onOpenChange, supplierId: fixedSupplier,
           const pc = isReady ? (l.pc ?? emptyReady()) : undefined;
           const hasKarat = !!pc && metalHasKarats(pc.metal, d.settings);
           const dia = pc ? Number(pc.dia) || undefined : undefined;
-          const total = lineInr(l) + (i === 0 ? roundOffInr : 0);
+          // The line with its GST (In bill) — what the supplier is owed and what it cost us.
+          const total = lineInr(l) + lineGst(l) + (i === 0 ? roundOffInr : 0);
           const purchase: Purchase = {
             id: ids[i], supplierId, material: isReady ? READY_PIECE : lineMaterial(l), ...coField(co),
             gold: isGold ? { weightGrams: q, purity: l.purity, ratePerGram: Number(l.rate) || 0 } : undefined,
@@ -404,12 +418,14 @@ export function BuyMaterialForm({ open, onOpenChange, supplierId: fixedSupplier,
               certificateLab: l.kind === "certified" ? (l.lab.trim() || undefined) : undefined,
             } : undefined,
             purpose: target ? "order" : "stock", ...(target ? { orderId: target.id } : {}), currency,
-            totalUsd: currency === "USD" ? Math.round(lineBase(l) * 100) / 100 : undefined,
+            totalUsd: currency === "USD" ? usdWithGst(lineBase(l), gstPct) : undefined,
             exchangeRate: currency === "USD" ? Number(xrate) : undefined,
             totalInr: total, payments: [],
             discountPct: disc !== 0 ? disc : undefined,
             // The bill is rounded once, so it rides on its first line.
             roundOffInr: i === 0 && roundOffInr !== 0 ? roundOffInr : undefined,
+            // In bill or not — on every line of the bill; this line's own GST.
+            ...gstFields(gstBill, gstPct, lineInr(l)),
             invoiceNumber: billNo.trim() || undefined,
             ...brokerShares[i],
             notes: notes.trim() || undefined,
@@ -480,12 +496,12 @@ export function BuyMaterialForm({ open, onOpenChange, supplierId: fixedSupplier,
                 : l.kind === "certified" ? `${q}ct ${l.shape} diamond (Certified ${l.certNo.trim()})`
                 : `${q}ct ${bucket} diamond`;
               const p = d.purchases.find(x => x.id === ids[i]);
-              const amt = p?.totalInr ?? lineInr(l) + (i === 0 ? roundOffInr : 0);
+              const amt = p?.totalInr ?? lineInr(l) + lineGst(l) + (i === 0 ? roundOffInr : 0);
               const brk = p ? brokerageWePay(p) : 0;
               o.manufacturingLog!.push({
                 id: uid("mlog_"), type: "material_purchased", at: now, employeeId: user!.id,
                 material: lineMaterial(l), amountMaterial: q, amountInr: amt,
-                remarks: `Purchased ${what} from ${supplier?.name || "supplier"}${billNo.trim() ? ` (bill ${billNo.trim()})` : ""} for this order — ${fmtMoneyInr(amt)}${brk > 0 ? ` + brokerage ${fmtMoneyInr(brk)}` : ""}`,
+                remarks: `Purchased ${what} from ${supplier?.name || "supplier"}${billNo.trim() ? ` (bill ${billNo.trim()})` : ""} for this order — ${fmtMoneyInr(amt)}${p?.gstBill ? ` incl. GST ${fmtMoneyInr(p.gstInr ?? 0)}` : ""}${brk > 0 ? ` + brokerage ${fmtMoneyInr(brk)}` : ""}`,
               });
               // From the order's own Buy: issued straight to its factory (source "purchase" —
               // the stock pool is untouched). A diamond-only order has no factory, so nothing is issued.
@@ -532,7 +548,7 @@ export function BuyMaterialForm({ open, onOpenChange, supplierId: fixedSupplier,
       plan!.onPlanned({
         supplierName: db.suppliers.find(x => x.id === supplierId)?.name ?? "Supplier",
         billNo: billNo.trim(),
-        lines: lines.map(l => ({ kind: l.kind, text: lineText(l, db.settings), qty: Number(l.qty), unit: lineUnit(l, db.settings), inr: lineInr(l),
+        lines: lines.map(l => ({ kind: l.kind, text: lineText(l, db.settings), qty: Number(l.qty), unit: lineUnit(l, db.settings), inr: lineInr(l) + lineGst(l),
           ...(l.kind === "other" && l.materialId ? { materialId: l.materialId } : {}) })),
         totalInr: billTotalInr,
         execute: async (o: Order) => record(o, true, workCompanyOf(loadDb(), o), o.assignedFactoryId || ""),
@@ -553,15 +569,16 @@ export function BuyMaterialForm({ open, onOpenChange, supplierId: fixedSupplier,
             <Stat label={Number(xrate) > 0 ? `In ₹ at ${xrate} / $` : "In ₹"}
               value={Number(xrate) > 0 ? fmtMoneyInr(linesTotalInr) : <span className="text-xs text-amber-700">Enter the rate ₹/$</span>} />
           )}
+          {gstBill && <Stat label={`GST ${pctText(gstPct)}%`} value={`+${fmtMoneyInr(gstTotalInr)}`} />}
           <div>
             <Label htmlFor={roundId} className="block text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Round off ₹</Label>
             <div className="mt-0.5 flex items-center gap-2">
               <Input id={roundId} type="number" step="1" value={roundOff} onChange={e => setRoundOff(e.target.value)} className="h-8 w-24 rounded-lg text-right tabular-nums" placeholder="e.g. -3" />
-              {linesTotalInr > 0 && roundOffInr === 0 && linesTotalInr % 10 !== 0 && (
-                <button type="button" onClick={() => setRoundOff(String(-(linesTotalInr % 10)))}
-                  title={`Round ${fmtMoneyInr(linesTotalInr)} down to ${fmtMoneyInr(linesTotalInr - (linesTotalInr % 10))}`}
+              {linesTotalInr + gstTotalInr > 0 && roundOffInr === 0 && (linesTotalInr + gstTotalInr) % 10 !== 0 && (
+                <button type="button" onClick={() => setRoundOff(String(-((linesTotalInr + gstTotalInr) % 10)))}
+                  title={`Round ${fmtMoneyInr(linesTotalInr + gstTotalInr)} down to ${fmtMoneyInr(linesTotalInr + gstTotalInr - ((linesTotalInr + gstTotalInr) % 10))}`}
                   className="text-xs text-primary hover:underline whitespace-nowrap">
-                  Round to {fmtMoneyInr(linesTotalInr - (linesTotalInr % 10))}
+                  Round to {fmtMoneyInr(linesTotalInr + gstTotalInr - ((linesTotalInr + gstTotalInr) % 10))}
                 </button>
               )}
             </div>
@@ -569,7 +586,7 @@ export function BuyMaterialForm({ open, onOpenChange, supplierId: fixedSupplier,
         </div>
         <div className="text-right ml-auto">
           <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">{usd ? "Total (USD)" : "Total"}</p>
-          <p className="font-display text-2xl sm:text-3xl font-bold text-brand-dark tabular-nums leading-tight">{usd ? fmtBill(netBill) : fmtMoneyInr(billTotalInr)}</p>
+          <p className="font-display text-2xl sm:text-3xl font-bold text-brand-dark tabular-nums leading-tight">{usd ? fmtBill(gstBill ? lines.reduce((t, l) => t + usdWithGst(lineBase(l), gstPct), 0) : netBill) : fmtMoneyInr(billTotalInr)}</p>
           {usd && <p className="text-[11px] text-muted-foreground tabular-nums">{fmtMoneyInr(billTotalInr)} payable in ₹</p>}
         </div>
       </div>
@@ -658,8 +675,21 @@ export function BuyMaterialForm({ open, onOpenChange, supplierId: fixedSupplier,
             <Field label="Remark" className={multiCo ? "col-span-2 @md:col-span-1" : "col-span-2"}>{id => (
               <Input id={id} value={notes} onChange={e => setNotes(e.target.value)} className="rounded-xl h-10" placeholder="Optional" />
             )}</Field>
+            {/* In bill: bought on a GST bill. Every line gets its GST at this %, inside its total. */}
+            <div className="col-span-2 flex flex-wrap items-center gap-x-3 gap-y-2 rounded-xl border border-border/60 bg-secondary/30 px-3 py-2">
+              <label className="flex items-center gap-2 text-sm font-medium text-brand-dark cursor-pointer">
+                <Checkbox checked={gstBill} onCheckedChange={v => setGstBill(v === true)} aria-label="In bill (GST)" />
+                In bill (GST)
+              </label>
+              {gstBill ? (
+                <>
+                  <div className="w-24"><UnitInput min={0} max={100} step="0.01" unit="%" value={gstPctText} onChange={e => setGstPctText(e.target.value)} aria-label="GST %" /></div>
+                  <span className="text-xs text-muted-foreground">{gstTotalInr > 0 ? `+${fmtMoneyInr(gstTotalInr)} GST on the bill` : "Added on each line after its discount"}</span>
+                </>
+              ) : <span className="text-xs text-muted-foreground">Not ticked: bought without a bill — no GST.</span>}
+            </div>
           </div>
-          <BillBrokerFields value={brokerage} onChange={setBrokerage} billTotalInr={billTotalInr} supplierId={supplierId} className="mt-3" />
+          <BillBrokerFields value={brokerage} onChange={setBrokerage} billTotalInr={preGstTotalInr} supplierId={supplierId} className="mt-3" />
         </Group>
 
         <Group title="Items" aside={<span className="text-xs text-muted-foreground">{lines.length} line{lines.length !== 1 ? "s" : ""}</span>}>

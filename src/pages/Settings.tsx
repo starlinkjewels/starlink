@@ -38,6 +38,7 @@ import { legacyPayments, backfillReceipts } from "@/lib/receipts";
 import { orphanSupplierPayments, repairSupplierPayments } from "@/lib/supplierRepair";
 import { orphanDirectUses, orphanImpact, repairOrphanDirectUses } from "@/lib/stockRepair";
 import { fmtMoneyInr } from "@/lib/manufacturing";
+import { DEFAULT_PURCHASE_GST_PCT } from "@/lib/purchaseGst";
 import { ccy, ccySymbol, fmtCcy } from "@/lib/currency";
 import { uploadDataUrl } from "@/lib/storage";
 import { createAuthUser, auth, isAdminEmail, ADMIN_EMAILS } from "@/lib/firebase";
@@ -1090,6 +1091,33 @@ export function SettingsPage() {
                 />
               </div>
               <p className="text-[11px] text-muted-foreground">per gram</p>
+            </div>
+
+            {/* GST on a supplier's bill — what "In bill" starts on in New purchase (lib/purchaseGst.ts). */}
+            <div className="space-y-1.5">
+              <Label htmlFor="purchase-gst-pct" className="text-xs flex items-center gap-1.5">
+                <Receipt className="h-3.5 w-3.5 text-primary" />
+                Purchase GST (%)
+              </Label>
+              <div className="relative">
+                <Input
+                  id="purchase-gst-pct"
+                  type="number"
+                  min={0}
+                  max={100}
+                  step={0.01}
+                  value={db.settings.purchaseGstPct ?? DEFAULT_PURCHASE_GST_PCT}
+                  onChange={(e) =>
+                    setDb({
+                      ...db,
+                      settings: { ...db.settings, purchaseGstPct: Math.min(100, Math.max(0, Number(e.target.value) || 0)) },
+                    })
+                  }
+                  className="rounded-xl pr-7"
+                />
+                <span className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground text-sm">%</span>
+              </div>
+              <p className="text-[11px] text-muted-foreground">added to a purchase ticked &ldquo;In bill&rdquo; — each bill can change it</p>
             </div>
 
             {/* ₹ to $ over time — admin only: it is what turns an order's rupee cost

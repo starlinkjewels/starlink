@@ -25,6 +25,7 @@
 import { coField, companyById, hasCompanies } from "./companies";
 import { collectionLoaded, loadDb, uid, updateDbAs, type DB, type Purchase, type StockMovement, type Supplier, type SupplierGoldEntry } from "./db";
 import { deriveStockBalances, fmtMoneyInr } from "./manufacturing";
+import { gstFields, gstOn } from "./purchaseGst";
 import { toPureGold } from "./pure/basics";
 import { decreaseStockSelfHealing, increaseStock, reverseMovement } from "./stock";
 
@@ -285,6 +286,9 @@ export interface GoldBill {
   at: string;
   invoiceNumber?: string;
   note?: string;
+  /** In bill (GST, lib/purchaseGst.ts): with GST at gstPct on top, or without a bill. */
+  gstBill?: boolean;
+  gstPct?: number;
 }
 
 /** Why gold can't be turned into a bill as entered — or null. Checked against the gold owed IN that company. */
@@ -315,12 +319,16 @@ export function goldToBill(supplierId: string, b: GoldBill, who: Who): Purchase 
   if (problem) throw new Error(problem);
   const fine = r3(b.fine);
   const note = b.note?.trim();
-  const totalInr = billAmount(fine, b.rateInr);
+  // In bill: the GST goes on top of fine × rate, inside the bill's total (lib/purchaseGst.ts).
+  const gstPct = b.gstBill ? b.gstPct ?? 0 : 0;
+  const baseInr = billAmount(fine, b.rateInr);
+  const totalInr = baseInr + gstOn(baseInr, gstPct);
   const purchase: Purchase = {
     id: uid("pur_"), supplierId, material: "gold", gold: { weightGrams: fine, purity: "24K", ratePerGram: b.rateInr },
     ...coField(coOf(b.companyId)), purpose: "stock", currency: "INR", totalInr, payments: [],
     ...(b.invoiceNumber?.trim() ? { invoiceNumber: b.invoiceNumber.trim() } : {}),
     notes: `Gold taken on loan, billed — ${fmtG(fine)} fine${note ? ` · ${note}` : ""}`,
+    ...gstFields(!!b.gstBill && gstPct > 0, gstPct, baseInr),
     fromGoldLoan: true, createdBy: who.id, createdAt: b.at,
   };
   let refused: string | null = null;

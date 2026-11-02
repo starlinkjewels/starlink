@@ -8,6 +8,7 @@ import { StatusBadge } from "@/components/StatusBadge";
 import { SectionTitle } from "@/components/SectionTitle";
 import { DataTable, CellMain, CellTag, CellAmount, CellDate } from "@/components/DataTable";
 import { purchaseQty as qtyOfPurchase, materialName, materialUnit, diamondSpec, readyPieceSpec } from "@/lib/materials";
+import { gstTag, gstText, pctText, preGstInr, purchaseGstInr } from "@/lib/purchaseGst";
 import { useState, useMemo, useEffect } from "react";
 import { loadDb, fmtMoney, fmtDate, currentUserOrders, totalAdvance, balanceDue, orderTotal, TIMELINE_STEPS, logEvent, keptValue, findInvoiceForOrder } from "@/lib/db";
 import type { Order, Purchase } from "@/lib/db";
@@ -274,6 +275,9 @@ export function ReportSections({ embedded = false, show, period, clientId, scope
       if (r.rd.count) section("Ready jewellery", "pcs", r.rd);
       doc.setFont("helvetica", "bold"); doc.setFontSize(13);
       doc.text(`Grand Total Purchases: ${money(r.grand)}`, 20, y + 2);
+      // The GST inside it — bills bought in bill (lib/purchaseGst.ts).
+      const gstAll = r.rows.reduce((t, p) => t + purchaseGstInr(p), 0);
+      if (gstAll > 0) { doc.setFont("helvetica", "normal"); doc.setFontSize(10); doc.text(`incl. GST on bills: ${money(gstAll)}`, 20, y + 9); y += 7; }
 
       // Full purchase history (every line) so the downloaded PDF is complete, not just a summary.
       const suppliers = db.suppliers ?? [];
@@ -311,7 +315,7 @@ export function ReportSections({ embedded = false, show, period, clientId, scope
     try {
       const suppliers = db.suppliers ?? [];
       const esc = (v: unknown) => { const s = String(v ?? ""); return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; };
-      const headers = ["Date","Supplier","Category","Purpose","Purity/Shape","Quantity","Unit","Rate (Rs)","Amount (Rs)","Running Total (Rs)","Invoice #"];
+      const headers = ["Date","Supplier","Category","Purpose","Purity/Shape","Quantity","Unit","Rate (Rs)","In bill","GST (Rs)","Amount (Rs)","Running Total (Rs)","Invoice #"];
       const catLabel = { gold: "Metal (Gold)", diamond: "Diamond (Loose)", cert: "Certified Diamond", other: "Other material", ready: "Ready jewellery" };
       let running = 0;
       const rows = [...materialReport.rows]
@@ -326,7 +330,9 @@ export function ReportSections({ embedded = false, show, period, clientId, scope
           return [
             fmtDate(p.invoiceDate || p.createdAt),
             suppliers.find(s => s.id === p.supplierId)?.name ?? "",
-            catLabel[c], p.purpose, detail, qty, unit, rate, Math.round(p.totalInr), Math.round(running), p.invoiceNumber ?? "",
+            catLabel[c], p.purpose, detail, qty, unit, rate,
+            p.gstBill === true ? `GST ${pctText(p.gstPct)}%` : p.gstBill === false ? "No bill" : "", purchaseGstInr(p) || "",
+            Math.round(p.totalInr), Math.round(running), p.invoiceNumber ?? "",
           ];
         });
       const csv = [headers, ...rows].map(r => r.map(esc).join(",")).join("\r\n");
@@ -911,6 +917,7 @@ export function ReportSections({ embedded = false, show, period, clientId, scope
       !!p.diamond?.certificateNumber && { label: "Certificate", value: [p.diamond.certificateLab, p.diamond.certificateNumber].filter(Boolean).join(" ") },
       !!p.discountPct && { label: p.discountPct > 0 ? "Discount" : "Charge added", value: `${Math.abs(p.discountPct)}%` },
       !!p.roundOffInr && { label: "Rounded off", value: fmtMoneyInr(p.roundOffInr) },
+      p.gstBill !== undefined && { label: "GST", value: p.gstBill ? `${pctText(p.gstPct)}% · ${fmtMoneyInr(purchaseGstInr(p))} on ${fmtMoneyInr(preGstInr(p))}` : "No bill — no GST" },
       { label: "Notes", value: noteText(p.notes) },
       { label: "Recorded", value: recorded(db, p.createdAt, p.createdBy) },
     ]);
@@ -1248,6 +1255,11 @@ export function ReportSections({ embedded = false, show, period, clientId, scope
                     cell: p => <span className="font-medium tabular-nums whitespace-nowrap">{purchaseQty(p).toLocaleString(undefined, { maximumFractionDigits: 3 })} {materialUnit(db.settings, p.material)}</span> },
                   { key: "rate", header: "Rate", align: "right", kind: "number", sortValue: p => { const q = purchaseQty(p); return q > 0 ? p.totalInr / q : null; },
                     cell: p => { const q = purchaseQty(p); return <span className="text-muted-foreground tabular-nums whitespace-nowrap">{q > 0 ? `${fmtMoneyInr(p.totalInr / q)}/${materialUnit(db.settings, p.material)}` : "—"}</span>; } },
+                  // In bill (GST, inside the total) or not; older purchases say nothing.
+                  { key: "gst", header: "GST", align: "right", kind: "number", sortValue: p => (p.gstBill === undefined ? null : purchaseGstInr(p)),
+                    csv: p => (p.gstBill === true ? purchaseGstInr(p) : p.gstBill === false ? "No bill" : ""),
+                    cell: p => (p.gstBill === undefined ? <span className="text-muted-foreground/50">—</span>
+                      : <span className={`tabular-nums whitespace-nowrap text-xs ${p.gstBill ? "" : "text-muted-foreground"}`} title={gstText(p)}>{p.gstBill ? fmtMoneyInr(purchaseGstInr(p)) : gstTag(p)}</span>) },
                   { key: "total", header: "Total", align: "right", kind: "number", sortValue: p => p.totalInr, cell: p => <CellAmount>{fmtMoneyInr(p.totalInr)}</CellAmount> },
                 ]}
               />

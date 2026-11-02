@@ -13,6 +13,7 @@ import { useAuth } from "@/lib/auth";
 import { stockBucketHistory, deriveStockBalances, fmtMoneyInr } from "@/lib/manufacturing";
 import { recomputeStockFromHistory } from "@/lib/stock";
 import { purchaseEditScope, editPurchase, canVoidPurchase, voidPurchase, voidImpact } from "@/lib/purchaseVoid";
+import { gstOn, usdWithGst } from "@/lib/purchaseGst";
 import { isOpeningMovement } from "@/lib/openingStock";
 import { OpeningStockEditSheet, openingStockActions } from "@/components/OpeningStockEditSheet";
 import type { MoreAction } from "@/components/MoreMenu";
@@ -674,7 +675,12 @@ function CertifiedSection() {
         // the purchase's own billing currency, keeping any recorded discount so
         // qty x rate less discount still lands on the same rupee figure.
         const disc = Math.min(Math.max(purchase.discountPct ?? 0, 0), 99.99);
-        const netInr = (rateInr ?? 0) * p.carat;
+        // Bought in bill: the packet's rate carries the GST, the bill's rate does not (lib/purchaseGst.ts).
+        const gstPct = purchase.gstBill ? purchase.gstPct ?? 0 : 0;
+        const withGstInr = (rateInr ?? 0) * p.carat;
+        const lineInr = Math.round(withGstInr / (1 + gstPct / 100));
+        const gstInr = gstOn(lineInr, gstPct);
+        const netInr = lineInr;
         const isUsd = purchase.currency === "USD";
         const fx = purchase.exchangeRate ?? 0;
         const netBilling = isUsd && fx > 0 ? netInr / fx : netInr;
@@ -685,8 +691,9 @@ function CertifiedSection() {
             quantity: p.carat,
             ratePerUnit: Math.round(grossRate * 100) / 100,
             discountPct: disc,
-            totalInr: Math.round(netInr),
-            totalUsd: isUsd ? Math.round(netBilling * 100) / 100 : undefined,
+            totalInr: lineInr + gstInr,
+            totalUsd: isUsd ? usdWithGst(netBilling, gstPct) : undefined,
+            ...(purchase.gstBill ? { gstBill: true, gstPct, gstInr } : {}),
             exchangeRate: isUsd ? fx : undefined,
             invoiceNumber: purchase.invoiceNumber,
             notes: purchase.notes,

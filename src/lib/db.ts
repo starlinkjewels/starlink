@@ -1062,6 +1062,9 @@ export interface Settings {
   notifications: boolean;
   diamondRate: number; // $ per carat
   metalRate: number; // $ per gram
+  /** The GST % a supplier's bill starts on when it is ticked "In bill"
+   *  (lib/purchaseGst.ts). Unset = 1.5%. Each bill can change its own. */
+  purchaseGstPct?: number;
   /** ₹ to the $ — converts an order's rupee cost so it can be set against its
    *  dollar selling price. ADMIN ONLY, like everything profit touches. Unset
    *  means no profit is stated at all rather than one worked out at a guess. */
@@ -1770,6 +1773,14 @@ export interface Purchase {
    *  so a statement can explain why the total is not weight × rate. Negative
    *  when the bill was rounded DOWN, which is the usual direction. */
   roundOffInr?: number;
+  /** Bought on a GST bill ("In bill", lib/purchaseGst.ts): true = with GST,
+   *  false = ticked off (no bill), unset = an older purchase, not known. The
+   *  GST is INSIDE totalInr (and totalUsd) — it is what the supplier is owed and
+   *  what the material really cost — while the rate fields stay the bill's
+   *  pre-GST rate. gstInr is this line's GST in ₹; gstPct the % it was at. */
+  gstBill?: boolean;
+  gstPct?: number;
+  gstInr?: number;
   invoiceNumber?: string;
   invoiceDate?: string;
   /** The broker who brought this purchase (Suppliers → Brokers), and this

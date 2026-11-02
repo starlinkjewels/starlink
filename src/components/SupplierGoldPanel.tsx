@@ -23,6 +23,8 @@ import { DataTable, CellAmount, CellDate, CellTag, type DataColumn } from "@/com
 import { filled, noteText, recorded, type Detail } from "@/components/rowDetails";
 import type { MoreAction } from "@/components/MoreMenu";
 import { Input } from "@/components/ui/input";
+import { Checkbox } from "@/components/ui/checkbox";
+import { cleanGstPct, defaultPurchaseGstPct, gstOn, pctText } from "@/lib/purchaseGst";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 
 /** Which form is open: take on loan, give back, turn into a bill, or the opening figure. */
@@ -60,10 +62,14 @@ export function SupplierGoldPanel({ supplier, isAdmin, mode, onMode }: {
   const [fine, setFine] = useState("");
   const [rate, setRate] = useState("");
   const [billNo, setBillNo] = useState("");
+  // In bill (GST) — off unless ticked, at the % from Settings → Pricing.
+  const [gstBill, setGstBill] = useState(false);
+  const [gstPctText, setGstPctText] = useState("");
   useEffect(() => {
     if (!mode) return;
     setGrams(""); setPurity(""); setDate(mode === "opening" ? supplier.openingGoldDate || "" : todayLocal()); setCompanyId(defaultCo);
     setNote(""); setFine(mode === "opening" && supplier.openingGoldFine ? String(supplier.openingGoldFine) : ""); setRate(""); setBillNo("");
+    setGstBill(false); setGstPctText(pctText(defaultPurchaseGstPct(db.settings)));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mode]);
 
@@ -78,7 +84,11 @@ export function SupplierGoldPanel({ supplier, isAdmin, mode, onMode }: {
   const g = r3(num(grams));
   const moveFine = purity && g > 0 ? goldFine(g, purity) : 0;
   const billFine = r3(num(fine));
-  const amount = billFine > 0 && num(rate) > 0 ? billAmount(billFine, num(rate)) : 0;
+  const baseAmount = billFine > 0 && num(rate) > 0 ? billAmount(billFine, num(rate)) : 0;
+  const gstPct = gstBill ? cleanGstPct(gstPctText) : 0;
+  const gstAmount = gstOn(baseAmount, gstPct);
+  // The bill as it goes on their account — with its GST when it is in bill.
+  const amount = baseAmount + gstAmount;
   /** Grams of a purity that make this much fine gold (owed 9.16 g fine = 10 g of 22K). */
   const grossOf = (f: number, p: string) => { const per = goldFine(1, p); return per > 0 ? r3(f / per) : 0; };
   const move = () => ({ grams: g, purity, companyId, at: stampFor(date), note });
@@ -103,15 +113,16 @@ export function SupplierGoldPanel({ supplier, isAdmin, mode, onMode }: {
     } catch (e) { toast.error(e instanceof Error ? e.message : "The return wasn't recorded"); }
   };
   const bill = async () => {
-    const b = { fine: billFine, rateInr: num(rate), companyId, at: stampFor(date), invoiceNumber: billNo, note };
+    const b = { fine: billFine, rateInr: num(rate), companyId, at: stampFor(date), invoiceNumber: billNo, note, gstBill, gstPct };
     if (!ready) { toast.error("Still loading — a moment"); return; }
+    if (gstBill && !(gstPct > 0)) { toast.error("Enter the GST % — or untick In bill"); return; }
     const problem = billProblem(db, supplier, b);
     if (problem) { toast.error(problem); return; }
     if (!(await confirmBox([
       `Turn ${fmtG(billFine)} fine gold into a bill of ${fmtMoneyInr(amount)}?`,
       "",
       `• ${fmtG(billFine)} fine comes off the gold owed to ${supplier.name}`,
-      `• ${fmtMoneyInr(amount)} goes on their account as a bill, paid like any other`,
+      `• ${fmtMoneyInr(amount)}${gstAmount > 0 ? ` (incl. GST ${pctText(gstPct)}% ${fmtMoneyInr(gstAmount)})` : ""} goes on their account as a bill, paid like any other`,
       "• no stock moves — the gold is already in stock",
     ].join("\n"), { confirmText: "Make the bill" }))) return;
     try {
@@ -238,7 +249,7 @@ export function SupplierGoldPanel({ supplier, isAdmin, mode, onMode }: {
           <div className="space-y-3">
             <Stats>
               {mode === "bill"
-                ? <Stat big label="Bill" value={amount > 0 ? fmtMoneyInr(amount) : "—"} sub={billFine > 0 && num(rate) > 0 ? `${fmtG(billFine)} fine × ${fmtMoneyInr(num(rate))}/g` : "fine grams × rate"} />
+                ? <Stat big label="Bill" value={amount > 0 ? fmtMoneyInr(amount) : "—"} sub={billFine > 0 && num(rate) > 0 ? `${fmtG(billFine)} fine × ${fmtMoneyInr(num(rate))}/g${gstAmount > 0 ? ` + GST ${fmtMoneyInr(gstAmount)}` : ""}` : "fine grams × rate"} />
                 : mode === "opening"
                   ? <Stat big label="Opening" value={`${fmtG(num(fine))} fine`} />
                   : <Stat big label="Fine gold" value={moveFine > 0 ? `${fmtG(moveFine)} fine` : "—"} sub={purity ? `${purity} at ${Math.round(goldFine(1, purity) * 1000)}‰` : "choose the purity"} />}
@@ -311,6 +322,15 @@ export function SupplierGoldPanel({ supplier, isAdmin, mode, onMode }: {
                 {dateField}
                 {companyField}
                 {noteField}
+                {/* In bill: GST on top of fine × rate (lib/purchaseGst.ts). */}
+                <div className="col-span-2 flex flex-wrap items-center gap-x-3 gap-y-2 rounded-xl border border-border/60 bg-secondary/30 px-3 py-2">
+                  <label className="flex items-center gap-2 text-sm font-medium text-brand-dark cursor-pointer">
+                    <Checkbox checked={gstBill} onCheckedChange={v => setGstBill(v === true)} aria-label="In bill (GST)" />
+                    In bill (GST)
+                  </label>
+                  {gstBill && <div className="w-24"><UnitInput min={0} max={100} step="0.01" unit="%" value={gstPctText} onChange={e => setGstPctText(e.target.value)} aria-label="GST %" /></div>}
+                  <span className="text-xs text-muted-foreground">{gstBill ? (gstAmount > 0 ? `+${fmtMoneyInr(gstAmount)} GST` : "GST on fine × rate") : "Not ticked: no bill — no GST."}</span>
+                </div>
               </div>
               <p className="text-xs text-muted-foreground mt-3">The gold stays in stock. The bill goes on their money account and is paid like any other; void it to put the gold back on what is owed.</p>
             </Group>
