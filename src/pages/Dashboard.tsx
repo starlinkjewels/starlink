@@ -6,7 +6,7 @@ import { factoryFigures, supplierFigures, lockerFigure } from "@/lib/partyTotals
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { OrderThumb } from "@/components/OrderThumb";
 import { useAuth } from "@/lib/auth";
-import { loadDb, fmtMoney, fmtDate, currentUserOrders, orderTotal, balanceDue, totalAdvance, giftCardStats, keptValue } from "@/lib/db";
+import { loadDb, fmtMoney, fmtDate, byNewestEntered, currentUserOrders, orderTotal, balanceDue, totalAdvance, giftCardStats, keptValue } from "@/lib/db";
 import { useDb } from "@/hooks/useDb";
 import { motion } from "framer-motion";
 import { Package, Clock, CheckCircle2, Users, Briefcase, DollarSign, Factory, PackageCheck, TrendingUp, ArrowRight, Truck, Wallet, TrendingDown, Receipt, BadgeCheck, ClipboardCheck, Coins, Gem, Gift, AlertCircle, type LucideIcon } from "lucide-react";
@@ -147,7 +147,8 @@ export function Dashboard() {
   ].map(s => ({ ...s, value: orders.filter(o => o.status === s.name).length }));
 
   const client = user?.role === "client" ? db.clients.find(c => c.id === user.clientId) : null;
-  const recent = [...orders].sort((a, b) => +new Date(b.createdAt) - +new Date(a.createdAt)).slice(0, 6);
+  // The orders entered last — a back-dated one still counts as just placed.
+  const recent = [...orders].sort(byNewestEntered).slice(0, 6);
 
   // ── Expense stats ──
   const myExpenses = useMemo(

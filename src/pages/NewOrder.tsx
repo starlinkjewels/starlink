@@ -3,7 +3,7 @@ import { activeMaterials, materialDef } from "@/lib/materials";
 import { COPY_PARAM, copyBlocker, copyFields, copyHref, copyKind } from "@/lib/orderCopy";
 import { chargeDrafts } from "@/components/OtherCharges";
 import { useCan } from "@/hooks/useCan";
-import { buildLooseTimelineSteps, type ReadyStockItem } from "@/lib/db";
+import { buildLooseTimelineSteps, byNewestEntered, type ReadyStockItem } from "@/lib/db";
 import { looseStages } from "@/lib/stages";
 import { ProductionPlan, type OrderKind } from "@/components/order/ProductionPlan";
 import type { PlannedBuy } from "@/components/BuyMaterialForm";
@@ -489,7 +489,7 @@ function NewOrderForm() {
   // The client's orders, newest first — only those this person may see (lib/db.ts).
   const clientOrders = (clientId: string): Order[] => !user || isClient || !clientId || clientId === READY_STOCK_CLIENT ? []
     : currentUserOrders(db, user).filter(o => o.clientId === clientId && !o.forReadyStock)
-        .sort((a, b) => (b.createdAt ?? "").localeCompare(a.createdAt ?? ""));
+        .sort(byNewestEntered);
   // Rhodium and Stamping start as the client had them on their last order (no
   // engraving — that was those words alone); our own stock build starts with none.
   const chooseClient = (v: string) => {
