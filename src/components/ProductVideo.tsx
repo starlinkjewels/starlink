@@ -129,7 +129,7 @@ export function ProductVideo({ src: original, poster, onDownload, onUnplayable, 
       ) : (
         <>
           {/* Sound, full screen, download — in the corner, out of the way. */}
-          <div className="absolute top-2.5 right-2.5 flex items-center gap-1.5 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 sm:focus-within:opacity-100 transition-opacity">
+          <div className="absolute top-2.5 right-2.5 flex items-center gap-1.5 opacity-100 [@media(hover:hover)]:opacity-0 [@media(hover:hover)]:group-hover:opacity-100 sm:focus-within:opacity-100 transition-opacity">
             <button type="button" className={btn} onClick={() => setMuted(m => !m)} aria-label={muted ? "Sound on" : "Sound off"} title={muted ? "Sound on" : "Sound off"}>
               {muted ? <VolumeX className="h-4 w-4" /> : <Volume2 className="h-4 w-4" />}
             </button>

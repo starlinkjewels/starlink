@@ -61,7 +61,10 @@ service cloud.firestore {
       allow read: if isActive();
       allow create: if isAdmin() || (isStaff() && request.resource.data.role == 'client');
       allow update: if isAdmin()
-        || (isStaff() && resource.data.role == 'client')
+        // Staff look after clients' profiles — but a client's stays a client's. Turning one
+        // into an employee or admin (with someone's own sign-in) would let them grant
+        // themselves anything once an admin's session copies it to the security index.
+        || (isStaff() && resource.data.role == 'client' && request.resource.data.role == 'client')
         || (isActive()
             && resource.data.authUid == request.auth.uid
             && request.resource.data.role     == resource.data.role
@@ -71,7 +74,9 @@ service cloud.firestore {
             // Nor their own role, or the companies they sell for. Read with get(): a field that is not there
             // fails the whole check, and most profiles have no roleId at all.
             && request.resource.data.get('roleId', null) == resource.data.get('roleId', null)
-            && request.resource.data.get('companyIds', null) == resource.data.get('companyIds', null));
+            && request.resource.data.get('companyIds', null) == resource.data.get('companyIds', null)
+            // Nor let themselves into Documents: an admin's session copies this to the index (canDocs below).
+            && request.resource.data.get('documentsAccess', null) == resource.data.get('documentsAccess', null));
       allow delete: if isAdmin() || (isStaff() && resource.data.role == 'client');
     }
 
@@ -266,6 +271,18 @@ service cloud.firestore {
     // the overflow is written to pages under the share. Same access as the
     // share itself: public to read, staff to write.
     match /shares/{id}/items/{page} { allow read: if true; allow write: if isStaff(); }
+
+    // Documents — the business's own papers (src/lib/documentsModel.ts). Only
+    // an admin, or an employee an admin let in: the "docs" flag on their role
+    // index, which only an admin can write (a non-admin may write only role
+    // "client" index docs, and a client's index never passes isStaff()). Never
+    // public: a password link is opened by the openDocShare function (it reads
+    // with the server's rights), so the password's hash in docShares never
+    // leaves the server.
+    function canDocs() { return isAdmin() || (isStaff() && hasIdx() && idx().get('docs', false) == true); }
+    match /docFolders/{id} { allow read, write: if canDocs(); }
+    match /docItems/{id}   { allow read, write: if canDocs(); }
+    match /docShares/{id}  { allow read, write: if canDocs(); }
 
     // App settings / branding — readable by any active user; edited by staff.
     match /meta/{doc} {

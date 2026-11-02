@@ -1693,6 +1693,19 @@ function OrderDetailPageBody() {
     } catch { toast.error("Failed to upload images"); }
     setRefUploading(false);
   };
+  // The CAD picture taken off the order (a wrong one uploaded) — the stage and its
+  // history stay as they are; a new one can be uploaded any time.
+  const removeCadImage = async () => {
+    if (!(await confirmBox("Remove the CAD image from this order?\n\nThe client stops seeing it. You can upload another any time."))) return;
+    updateDb(d => {
+      const o = d.orders.find(x => x.id === order.id)!;
+      const before = orderPictures(o);
+      o.cadImage = undefined;
+      followOrderPictures(d, order.id, before, whoOf(user));
+    });
+    toast.success("CAD image removed");
+  };
+
   const removeRefImage = async (src: string) => {
     if (!(await confirmBox("Remove this reference image?"))) return;
     updateDb(d => {
@@ -2968,7 +2981,8 @@ function OrderDetailPageBody() {
             // Visible to everyone (incl. client) once a 3D model is on file; else the first thing missing.
             const main: (MoreAction & { short: string }) | null = order.cad3dmUrl ? { label: "View 360°", short: "360°", icon: Box, onSelect: () => setShow360(true) }
               : !edit ? null : !order.cadImage ? { ...uploadCad, short: cadUploading ? "…" : "Add CAD" } : { ...upload3dm, short: model3dmUploading ? "…" : "Add 3D" };
-            const rest = edit ? [uploadCad, upload3dm].filter(a => a.label !== main?.label) : [];
+            const removeCad: MoreAction = { label: "Remove CAD image", icon: Trash2, danger: true, disabled: busy, onSelect: () => { void removeCadImage(); } };
+            const rest = edit ? [uploadCad, upload3dm, ...(order.cadImage ? [removeCad] : [])].filter(a => a.label !== main?.label) : [];
             const MainIcon = main?.icon;
             return (
               <>
@@ -3027,7 +3041,7 @@ function OrderDetailPageBody() {
                 <button
                   type="button"
                   onClick={() => setLightboxSrc(order.cadImage!)}
-                  className="absolute top-2 right-2 h-8 w-8 rounded-lg bg-black/50 text-white grid place-items-center opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity"
+                  className="absolute top-2 right-2 h-8 w-8 rounded-lg bg-black/50 text-white grid place-items-center opacity-100 [@media(hover:hover)]:opacity-0 [@media(hover:hover)]:group-hover:opacity-100 focus-visible:opacity-100 transition-opacity"
                   aria-label="Zoom CAD image"
                 >
                   <Eye className="h-4 w-4" />
@@ -3199,20 +3213,20 @@ function OrderDetailPageBody() {
                   <img src={src} alt={`Product photo ${i + 1}`} className="h-full w-full object-cover cursor-pointer" onClick={() => setLightboxSrc(src)} />
                   <button
                     type="button" onClick={() => setLightboxSrc(src)}
-                    className="absolute top-1.5 right-1.5 h-7 w-7 rounded-lg bg-black/50 text-white grid place-items-center opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity"
+                    className="absolute top-1.5 right-1.5 h-7 w-7 rounded-lg bg-black/50 text-white grid place-items-center opacity-100 [@media(hover:hover)]:opacity-0 [@media(hover:hover)]:group-hover:opacity-100 focus-visible:opacity-100 transition-opacity"
                     aria-label="Zoom photo">
                     <Eye className="h-3.5 w-3.5" />
                   </button>
                   <button
                     type="button" onClick={() => downloadOne(src, `photo-${i + 1}.jpg`)}
-                    className="absolute bottom-1.5 right-1.5 h-7 w-7 rounded-lg bg-black/50 text-white grid place-items-center opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity"
+                    className="absolute bottom-1.5 right-1.5 h-7 w-7 rounded-lg bg-black/50 text-white grid place-items-center opacity-100 [@media(hover:hover)]:opacity-0 [@media(hover:hover)]:group-hover:opacity-100 focus-visible:opacity-100 transition-opacity"
                     aria-label="Download photo">
                     <Download className="h-3.5 w-3.5" />
                   </button>
                   {canEditStage() && (
                     <button
                       type="button" onClick={() => removeProductPhoto(src)}
-                      className="absolute top-1.5 left-1.5 h-7 w-7 rounded-lg bg-destructive/80 text-white grid place-items-center opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity"
+                      className="absolute top-1.5 left-1.5 h-7 w-7 rounded-lg bg-destructive/80 text-white grid place-items-center opacity-100 [@media(hover:hover)]:opacity-0 [@media(hover:hover)]:group-hover:opacity-100 focus-visible:opacity-100 transition-opacity"
                       aria-label="Remove photo">
                       <Trash2 className="h-3.5 w-3.5" />
                     </button>

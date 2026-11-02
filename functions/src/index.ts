@@ -7,6 +7,8 @@ export { sendMail } from "./mail";
 export { setClientLogin } from "./clientLogin";
 // Product videos made playable on every browser and device (see videoWeb.ts).
 export { makeWebVideo } from "./videoWeb";
+// Documents: opening a password link without signing in (see docShare.ts).
+export { openDocShare } from "./docShare";
 // Smart Pipelines — the business's own automations (Settings → Autopilot; see pipelines/).
 export { pipelineOnOrder, pipelineOnClient, pipelineOnInvoice, pipelineOnAnswer, pipelineTick, pipelineTest, pipelineRunNow } from "./pipelines";
 
