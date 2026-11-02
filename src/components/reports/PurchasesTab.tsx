@@ -17,7 +17,9 @@ export function PurchasesTab({ ctx }: { ctx: ReportCtx }) {
     const inP = (db.purchases ?? []).filter(p => inPeriod(period, p.invoiceDate || p.createdAt) && (!ctx.companyId || companyOf(p) === ctx.companyId));
     const gold = inP.filter(p => p.material === "gold");
     const dia = inP.filter(p => p.material === "diamond");
-    const oth = inP.filter(p => p.material !== "gold" && p.material !== "diamond");
+    const oth = inP.filter(p => p.material !== "gold" && p.material !== "diamond" && p.material !== "readyPiece");
+    // Finished pieces bought ready-made — never gold grams or diamond carats.
+    const ready = inP.filter(p => p.material === "readyPiece");
     const bySupplier = new Map<string, number>();
     for (const p of inP) bySupplier.set(p.supplierId, (bySupplier.get(p.supplierId) ?? 0) + p.totalInr);
     return {
@@ -28,6 +30,8 @@ export function PurchasesTab({ ctx }: { ctx: ReportCtx }) {
       diaCt: dia.reduce((s, p) => s + (p.diamond?.carat ?? 0), 0),
       othInr: oth.reduce((s, p) => s + p.totalInr, 0),
       othCount: oth.length,
+      readyInr: ready.reduce((s, p) => s + p.totalInr, 0),
+      readyPcs: ready.reduce((s, p) => s + (p.piece?.qty ?? 0), 0),
       // Brokerage we pay on the period's bills, and what brokers are owed today (lib/brokers.ts).
       brokerageInr: inP.reduce((s, p) => s + brokerageWePay(p), 0),
       brokersOwed: (db.brokers ?? []).reduce((s, b) => s + Math.max(0, brokerAccount(db, b).due), 0),
@@ -51,7 +55,7 @@ export function PurchasesTab({ ctx }: { ctx: ReportCtx }) {
       )}
       <div className={`grid grid-cols-2 gap-3 ${data.hasBrokers ? "lg:grid-cols-6" : "lg:grid-cols-5"}`}>
         <KpiCard icon={Coins} label="Gold bought" value={inr(data.goldInr, true)} sub={`${num(Math.round(data.goldG * 1000) / 1000, " g")} · ${num(Math.round(data.goldFine * 1000) / 1000, " g fine")}`} tone="gold" />
-        <KpiCard icon={Gem} label="Diamonds bought" value={inr(data.diaInr, true)} sub={`${num(Math.round(data.diaCt * 100) / 100, " ct")}${data.diaCt ? ` · ${inr(data.diaInr / data.diaCt)}/ct avg` : ""}${data.othCount ? ` · other materials ${inr(data.othInr, true)}` : ""}`} tone="sky" />
+        <KpiCard icon={Gem} label="Diamonds bought" value={inr(data.diaInr, true)} sub={`${num(Math.round(data.diaCt * 100) / 100, " ct")}${data.diaCt ? ` · ${inr(data.diaInr / data.diaCt)}/ct avg` : ""}${data.othCount ? ` · other materials ${inr(data.othInr, true)}` : ""}${data.readyPcs ? ` · ready jewellery ${inr(data.readyInr, true)} (${num(data.readyPcs, " pcs")})` : ""}`} tone="sky" />
         <KpiCard icon={Scale} label="Fine gold cost" value={data.fine ? `${inr(data.fine.rate)}/g` : "—"} sub={data.fine ? "Average, 24KT" : "No priced gold yet"} tone="violet" />
         <KpiCard icon={Landmark} label="Owed to suppliers" value={inr(data.pay.suppliersInr, true)} sub="As of today" tone="rose" />
         <KpiCard icon={Factory} label="Owed to factories" value={inr(data.pay.factoriesInr, true)} sub="Labour, as of today" tone="rose" />
@@ -60,7 +64,7 @@ export function PurchasesTab({ ctx }: { ctx: ReportCtx }) {
 
       <div className="grid lg:grid-cols-3 gap-4">
         <Panel title="Material bought, month by month" subtitle="By supplier bill date" icon={ShoppingCart} className="lg:col-span-2">
-          {data.months.some(m => m.goldInr || m.diamondInr || m.otherInr) ? (
+          {data.months.some(m => m.goldInr || m.diamondInr || m.otherInr || m.readyInr) ? (
             <div className="h-64">
               <ResponsiveContainer width="100%" height="100%">
                 <BarChart data={data.months} margin={{ top: 8, right: 8, left: -4, bottom: 0 }}>
@@ -70,8 +74,9 @@ export function PurchasesTab({ ctx }: { ctx: ReportCtx }) {
                   <Tooltip content={<ChartTip format={v => inr(v)} />} />
                   <Legend wrapperStyle={{ fontSize: 11 }} iconType="circle" />
                   <RBar dataKey="goldInr" name="Gold" stackId="a" fill={C.gold} maxBarSize={36} />
-                  <RBar dataKey="diamondInr" name="Diamonds" stackId="a" fill={C.sky} radius={data.othCount ? undefined : [6, 6, 0, 0]} maxBarSize={36} />
-                  {data.othCount > 0 && <RBar dataKey="otherInr" name="Other materials" stackId="a" fill="oklch(0.62 0.13 160)" radius={[6, 6, 0, 0]} maxBarSize={36} />}
+                  <RBar dataKey="diamondInr" name="Diamonds" stackId="a" fill={C.sky} radius={data.othCount || data.readyPcs ? undefined : [6, 6, 0, 0]} maxBarSize={36} />
+                  {data.othCount > 0 && <RBar dataKey="otherInr" name="Other materials" stackId="a" fill="oklch(0.62 0.13 160)" radius={data.readyPcs ? undefined : [6, 6, 0, 0]} maxBarSize={36} />}
+                  {data.readyPcs > 0 && <RBar dataKey="readyInr" name="Ready jewellery" stackId="a" fill={C.violet} radius={[6, 6, 0, 0]} maxBarSize={36} />}
                 </BarChart>
               </ResponsiveContainer>
             </div>

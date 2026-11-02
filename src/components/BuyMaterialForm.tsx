@@ -1,6 +1,6 @@
 import { AddNewItem, useAddNew } from "@/components/create/QuickCreate";
 import { useStudio } from "@/lib/studio";
-import { useId, useState } from "react";
+import { useId, useRef, useState } from "react";
 import { useAuth } from "@/lib/auth";
 import { BillBrokerFields } from "@/components/BillBrokerFields";
 import { ListSelect, LooseLotFields, CertGradeFields } from "@/components/LotFields";
@@ -12,6 +12,7 @@ import {
   isDiamondOnlyOrder, type Order, type Purchase, type PurchaseCurrency,
   loadDb,
   worksOnOrder,
+  fmtMoney, writeStockCost, type ReadyStockItem,
 } from "@/lib/db";
 import { increaseStock, logOrderDirectPurchase } from "@/lib/stock";
 import { fmtMoneyInr, applyDiscountPct, discountLabel } from "@/lib/manufacturing";
@@ -23,28 +24,64 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Coins, Gem, BadgeCheck, Plus, X, Layers, ShoppingCart, ChevronDown, type LucideIcon } from "lucide-react";
+import { Coins, Gem, BadgeCheck, Plus, X, Layers, ShoppingCart, ChevronDown, Crown, ImagePlus, type LucideIcon } from "lucide-react";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Command, CommandEmpty, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
 import { toast } from "sonner";
 import { OtherMaterialSelect, GradeInput } from "@/components/MaterialFields";
-import { materialDef, materialName, materialUnit, type MaterialKey, type MaterialUnit } from "@/lib/materials";
+import { materialDef, materialName, materialUnit, READY_PIECE, type MaterialKey, type MaterialUnit } from "@/lib/materials";
+import { ListCombo } from "@/components/ListCombo";
+import { WeightCheck } from "@/components/WeightCheck";
+import { weightProblem } from "@/lib/weights";
+import { metalHasKarats, metalOptions } from "@/lib/metals";
+import { choicesOf, listOf } from "@/lib/optionLists";
+import { officeLabel, readyStockOffices } from "@/lib/offices";
+import { logItem, whoOf } from "@/lib/readyStockHistory";
+import { uploadDataUrl } from "@/lib/storage";
+import { imageForUpload } from "@/lib/images";
+import { inrOn } from "@/lib/orderCost";
 import { CompanyPicker, useDefaultCompany, useMultiCo } from "@/components/CompanyFields";
 import { coField, companyById, workCompanyOf } from "@/lib/companies";
 import { confirmBox } from "@/lib/confirm";
 import { Field, Group, PanelActions, Stat, UnitInput } from "@/components/BillLayout";
 
 const GOLD_PURITIES = ["9K", "10K", "14K", "18K", "22K", "24K"];
-/** Gold, loose or certified diamonds, or any other material (Settings → Materials). */
-type BuyKind = "gold" | "loose" | "certified" | "other";
+/** Gold, loose or certified diamonds, any other material (Settings → Materials),
+ *  or ready jewellery — finished pieces bought ready-made, onto Ready Stock. */
+type BuyKind = "gold" | "loose" | "certified" | "other" | "ready";
 /** Each kind of line: what it is called and its badge. */
 const KIND: Record<BuyKind, { label: string; icon: LucideIcon }> = {
   gold: { label: "Gold", icon: Coins },
   loose: { label: "Loose diamond", icon: Gem },
   certified: { label: "Certified diamond", icon: BadgeCheck },
   other: { label: "Other material", icon: Layers },
+  ready: { label: "Ready jewellery", icon: Crown },
 };
-const KIND_ORDER: BuyKind[] = ["gold", "loose", "certified", "other"];
+const KIND_ORDER: BuyKind[] = ["gold", "loose", "certified", "other", "ready"];
+/** Material only — a bill for an order, and opening stock, never hold ready
+ *  jewellery: a ready piece goes onto Ready Stock, not into an order or Stock. */
+const MATERIAL_KINDS: BuyKind[] = KIND_ORDER.filter(k => k !== "ready");
+/** A ready piece's karat — the same choices as a Ready Stock piece's. */
+const READY_KARATS = ["9K", "14K", "18K", "22K", "24K"];
+
+/** A ready piece as Ready Stock asks for it (components/ReadyStockItemDialog):
+ *  each piece's details, its selling price in $, and the office it is kept at. */
+interface ReadyDraft {
+  name: string; type: string; metal: string; karat: string;
+  gross: string; net: string; dia: string; diaType: string;
+  price: string; office: string; sku: string;
+  /** Photos as picked (data URLs) — uploaded on save. */
+  images: string[];
+}
+// Starts on the first of each of the business's lists, as a new Ready Stock piece does.
+const emptyReady = (): ReadyDraft => ({
+  name: "", type: listOf("jewelleryTypes")[0] ?? "Ring", metal: listOf("metals")[0] ?? "Yellow Gold", karat: "22K",
+  gross: "", net: "", dia: "", diaType: listOf("diamondTypes")[0] ?? "Natural",
+  price: "", office: "", sku: "", images: [],
+});
+/** "Ring 18K Yellow Gold" — a ready piece's name when none is typed. */
+const readyName = (pc: ReadyDraft, settings?: Parameters<typeof metalHasKarats>[1]): string =>
+  pc.name.trim() || [pc.type.trim(), metalHasKarats(pc.metal, settings) ? pc.karat : "", pc.metal].filter(Boolean).join(" ");
 
 /*
  * Every line, whatever it buys, is the same grid: what it is in the first
@@ -74,6 +111,8 @@ interface Line {
   fluor: string; measure: string; lab: string; certNo: string;
   /** kind "other": which material, and its grade. */
   materialId: string; grade: string;
+  /** kind "ready": the piece (qty is its pieces, rate its cost a piece). */
+  pc?: ReadyDraft;
 }
 
 const emptyLine = (): Line => ({
@@ -94,7 +133,8 @@ const isGemLine = (l: Line, settings: Parameters<typeof materialDef>[0]): boolea
 const otherBucket = (l: Line, settings: Parameters<typeof materialDef>[0]): string =>
   isGemLine(l, settings) ? lotKey(lotOfLine(l)) : (l.grade.trim() || "—");
 
-/** The stock material a line buys. */
+/** The stock material a line buys. Never asked of a ready line — it buys no
+ *  stock material (its purchase is READY_PIECE and its pieces go onto Ready Stock). */
 const lineMaterial = (l: Line): MaterialKey => (l.kind === "gold" ? "gold" : l.kind === "other" ? (l.materialId as MaterialKey) : "diamond");
 
 /** Weight × rate, less this line's own discount. */
@@ -108,13 +148,14 @@ const whose = (name: string) => (/s$/i.test(name) ? `${name}'` : `${name}'s`);
 
 /** What a line measures in: grams, carats, or the other material's own unit. */
 const lineUnit = (l: Line, settings: Parameters<typeof materialUnit>[0]): MaterialUnit =>
-  (l.kind === "gold" ? "g" : l.kind === "other" ? materialUnit(settings, l.materialId) : "ct");
+  (l.kind === "gold" ? "g" : l.kind === "other" ? materialUnit(settings, l.materialId) : l.kind === "ready" ? "pcs" : "ct");
 
 /** "18K gold", "Round · 1.3 mm · G-H · VS", "Certified Oval GIA 2141…", "950 Platinum" — a line in a word or two. */
 const lineText = (l: Line, settings: Parameters<typeof materialName>[0]): string =>
   l.kind === "gold" ? `${l.purity} gold`
     : l.kind === "loose" ? lotLabel(lotKey(lotOfLine(l)))
     : l.kind === "certified" ? `Certified ${l.shape}${l.certNo.trim() ? ` · ${l.certNo.trim()}` : ""}`
+    : l.kind === "ready" ? `Ready ${readyName(l.pc ?? emptyReady())}`
     : isGemLine(l, settings) ? `${materialName(settings, l.materialId)} · ${lotKey(lotOfLine(l))}`
     : `${l.grade.trim() ? `${l.grade.trim()} ` : ""}${materialName(settings, l.materialId)}`;
 
@@ -190,6 +231,8 @@ export function BuyMaterialForm({ open, onOpenChange, supplierId: fixedSupplier,
   const addLine = (kind: BuyKind) => setLines(ls => [...ls, {
     ...emptyLine(), kind,
     materialId: kind === "other" ? ([...ls].reverse().find(l => l.kind === "other")?.materialId ?? "") : "",
+    // A ready piece: one piece unless said otherwise.
+    ...(kind === "ready" ? { pc: emptyReady(), qty: "1" } : {}),
   }]);
   const removeLine = (i: number) => setLines(ls => (ls.length > 1 ? ls.filter((_, n) => n !== i) : ls));
 
@@ -215,6 +258,9 @@ export function BuyMaterialForm({ open, onOpenChange, supplierId: fixedSupplier,
   const hasDiscount = Math.abs(discount) >= (usd ? 0.005 : 0.5);
   const chosenSupplier = db.suppliers.find(s => s.id === supplierId);
   const certifiedLines = lines.filter(l => l.kind === "certified").length;
+  // Ready jewellery goes onto Ready Stock — only a bill into stock offers it.
+  const readyLines = lines.filter(l => l.kind === "ready").length;
+  const kinds = forWhat === "order" ? MATERIAL_KINDS : KIND_ORDER;
 
   const reset = () => {
     setLines([{ ...emptyLine(), kind: firstKind }]);
@@ -248,9 +294,20 @@ export function BuyMaterialForm({ open, onOpenChange, supplierId: fixedSupplier,
     if (currency === "USD" && !xrate) { toast.error("Enter the exchange rate"); return; }
     for (const [i, l] of lines.entries()) {
       const q = Number(l.qty);
+      if (l.kind === "ready" && forWhat === "order") { toast.error(`Item ${i + 1}: ready jewellery goes onto Ready Stock — buy it for Stock, not for an order`); return; }
       if (l.kind === "other" && !materialDef(db.settings, l.materialId)) { toast.error(`Item ${i + 1}: choose the material`); return; }
-      if (!q || q <= 0) { toast.error(`Item ${i + 1}: enter the ${l.kind === "gold" ? "weight" : l.kind === "other" ? "quantity" : "carat"}`); return; }
+      if (!q || q <= 0) { toast.error(`Item ${i + 1}: enter the ${l.kind === "gold" ? "weight" : l.kind === "other" ? "quantity" : l.kind === "ready" ? "pieces" : "carat"}`); return; }
       if (l.kind === "certified" && !l.certNo.trim()) { toast.error(`Item ${i + 1}: enter the report number`); return; }
+      if (l.kind === "ready") {
+        const pc = l.pc ?? emptyReady();
+        if (!Number.isInteger(q)) { toast.error(`Item ${i + 1}: pieces are whole — 1, 2, 3…`); return; }
+        if (!pc.type.trim()) { toast.error(`Item ${i + 1}: choose the jewellery type`); return; }
+        if (!pc.metal.trim()) { toast.error(`Item ${i + 1}: choose the metal`); return; }
+        const wp = weightProblem({ gross: Number(pc.gross), net: Number(pc.net), diamondCt: Number(pc.dia) });
+        if (wp) { toast.error(`Item ${i + 1}: ${wp}`); return; }
+        if (Number(pc.price) < 0) { toast.error(`Item ${i + 1}: the selling price can't be below $0`); return; }
+        if (!pc.office) { toast.error(`Item ${i + 1}: choose the office the piece is kept at`); return; }
+      }
       if (lineInr(l) <= 0) { toast.error(`Item ${i + 1}: comes to ₹0 — check the rate`); return; }
     }
     // Recording the bill: now, or — planned with a new order — when the order is placed.
@@ -261,8 +318,22 @@ export function BuyMaterialForm({ open, onOpenChange, supplierId: fixedSupplier,
     const ids = lines.map(() => uid("pur_"));
     // The bill's brokerage, shared over its lines by amount (lib/brokers.ts).
     const brokerShares = brokerageForLines(brokerage, lines.map((l, i) => lineInr(l) + (i === 0 ? roundOffInr : 0)));
+    // Ready jewellery: each line is one Ready Stock piece, made below with the bill.
+    const readyIds = lines.map(l => (l.kind === "ready" ? uid("rs_") : ""));
+    // Its cost is admin-only and in dollars: the line's landed rupees at the bill's
+    // own rate when billed in $, else the $ rate on file for the bill's date.
+    const isAdmin = user?.role === "admin";
+    const usdRate = currency === "USD" ? Number(xrate) : inrOn(db, "USD", now);
+    let costless = 0;
     setSaving(true);
     try {
+      // Photos first: a failed upload must leave nothing half-saved.
+      const readyImages: string[][] = [];
+      for (const [i, l] of lines.entries()) {
+        readyImages[i] = l.kind === "ready" && l.pc?.images.length
+          ? await Promise.all(l.pc.images.map(img => uploadDataUrl(img, `readyStock/${readyIds[i]}`)))
+          : [];
+      }
       // Gold and loose pool into Stock; a certified stone never pools — it
       // becomes its own packet below.
       // From the order's own Buy: material goes straight to the factory and never into the
@@ -270,7 +341,7 @@ export function BuyMaterialForm({ open, onOpenChange, supplierId: fixedSupplier,
       // Both legs carry the purchase's own timestamp (see logOrderDirectPurchase).
       if (asFixed && target) {
         for (const [i, l] of lines.entries()) {
-          if (l.kind === "certified") continue;
+          if (l.kind === "certified" || l.kind === "ready") continue;
           const lot = l.kind === "loose" || isGemLine(l, db.settings) ? lotOfLine(l) : undefined;
           await logOrderDirectPurchase({
             companyId: co, material: lineMaterial(l),
@@ -282,7 +353,8 @@ export function BuyMaterialForm({ open, onOpenChange, supplierId: fixedSupplier,
       }
       // Bought for an order, nothing goes into stock — the order's factory takes it from the bill.
       for (const [i, l] of (target ? [] : lines).entries()) {
-        if (l.kind === "certified") continue;
+        // A certified stone is its own packet; a ready piece goes onto Ready Stock (below) — neither pools.
+        if (l.kind === "certified" || l.kind === "ready") continue;
         // Loose stones go into their lot (its bag): shape · sieve · mm · colour · clarity (lib/diamondLots.ts).
         const lot = l.kind === "loose" || isGemLine(l, db.settings) ? lotOfLine(l) : undefined;
         await increaseStock({
@@ -300,15 +372,28 @@ export function BuyMaterialForm({ open, onOpenChange, supplierId: fixedSupplier,
           const disc = Math.min(Math.max(Number(l.discountPct) || 0, -100), 100);
           const isGold = l.kind === "gold";
           const isOther = l.kind === "other";
+          const isReady = l.kind === "ready";
+          const pc = isReady ? (l.pc ?? emptyReady()) : undefined;
+          const hasKarat = !!pc && metalHasKarats(pc.metal, d.settings);
+          const dia = pc ? Number(pc.dia) || undefined : undefined;
           const total = lineInr(l) + (i === 0 ? roundOffInr : 0);
           const purchase: Purchase = {
-            id: ids[i], supplierId, material: lineMaterial(l), ...coField(co),
+            id: ids[i], supplierId, material: isReady ? READY_PIECE : lineMaterial(l), ...coField(co),
             gold: isGold ? { weightGrams: q, purity: l.purity, ratePerGram: Number(l.rate) || 0 } : undefined,
+            // The bill's own record of the piece — the statement reads it, whatever becomes of the piece.
+            piece: pc ? {
+              readyStockId: readyIds[i], qty: q, ratePerPiece: Number(l.rate) || 0,
+              name: readyName(pc, d.settings), jewelleryType: pc.type.trim(), metal: pc.metal,
+              karat: hasKarat ? pc.karat : undefined,
+              grossWeight: Number(pc.gross) || undefined, netWeight: Number(pc.net) || undefined,
+              diamondWeight: dia, diamondType: dia ? pc.diaType || undefined : undefined,
+              sku: pc.sku.trim() || undefined,
+            } : undefined,
             other: isOther ? {
               qty: q, grade: otherBucket(l, db.settings), ratePerUnit: Number(l.rate) || 0,
               pieces: Number(l.pcs) > 0 ? Math.round(Number(l.pcs)) : undefined,
             } : undefined,
-            diamond: !isGold && !isOther ? {
+            diamond: !isGold && !isOther && !isReady ? {
               // Loose: its colour and clarity read as its quality, where older screens show one.
               carat: q, quality: (l.kind === "loose" ? [l.color, l.clarity].map(x => x.trim()).filter(Boolean).join(" ") : l.quality.trim()) || undefined, ratePerCarat: Number(l.rate) || 0,
               pieces: l.kind === "loose" && Number(l.pcs) > 0 ? Math.round(Number(l.pcs)) : undefined,
@@ -331,6 +416,29 @@ export function BuyMaterialForm({ open, onOpenChange, supplierId: fixedSupplier,
             createdBy: user!.id, createdAt: now,
           };
           d.purchases.unshift(purchase);
+          if (pc) {
+            // The piece onto Ready Stock, at its office, in the bill's company.
+            // Every client can read Ready Stock: no supplier, bill or cost on it.
+            const price = Math.max(0, Math.round((Number(pc.price) || 0) * 100) / 100);
+            const item: ReadyStockItem = {
+              id: readyIds[i], name: readyName(pc, d.settings), jewelleryType: pc.type.trim(), metal: pc.metal,
+              productKarats: hasKarat ? pc.karat : undefined,
+              grossWeight: Number(pc.gross) || undefined, netWeight: Number(pc.net) || undefined,
+              diamondWeight: dia, diamondType: dia ? pc.diaType || undefined : undefined,
+              price, quantity: q, images: readyImages[i] ?? [],
+              sku: pc.sku.trim() || undefined, location: pc.office, ...coField(co),
+              createdBy: user!.id, createdAt: now,
+            };
+            logItem(item, { ...whoOf(user), at: now, kind: "added",
+              text: `Bought ready-made — added to Ready Stock at the ${officeLabel(pc.office)} · ${q} piece${q !== 1 ? "s" : ""}${price > 0 ? ` at ${fmtMoney(price)}` : ", no selling price yet"}` });
+            if (!d.readyStock) d.readyStock = [];
+            d.readyStock.unshift(item);
+            // What each piece cost us, in $: the line (with its discount, and the bill's
+            // rounding when it is the first line) plus any brokerage we pay on it.
+            const costUsd = usdRate && usdRate > 0 ? Math.round((landedInr(purchase) / q / usdRate) * 100) / 100 : 0;
+            if (isAdmin && costUsd > 0) writeStockCost(d, item.id, costUsd);
+            else costless++;
+          }
           if (l.kind === "certified") {
             if (!d.diamondPackets) d.diamondPackets = [];
             packetIds[i] = uid("dp_");
@@ -405,7 +513,13 @@ export function BuyMaterialForm({ open, onOpenChange, supplierId: fixedSupplier,
       });
       toast.success(asFixed && sendTo
         ? `${lines.length > 1 ? `${lines.length} items` : "Item"} bought (${fmtMoneyInr(billTotalInr)}) & sent to ${db.factories.find(f => f.id === sendTo)?.name || "the factory"}`
-        : `${lines.length > 1 ? `${lines.length} items` : "Item"} bought → ${target ? `order ${target.orderNumber}` : `${co !== "main" ? `${companyById(db.settings, co).name}'s ` : ""}stock`} · ${fmtMoneyInr(billTotalInr)} to ${supplier?.name || "supplier"}`);
+        : `${lines.length > 1 ? `${lines.length} items` : "Item"} bought → ${target ? `order ${target.orderNumber}` : `${co !== "main" ? `${companyById(db.settings, co).name}'s ` : ""}${readyLines === lines.length ? "Ready Stock" : readyLines ? "stock & Ready Stock" : "stock"}`} · ${fmtMoneyInr(billTotalInr)} to ${supplier?.name || "supplier"}`);
+      // A ready piece saved without its cost: say why, and where it is set.
+      if (costless) {
+        toast.warning(!isAdmin
+          ? `The cost of the ready piece${costless !== 1 ? "s" : ""} is for an admin to set on Ready Stock.`
+          : `No $ rate on file for this date — the cost of the ready piece${costless !== 1 ? "s" : ""} was not set. Add a rate in Settings → Exchange rates, then set the cost on the piece in Ready Stock.`);
+      }
       reset();
       onOpenChange(false);
     } catch (e) {
@@ -465,7 +579,7 @@ export function BuyMaterialForm({ open, onOpenChange, supplierId: fixedSupplier,
             ? `${lines.length} purchase${lines.length !== 1 ? "s" : ""} onto ${whose(chosenSupplier.name)} account, for ${fixedOrder.orderNumber} — ${fixedOrder.assignedFactoryId ? `straight to ${db.factories.find(f => f.id === fixedOrder.assignedFactoryId)?.name ?? "its factory"}` : "held against the order"}.`
           : forWhat === "order"
             ? (forOrder ? `${lines.length} purchase${lines.length !== 1 ? "s" : ""} onto ${whose(chosenSupplier.name)} account, for order ${forOrder.orderNumber} — not into stock${certifiedLines ? "; certified stones kept for the order" : ""}.` : "Choose the order this bill is for.")
-            : `${lines.length} purchase${lines.length !== 1 ? "s" : ""} onto ${whose(chosenSupplier.name)} account, into ${multiCo ? `${whose(companyById(db.settings, companyId).name)} ` : ""}stock${certifiedLines ? " — each certified stone as its own packet" : ""}.`}>
+            : `${lines.length} purchase${lines.length !== 1 ? "s" : ""} onto ${whose(chosenSupplier.name)} account, into ${multiCo ? `${whose(companyById(db.settings, companyId).name)} ` : ""}${readyLines === lines.length ? "Ready Stock" : "stock"}${certifiedLines ? " — each certified stone as its own packet" : ""}${readyLines && readyLines < lines.length ? `${certifiedLines ? "; " : " — "}ready jewellery onto Ready Stock` : ""}.`}>
         <AsyncButton onClick={submit} disabled={saving} className="btn-hero rounded-xl h-11 flex-1 sm:flex-none sm:min-w-52">
           {saving ? "Saving…" : fixedOrder ? (lines.length > 1 ? `Save ${lines.length} Purchases` : "Save Purchase") : forWhat === "order" ? (forOrder ? `Buy for ${forOrder.orderNumber}` : "Buy for the order") : lines.length > 1 ? `Buy ${lines.length} Items → Stock` : (studio ? (lines.length > 1 ? `Save ${lines.length} purchases` : "Save purchase") : "Buy → Stock")}
         </AsyncButton>
@@ -551,15 +665,18 @@ export function BuyMaterialForm({ open, onOpenChange, supplierId: fixedSupplier,
         <Group title="Items" aside={<span className="text-xs text-muted-foreground">{lines.length} line{lines.length !== 1 ? "s" : ""}</span>}>
           <div className="space-y-2.5">
             {lines.map((l, i) => (
-              <LineCard key={i} line={l} n={i + 1} currency={currency} removable={lines.length > 1}
+              <LineCard key={i} line={l} n={i + 1} currency={currency} removable={lines.length > 1} kinds={kinds}
                 onChange={patch => set(i, patch)} onRemove={() => removeLine(i)} base={lineBase(l)} inr={lineInr(l)} />
             ))}
           </div>
+          {forWhat === "order" && readyLines > 0 && (
+            <p className="mt-2 text-xs text-destructive">Ready jewellery goes onto Ready Stock — remove it, or buy it for Stock.</p>
+          )}
           {/* Each line is added as its material, so it only ever shows that material's fields. */}
           {/* A phone: two by two, rather than three and one left over. */}
           <div className="mt-3 grid grid-cols-2 sm:flex sm:flex-wrap items-center gap-2">
             <span className="col-span-2 text-xs text-muted-foreground mr-1">Add a line:</span>
-            {KIND_ORDER.map(k => {
+            {kinds.map(k => {
               const Icon = KIND[k].icon;
               return (
                 <Button key={k} type="button" variant="outline" size="sm" onClick={() => addLine(k)} className="h-8 rounded-lg gap-1.5 text-xs px-2.5">
@@ -578,8 +695,10 @@ export function BuyMaterialForm({ open, onOpenChange, supplierId: fixedSupplier,
  * One line of the bill: its material as a badge, then only that material's
  * fields, in the same grid as every other line so the figures line up.
  */
-function LineCard({ line: l, n, currency, removable, onChange, onRemove, base, inr, opening = false }: {
+function LineCard({ line: l, n, currency, removable, onChange, onRemove, base, inr, opening = false, kinds }: {
   line: Line; n: number; currency: PurchaseCurrency; removable: boolean;
+  /** What the line may be changed to (ready jewellery only on a bill into stock). */
+  kinds: BuyKind[];
   /** Opening stock: no discount, and the rate is optional — it only values the stock. */
   opening?: boolean;
   onChange: (patch: Partial<Line>) => void; onRemove: () => void;
@@ -592,7 +711,7 @@ function LineCard({ line: l, n, currency, removable, onChange, onRemove, base, i
   const disc = Number(l.discountPct) || 0;
   const Icon = KIND[l.kind].icon;
   const name = l.kind === "other" && l.materialId ? materialName(db.settings, l.materialId) : KIND[l.kind].label;
-  const qtyLabel = l.kind === "gold" ? "Weight (g)" : l.kind === "loose" || l.kind === "certified" ? "Carat" : `Quantity (${unit})`;
+  const qtyLabel = l.kind === "gold" ? "Weight (g)" : l.kind === "loose" || l.kind === "certified" ? "Carat" : l.kind === "ready" ? "Pieces" : `Quantity (${unit})`;
   const qtyStep = l.kind === "gold" ? "0.001" : l.kind === "other" ? (unit === "pcs" ? "1" : "0.001") : "0.01";
   const sub = [disc !== 0 ? discountLabel(disc) : "", usd && inr > 0 ? fmtMoneyInr(inr) : ""].filter(Boolean).join(" · ");
 
@@ -608,7 +727,8 @@ function LineCard({ line: l, n, currency, removable, onChange, onRemove, base, i
         </span>
         <MoreMenu size="sm" label={`Line ${n}: change material`} title="Change this line to"
           className="border-transparent shadow-none text-muted-foreground"
-          actions={KIND_ORDER.filter(k => k !== l.kind).map(k => ({ label: KIND[k].label, icon: KIND[k].icon, onSelect: () => onChange({ kind: k }) }))} />
+          actions={kinds.filter(k => k !== l.kind).map(k => ({ label: KIND[k].label, icon: KIND[k].icon,
+            onSelect: () => onChange({ kind: k, ...(k === "ready" && !l.pc ? { pc: emptyReady(), qty: l.qty || "1" } : {}) }) }))} />
         {removable && (
           <button type="button" onClick={onRemove} aria-label={`Remove item ${n}`} title="Remove this line"
             className="h-8 w-8 -mr-1 rounded-lg grid place-items-center shrink-0 text-muted-foreground hover:text-destructive hover:bg-destructive/10">
@@ -617,7 +737,11 @@ function LineCard({ line: l, n, currency, removable, onChange, onRemove, base, i
         )}
       </div>
 
-      {l.kind === "loose" ? (
+      {l.kind === "ready" ? (
+        // A finished piece: what it is and its weights (as Ready Stock asks them),
+        // then pieces at a cost each, its selling price and the office it is kept at.
+        <ReadyFields l={l} n={n} currency={currency} unit={unit} onChange={onChange} />
+      ) : l.kind === "loose" ? (
         // A loose lot: what it is (it names the bag), then how much at what.
         <div className="space-y-2.5">
           <LooseLotFields idPrefix={`line${n}`} compact
@@ -728,6 +852,119 @@ function LineCard({ line: l, n, currency, removable, onChange, onRemove, base, i
         </div>
   
       )}
+    </div>
+  );
+}
+
+/**
+ * A ready piece's fields — the same questions, and the same lists, as adding a
+ * piece to Ready Stock: type, metal and karat, the weights of each piece, then
+ * how many at what cost (the bill), the selling price and the office (the shelf).
+ */
+function ReadyFields({ l, n, currency, unit, onChange }: {
+  l: Line; n: number; currency: PurchaseCurrency; unit: MaterialUnit;
+  onChange: (patch: Partial<Line>) => void;
+}) {
+  const db = useDb();
+  const pc = l.pc ?? emptyReady();
+  const setPc = (patch: Partial<ReadyDraft>) => onChange({ pc: { ...pc, ...patch } });
+  const offices = readyStockOffices(db.settings);
+  const hasKarat = metalHasKarats(pc.metal, db.settings);
+  const imgRef = useRef<HTMLInputElement>(null);
+  const addImages = async (files: FileList | null) => {
+    if (!files) return;
+    const room = 4 - pc.images.length;
+    if (room <= 0) { toast.error("Up to 4 photos"); return; }
+    try {
+      // As picked — full size and sharpness (lib/images.ts); uploaded when the bill is saved.
+      const picked = await Promise.all(Array.from(files).slice(0, room).map(imageForUpload));
+      setPc({ images: [...pc.images, ...picked].slice(0, 4) });
+    } catch { toast.error("Couldn't read that photo"); }
+  };
+  return (
+    <div className="space-y-2.5">
+      <div className="grid grid-cols-2 @md:grid-cols-4 gap-2.5">
+        <Field label="Jewellery type" required>{id => (
+          <ListCombo id={id} list="jewelleryTypes" value={pc.type} onChange={v => setPc({ type: v })}
+            choices={choicesOf("jewelleryTypes", undefined, db.settings, { builtIn: false })} optional={false} ariaLabel={`Item ${n}: jewellery type`} />
+        )}</Field>
+        <Field label="Metal" required>{id => (
+          <Select value={pc.metal} onValueChange={v => setPc({ metal: v })}>
+            <SelectTrigger id={id} className="h-10 rounded-xl"><SelectValue /></SelectTrigger>
+            <SelectContent>{metalOptions(pc.metal, db.settings).map(m => <SelectItem key={m} value={m}>{m}</SelectItem>)}</SelectContent>
+          </Select>
+        )}</Field>
+        {hasKarat && <Field label="Karat">{id => (
+          <Select value={pc.karat} onValueChange={v => setPc({ karat: v })}>
+            <SelectTrigger id={id} className="h-10 rounded-xl"><SelectValue /></SelectTrigger>
+            <SelectContent>{READY_KARATS.map(k => <SelectItem key={k} value={k}>{k}</SelectItem>)}</SelectContent>
+          </Select>
+        )}</Field>}
+        <Field label="Name" className={hasKarat ? "" : "col-span-2 @md:col-span-2"}>{id => (
+          <Input id={id} value={pc.name} onChange={e => setPc({ name: e.target.value })} className="rounded-xl h-10" placeholder={readyName({ ...pc, name: "" }, db.settings) || "Optional"} />
+        )}</Field>
+      </div>
+      <div className="grid grid-cols-2 @md:grid-cols-4 gap-2.5">
+        <Field label="Gross (g)">{id => (
+          <UnitInput id={id} min={0} step="0.001" unit="g" value={pc.gross} onChange={e => setPc({ gross: e.target.value })} placeholder="Each piece" />
+        )}</Field>
+        <Field label="Net (g)">{id => (
+          <UnitInput id={id} min={0} step="0.001" unit="g" value={pc.net} onChange={e => setPc({ net: e.target.value })} placeholder="Each piece" />
+        )}</Field>
+        <Field label="Diamond (ct)">{id => (
+          <UnitInput id={id} min={0} step="0.01" unit="ct" value={pc.dia} onChange={e => setPc({ dia: e.target.value })} placeholder="Optional" />
+        )}</Field>
+        {Number(pc.dia) > 0 && <Field label="Diamond type">{id => (
+          <ListCombo id={id} list="diamondTypes" value={pc.diaType} onChange={v => setPc({ diaType: v })} optional={false} ariaLabel={`Item ${n}: diamond type`} />
+        )}</Field>}
+      </div>
+      <WeightCheck gross={Number(pc.gross)} net={Number(pc.net)} diamondCt={Number(pc.dia)} />
+      <div className="grid grid-cols-2 @md:grid-cols-4 gap-2.5">
+        <Field label="Pieces" required>{id => (
+          <UnitInput id={id} min={1} step="1" unit={unit} value={l.qty} onChange={e => onChange({ qty: e.target.value })} />
+        )}</Field>
+        <Field label={`Cost / pc (${currency})`} required>{id => (
+          <UnitInput id={id} min={0} unit={`${ccySymbol(currency)}/pc`} value={l.rate} onChange={e => onChange({ rate: e.target.value })} />
+        )}</Field>
+        <Field label="Discount %">{id => (
+          <UnitInput id={id} min={-100} max={100} step="0.01" unit="%" value={l.discountPct} onChange={e => onChange({ discountPct: e.target.value })}
+            placeholder="0" title="A minus figure adds instead — −2 adds 2%" />
+        )}</Field>
+        <Field label="Selling price / pc" hint={Number(pc.price) > 0 ? undefined : "Or set it on Ready Stock"}>{id => (
+          <UnitInput id={id} min={0} step="0.01" unit="$" value={pc.price} onChange={e => setPc({ price: e.target.value })} placeholder="Optional" />
+        )}</Field>
+      </div>
+      <div className="grid grid-cols-2 @md:grid-cols-4 gap-2.5">
+        <Field label="Office — kept at" required className="col-span-2 @md:col-span-2">{id => (
+          <Select value={pc.office} onValueChange={v => setPc({ office: v })}>
+            <SelectTrigger id={id} className="h-10 rounded-xl"><SelectValue placeholder="Choose the office" /></SelectTrigger>
+            <SelectContent>{offices.map(o => <SelectItem key={o} value={o}>{officeLabel(o)}</SelectItem>)}</SelectContent>
+          </Select>
+        )}</Field>
+        <Field label="SKU / design no." className="col-span-2 @md:col-span-2">{id => (
+          <Input id={id} value={pc.sku} onChange={e => setPc({ sku: e.target.value })} className="rounded-xl h-10" placeholder="Optional" />
+        )}</Field>
+      </div>
+      {/* Photos are optional — they can be added on the piece in Ready Stock later. */}
+      <div className="flex flex-wrap items-center gap-2">
+        {pc.images.map((src, k) => (
+          <div key={k} className="relative h-14 w-14 rounded-lg overflow-hidden border border-border">
+            <img src={src} alt={`Photo ${k + 1}`} className="h-full w-full object-cover" />
+            <button type="button" onClick={() => setPc({ images: pc.images.filter((_, j) => j !== k) })} aria-label={`Remove photo ${k + 1}`}
+              className="absolute top-0.5 right-0.5 h-5 w-5 rounded-full bg-destructive text-white grid place-items-center">
+              <X className="h-3 w-3" />
+            </button>
+          </div>
+        ))}
+        {pc.images.length < 4 && (
+          <button type="button" onClick={() => imgRef.current?.click()}
+            className="h-14 px-3 rounded-lg border-2 border-dashed border-border hover:border-primary/50 hover:bg-primary/5 flex items-center gap-1.5 text-xs text-muted-foreground">
+            <ImagePlus className="h-4 w-4" />{pc.images.length ? "Add more" : "Add photos"}
+          </button>
+        )}
+        <input ref={imgRef} type="file" accept="image/*" multiple className="hidden" onChange={e => { addImages(e.target.files); e.target.value = ""; }} />
+        <span className="text-[11px] text-muted-foreground">Optional — up to 4.</span>
+      </div>
     </div>
   );
 }
@@ -884,14 +1121,15 @@ export function OpeningStockForm({ open, onOpenChange }: { open: boolean; onOpen
         <Group title="Items" aside={<span className="text-xs text-muted-foreground">{lines.length} line{lines.length !== 1 ? "s" : ""}</span>}>
           <div className="space-y-2.5">
             {lines.map((l, i) => (
-              <LineCard key={i} line={l} n={i + 1} currency="INR" removable={lines.length > 1} opening
+              <LineCard key={i} line={l} n={i + 1} currency="INR" removable={lines.length > 1} opening kinds={MATERIAL_KINDS}
                 onChange={patch => set(i, patch)} onRemove={() => removeLine(i)} base={valueOf(l)} inr={valueOf(l)} />
             ))}
           </div>
           {/* A phone: two by two, rather than three and one left over. */}
+          {/* Material only — a ready piece owned before is added on Ready Stock. */}
           <div className="mt-3 grid grid-cols-2 sm:flex sm:flex-wrap items-center gap-2">
             <span className="col-span-2 text-xs text-muted-foreground mr-1">Add a line:</span>
-            {KIND_ORDER.map(k => {
+            {MATERIAL_KINDS.map(k => {
               const Icon = KIND[k].icon;
               return (
                 <Button key={k} type="button" variant="outline" size="sm" onClick={() => addLine(k)} className="h-8 rounded-lg gap-1.5 text-xs px-2.5">

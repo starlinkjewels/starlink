@@ -125,11 +125,12 @@ function lotOf(material: MaterialKey, key: string, lot: StockMovement["lot"]): S
   return material === "diamond" && key && key !== "Certified" && key !== "unspecified" ? cleanLot(lotParts(key)) : undefined;
 }
 
-async function addStockMovement(m: Omit<StockMovement, "id">): Promise<void> {
+async function addStockMovement(m: Omit<StockMovement, "id">): Promise<string> {
   const id = uid("sm_");
   await setDoc(doc(fsdb, "stockMovements", id), pruneUndefined({ ...m, lot: lotOf(m.material, m.purityOrQuality, m.lot), id }));
   // Loose stones into a lot: the lot gets its bag number if it has none yet.
   if (m.material === "diamond" && m.type === "purchase_in") ensureBag(m.purityOrQuality, m.createdBy);
+  return id;
 }
 
 /** Purchase → stock: a plain atomic increment is safe, since additions can never go negative. */
@@ -139,7 +140,7 @@ export async function increaseStock(args: {
   companyId?: string;
   purityOrQuality: string;
   quantity: number;
-  refType: "purchase" | "manual" | "opening" | "transfer" | "supplierSale" | "bagMove";
+  refType: "purchase" | "manual" | "opening" | "transfer" | "supplierSale" | "bagMove" | "supplierLoan";
   refId?: string;
   valueInr?: number; // an "opening" entry's ₹ valuation, or a "transfer"'s / "bagMove"'s cost where it came from
   createdBy: string;
@@ -148,7 +149,9 @@ export async function increaseStock(args: {
   /** Loose diamonds: the lot's parts and how many stones (lib/diamondLots.ts). */
   lot?: StockMovement["lot"];
   pieces?: number;
-}): Promise<void> {
+  /** Gold on loan (refType "supplierLoan"): its fine grams. */
+  fine?: number;
+}): Promise<string> {
   // Never from the device's saved copy (see staleCols in lib/db.ts) — refused before anything is written.
   assertFresh();
   // Each material its own map, keyed by the material itself.
@@ -163,7 +166,8 @@ export async function increaseStock(args: {
     updatedAt: new Date().toISOString(),
     version: increment(1),
   }, { merge: true });
-  await addStockMovement({
+  // The movement's id, for a record that keeps a link to it (lib/supplierGold.ts).
+  return addStockMovement({
     material: args.material,
     ...(args.companyId && args.companyId !== "main" ? { companyId: args.companyId } : {}),
     type: "purchase_in",
@@ -174,6 +178,7 @@ export async function increaseStock(args: {
     valueInr: args.valueInr,
     lot: args.lot,
     pieces: args.pieces,
+    fine: args.fine,
     createdBy: args.createdBy,
     createdAt: args.createdAt || new Date().toISOString(),
     note: args.note,
@@ -193,14 +198,18 @@ export async function decreaseStock(args: {
   purityOrQuality: string;
   quantity: number;
   type: "issuance_out" | "order_direct_use";
-  refType: "materialIssuance" | "order" | "purchase" | "diamondSale" | "supplierSale" | "transfer" | "bagMove";
+  refType: "materialIssuance" | "order" | "purchase" | "diamondSale" | "supplierSale" | "transfer" | "bagMove" | "supplierLoan";
   refId?: string;
   createdBy: string;
   note?: string;
   /** Loose diamonds: the lot's parts and how many stones (lib/diamondLots.ts). */
   lot?: StockMovement["lot"];
   pieces?: number;
-}): Promise<void> {
+  /** Gold on loan (refType "supplierLoan"): its fine grams. */
+  fine?: number;
+  /** As-of date (gold given back on an earlier day) — defaults to now. */
+  createdAt?: string;
+}): Promise<string> {
   // Never from the device's saved copy (see staleCols in lib/db.ts) — refused before anything is written.
   assertFresh();
   const field = args.material;
@@ -236,11 +245,64 @@ export async function decreaseStock(args: {
       refId: args.refId,
       lot: lotOf(args.material, args.purityOrQuality, args.lot),
       pieces: args.pieces,
+      fine: args.fine,
       createdBy: args.createdBy,
-      createdAt: new Date().toISOString(),
+      createdAt: args.createdAt || new Date().toISOString(),
       note: args.note,
     }));
   });
+  return movementId;
+}
+
+/**
+ * Cancel one stock line with another the other way, naming it (reversesId) —
+ * gold on loan or given back that was entered by mistake (lib/supplierGold.ts).
+ * One transaction: the counter and the cancelling line together. Its id is
+ * "<line id>_rev", read inside the transaction, so a line can never be
+ * cancelled twice — not from two screens at once either. Taking stock out is
+ * floor-checked as any issue is, and a stale-low counter is put right from the
+ * history once before it is refused.
+ */
+export async function reverseMovement(m: StockMovement, createdBy: string, note?: string): Promise<string> {
+  // Never from the device's saved copy (see staleCols in lib/db.ts) — refused before anything is written.
+  assertFresh();
+  if (m.reversesId) throw new Error("That line is itself a cancellation.");
+  if (m.type !== "purchase_in" && m.type !== "issuance_out") throw new Error("Only a line in or out of stock can be cancelled this way.");
+  const revId = `${m.id}_rev`;
+  const out = m.type === "purchase_in"; // cancelling an IN takes the stock out again
+  const qty = Math.round(Math.abs(m.quantity) * 1000) / 1000;
+  const field = m.material;
+  const run = () => runTransaction(fsdb, async (tx) => {
+    const ref = stockRef(m.companyId);
+    const revRef = doc(fsdb, "stockMovements", revId);
+    const [snap, rev, orig] = [await tx.get(ref), await tx.get(revRef), await tx.get(doc(fsdb, "stockMovements", m.id))];
+    if (rev.exists()) throw new Error("Already deleted — on this or another screen.");
+    if (!orig.exists()) throw new Error("That line is not on file any more.");
+    const levels = (snap.exists() ? snap.data() : { gold: {}, diamond: {} }) as StockLevels;
+    const have = ((levels as unknown as Record<string, Record<string, number> | undefined>)[field])?.[m.purityOrQuality] || 0;
+    if (out && have + 0.0005 < qty) throw new Error(`Insufficient ${m.purityOrQuality} ${m.material} stock: have ${have}, need ${qty}.`);
+    tx.set(ref, {
+      [field]: { [m.purityOrQuality]: out ? Math.max(0, Math.round((have - qty) * 1000) / 1000) : increment(qty) },
+      updatedAt: new Date().toISOString(),
+      version: increment(1),
+    }, { merge: true });
+    tx.set(revRef, pruneUndefined({
+      id: revId, material: m.material, companyId: m.companyId && m.companyId !== "main" ? m.companyId : undefined,
+      type: out ? "issuance_out" : "purchase_in", purityOrQuality: m.purityOrQuality, quantity: qty,
+      refType: m.refType, refId: m.refId, reversesId: m.id, fine: m.fine, lot: m.lot, pieces: m.pieces,
+      createdBy, createdAt: new Date().toISOString(), note,
+    }));
+  });
+  await ensureCollections(["stockMovements"]);
+  try {
+    await run();
+  } catch (e) {
+    if (out && e instanceof Error && e.message.startsWith("Insufficient")) {
+      await recomputeStockFromHistory(loadDb().stockMovements ?? [], m.companyId);
+      await run();
+    } else throw e;
+  }
+  return revId;
 }
 
 /**
@@ -308,15 +370,15 @@ export async function logOrderDirectPurchase(args: {
 export async function decreaseStockSelfHealing(
   args: Parameters<typeof decreaseStock>[0],
   movements: StockMovement[],
-): Promise<void> {
+): Promise<string> {
   // Never from the device's saved copy (see staleCols in lib/db.ts) — refused before anything is written.
   assertFresh();
   try {
-    await decreaseStock(args);
+    return await decreaseStock(args);
   } catch (e) {
     if (e instanceof Error && e.message.startsWith("Insufficient")) {
       await recomputeStockFromHistory(movements, args.companyId);
-      await decreaseStock(args);
+      return await decreaseStock(args);
     } else {
       throw e;
     }

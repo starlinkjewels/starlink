@@ -35,6 +35,10 @@ const CHECKING_GUARD: DeleteGuard = { ok: false, reason: CHECKING };
 /** A supplier with no purchases, payments or refunds may go. `figures`: the
  *  totals a list page shows — given, they are all the menu reads. */
 export function supplierDeleteGuard(db: DB, s: Supplier, figures?: SupplierFigures): DeleteGuard {
+  // Gold owed before the app is on their own record, so it is known on every page.
+  if ((s.openingGoldFine ?? 0) > 0) return { ok: false, reason: "Has opening gold owed — deactivate instead" };
+  // Gold on loan (lib/supplierGold.ts): stock lines naming them. The delete itself loads them (deleteRefusal).
+  if ((db.stockMovements ?? []).some(m => m.refType === "supplierLoan" && m.refId === s.id)) return { ok: false, reason: "Has a gold account — deactivate instead" };
   if (figures) {
     // Purchased includes an opening balance, which is the supplier's own field
     // and goes with them; anything beyond it is a real purchase.
@@ -88,7 +92,8 @@ export function factoryDeleteGuard(db: DB, f: Factory, figures?: FactoryFigures)
 export async function deleteRefusal(kind: "supplier", party: Supplier): Promise<string | undefined>;
 export async function deleteRefusal(kind: "factory", party: Factory): Promise<string | undefined>;
 export async function deleteRefusal(kind: "supplier" | "factory", party: Supplier | Factory): Promise<string | undefined> {
-  if (!(await recordsReady(TOTALS_COLS[kind]))) return STILL_LOADING;
+  // A supplier's gold on loan is in the stock lines (lib/supplierGold.ts) — counted too.
+  if (!(await recordsReady(kind === "supplier" ? [...TOTALS_COLS.supplier, "stockMovements"] : TOTALS_COLS[kind]))) return STILL_LOADING;
   const db = loadDb();
   const g = kind === "supplier" ? supplierDeleteGuard(db, party as Supplier) : factoryDeleteGuard(db, party as Factory);
   return g.ok ? undefined : g.reason;

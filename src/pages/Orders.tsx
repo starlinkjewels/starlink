@@ -102,15 +102,24 @@ export function OrdersPage() {
   // each can hold several choices (lib/filterSel.ts). A link that names a status
   // (?status=delayed from the Dashboard) shows it for this visit only.
   const [storedStatus, setStoredStatus] = useStickyFilter("orders.status", "all");
-  const [linkStatus, setLinkStatus] = useState<string | null>(sp.get("status"));
+  // Orders just placed (?fresh=1 from New Order, with their numbers in the search):
+  // shown whatever is remembered, for this visit — until a filter is changed here.
+  const [fresh, setFresh] = useState(sp.get("fresh") === "1");
+  const [linkStatus, setLinkStatus] = useState<string | null>(sp.get("status") ?? (fresh ? "all" : null));
   const status = linkStatus ?? storedStatus;
-  const setStatus = (v: string) => { setLinkStatus(null); setStoredStatus(v); };
-  const [clientFilter, setClientFilter] = useStickyFilter("orders.client", "all");
+  const setStatus = (v: string) => { setLinkStatus(null); setFresh(false); setStoredStatus(v); };
+  const [clientStored, setClientStored] = useStickyFilter("orders.client", "all");
   // The admin can look at one person's orders: assigned to them, or for a
   // client they manage — the same rule as their own Orders page.
-  const [employeeFilter, setEmployeeFilter] = useStickyFilter("orders.employee", "all");
+  const [employeeStored, setEmployeeStored] = useStickyFilter("orders.employee", "all");
   // Which of our companies — shown once there is more than one.
-  const [companyFilter, setCompanyFilter] = useStickyFilter("orders.company", "all");
+  const [companyStored, setCompanyStored] = useStickyFilter("orders.company", "all");
+  const clientFilter = fresh ? "all" : clientStored;
+  const employeeFilter = fresh ? "all" : employeeStored;
+  const companyFilter = fresh ? "all" : companyStored;
+  const setClientFilter = (v: string) => { setFresh(false); setClientStored(v); };
+  const setEmployeeFilter = (v: string) => { setFresh(false); setEmployeeStored(v); };
+  const setCompanyFilter = (v: string) => { setFresh(false); setCompanyStored(v); };
   const multiCo = hasCompanies(db.settings);
   const isStaff = user!.role !== "client";
   const can = useCan();

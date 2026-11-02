@@ -21,6 +21,7 @@ import { StockTransferDialog } from "@/components/StockTransfer";
 import { companiesOf, companyOf } from "@/lib/companies";
 import { ArrowRightLeft } from "lucide-react";
 import { useDataFresh } from "@/hooks/useDataFresh";
+import { goldOwedToSuppliers, fmtG } from "@/lib/supplierGold";
 
 /**
  * One material's stock, in the app's one figure style: its name and how many
@@ -119,6 +120,10 @@ export function StockPage() {
   const atFactoriesOther = (material: string) => db.factories.reduce((t, f) => t + (factoryOtherBalances(db.materialIssuances, f.id, view)[material] ?? 0), 0);
   const r3 = (n: number) => Math.round(n * 1000) / 1000;
   const atFactories = (n: number, unit: string) => (Math.abs(n) >= 0.0005 ? `At factories: ${r3(n).toLocaleString()} ${unit}` : null);
+  // Gold borrowed from suppliers is in the stock above but owed back in gold (lib/supplierGold.ts) —
+  // this company's loans less its returns and bills, so it waits for the bills as the value does.
+  const loanFine = priced ? goldOwedToSuppliers(db, view === "all" ? undefined : view) : 0;
+  const onLoanGold = Math.abs(loanFine) > 0.0005 ? `Owed to suppliers: ${fmtG(loanFine)} fine (gold on loan)` : null;
   // Gold leads with fine (24KT) grams — what it is worth and what a factory owes back.
   const goldFine = r3(Object.entries(goldBal).reduce((t, [k, g]) => t + toPureGold(g, k), 0));
   // A certified stone carries its own cost per carat.
@@ -204,7 +209,7 @@ export function StockPage() {
       <div className="grid gap-3 grid-cols-2 lg:grid-cols-3">
         <MaterialCard name="Gold Reserve" icon={Coins} sub={`${goldTotal.toLocaleString()} g · ${goldPurities} purit${goldPurities === 1 ? "y" : "ies"} in stock`}
           value={`${goldFine.toLocaleString()} g fine`} to={`/stock/gold${view !== "all" ? `?co=${view}` : ""}`}
-          lines={[worth("gold", Object.entries(goldBal)), atFactories(atFactoriesGold, "g fine")]} />
+          lines={[worth("gold", Object.entries(goldBal)), atFactories(atFactoriesGold, "g fine"), onLoanGold]} />
         <MaterialCard name="Loose Diamonds" icon={Gem} sub={`${lots.length || diamondShapes} lot${(lots.length || diamondShapes) === 1 ? "" : "s"} in stock${lotPcs ? ` · ${lotPcs.toLocaleString()} pcs` : ""}`}
           value={`${diamondTotal.toLocaleString()} ct`} to={`/stock/diamond${view !== "all" ? `?co=${view}` : ""}`}
           lines={[worth("diamond", lots.map(l => [l.key, l.ct] as [string, number])), atFactories(atFactoriesDia, "ct")]} />

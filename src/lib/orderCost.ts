@@ -183,6 +183,11 @@ function poolAverage(db: DB, material: string, bucket: string, at: string, compa
       // another of our companies, or another bag, at what it cost there.
       rate = m.valueInr / q;
     }
+    // Gold borrowed from a supplier (lib/supplierGold.ts) has no price of ours: it
+    // is owed back in gold. It joins at the current average below — never as
+    // zero-cost gold that would drag the average down. What it is finally paid
+    // for (a bill made from it) moves no stock and so never prices the pool.
+    if (m.refType === "supplierLoan") rate = null;
 
     if (rate === null) { bal += q; continue; } // unpriced: joins at the current average
     avg = avg === null || bal <= 0 ? rate : (avg * bal + rate * q) / (bal + q);
@@ -246,6 +251,8 @@ export function stockFineGoldRate(db: DB, at: string, companyId?: string): { rat
 
 function fineGoldLots(db: DB, at: string, companyId?: string): { rate: number; basis: string } | null {
   const lots: { at: number; fine: number; inr: number }[] = [];
+  // A bill made from borrowed gold (Purchase.fromGoldLoan) counts as gold bought:
+  // its fine grams at the rate it was billed. The loan itself is never a lot.
   for (const p of db.purchases ?? []) {
     if (p.material !== "gold" || !p.gold || !(p.totalInr > 0) || !inCo(p, companyId)) continue;
     const fine = toPureGold(p.gold.weightGrams || 0, p.gold.purity);

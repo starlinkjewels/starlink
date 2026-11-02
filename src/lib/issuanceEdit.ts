@@ -184,17 +184,19 @@ export interface StockIO {
 /** The real counter (lib/stock.ts), each move with its own history row. */
 export function liveStockIO(refId: string, userId: string, movements: StockMovement[]): StockIO {
   return {
-    take: s => {
+    take: async s => {
       const args = {
         material: s.material, companyId: s.companyId, purityOrQuality: s.bucket, quantity: s.qty,
         type: "issuance_out" as const, refType: "materialIssuance" as const, refId, createdBy: userId, note: s.note,
       };
-      return s.undo ? decreaseStock(args) : decreaseStockSelfHealing(args, movements);
+      await (s.undo ? decreaseStock(args) : decreaseStockSelfHealing(args, movements));
     },
-    put: s => increaseStock({
-      material: s.material, companyId: s.companyId, purityOrQuality: s.bucket, quantity: s.qty,
-      refType: "manual", refId, createdBy: userId, note: s.note,
-    }),
+    put: async s => {
+      await increaseStock({
+        material: s.material, companyId: s.companyId, purityOrQuality: s.bucket, quantity: s.qty,
+        refType: "manual", refId, createdBy: userId, note: s.note,
+      });
+    },
   };
 }
 

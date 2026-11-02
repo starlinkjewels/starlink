@@ -18,7 +18,8 @@
 import { landedInr } from "./brokers";
 import { companyOf } from "./companies";
 import { updateDb, uid, loadDb, type DB, type Purchase, type StockMovement } from "./db";
-import { purchaseQty, purchaseBucket, purchaseText, materialUnit } from "./materials";
+import { purchaseQty, purchaseBucket, purchaseText, materialUnit, type MaterialKey } from "./materials";
+import { readyStockDeleteBlocker } from "./readyStockGuards";
 import { purchasePaid, issuancePaid, fmtMoneyInr } from "./manufacturing";
 import { decreaseStockSelfHealing, increaseStock } from "./stock";
 
@@ -39,9 +40,19 @@ const qtyOf = (p: Purchase): number => purchaseQty(p);
 const bucketOf = (p: Purchase): string => purchaseBucket(p);
 
 /** True when this purchase actually increased the shared pooled stock. */
-function pooledStock(p: Purchase): boolean {
+function pooledStock(p: Purchase): p is Purchase & { material: MaterialKey } {
+  // Gold borrowed and then billed (lib/supplierGold.ts): the gold came in as a loan, never through this bill.
+  if (p.fromGoldLoan) return false;
+  // Ready jewellery went onto Ready Stock as pieces (below), never into the pool.
+  if (p.material === "readyPiece") return false;
   return p.purpose === "stock" && !(p.material === "diamond" && p.diamond?.kind === "certified");
 }
+
+// ── A bill made from borrowed gold (Purchase.fromGoldLoan, lib/supplierGold.ts) ──
+// It moves no stock. Voided, it is simply gone — the supplier's gold account is
+// worked out from the bills, so its gold is owed again; its grams and amount are
+// never corrected here.
+const GOLD_LOAN_BILL = "Made from gold taken on loan: its grams, rate and supplier are fixed — void it and turn the gold into a bill again. The bill no. and note can be corrected.";
 
 /**
  * Can this purchase be removed cleanly? Returns a reason when it can't, so the
@@ -64,7 +75,37 @@ export function canVoidPurchase(db: DB, p: Purchase): { ok: boolean; reason?: st
   if (packets.some(pk => pk.status === "used" || pk.status === "sold")) {
     return { ok: false, reason: "A certified diamond from this purchase is already used in a piece or sold. It can't be removed." };
   }
+  const ready = readyPieceBlocker(db, p);
+  if (ready) return { ok: false, reason: ready };
   return { ok: true };
+}
+
+// ── Ready jewellery bought ready-made (material "readyPiece", Purchase.piece) ──
+// The bill made one Ready Stock piece. Voided, that piece goes with it — but
+// only while it is exactly as the bill left it on the shelf: every piece still
+// there, none sold, moved or returned against it. Anything else is undone on
+// Ready Stock first, so the shelf and the bill can never disagree.
+const READY_FIXED = "Bought ready-made: the pieces and their cost are fixed on the bill — to change them, void the purchase and enter it again. The piece's own details (weights, price, photos) are edited on Ready Stock.";
+
+/** The Ready Stock piece a ready-jewellery purchase made, if it is still there. */
+function readyItemOf(db: Pick<DB, "readyStock">, p: Purchase) {
+  return p.material === "readyPiece" && p.piece?.readyStockId ? (db.readyStock ?? []).find(i => i.id === p.piece!.readyStockId) : undefined;
+}
+
+/** Why a ready-jewellery purchase can't be voided; undefined when it can (or it is not one). */
+function readyPieceBlocker(db: DB, p: Purchase): string | undefined {
+  if (p.material !== "readyPiece") return undefined;
+  const item = readyItemOf(db, p);
+  // Already taken off Ready Stock by hand: the bill alone goes.
+  if (!item) return undefined;
+  const bought = p.piece?.qty ?? 0;
+  const blocker = readyStockDeleteBlocker(db, item);
+  if (blocker) return `The piece from this purchase (${item.name}) is in use on Ready Stock — ${blocker.replace(/ — set quantity to 0 instead$/, "")}. It can't be removed.`;
+  if ((db.supplierSales ?? []).some(s => s.lines?.some(l => l.readyStockItemId === item.id))) return `A piece from this purchase (${item.name}) was sold to a supplier. It can't be removed.`;
+  if ((db.readyStock ?? []).some(i => i.splitFrom === item.id)) return `Some of the pieces from this purchase (${item.name}) were moved to another office. Move them back on Ready Stock first.`;
+  if (item.quantity < bought) return `${bought - item.quantity} of the ${bought} piece${bought !== 1 ? "s" : ""} from this purchase (${item.name}) ${bought - item.quantity !== 1 ? "have" : "has"} left Ready Stock. It can't be removed.`;
+  if (item.quantity > bought) return `The piece from this purchase (${item.name}) now shows ${item.quantity} on Ready Stock, more than the ${bought} bought. Set it back to ${bought} on Ready Stock first.`;
+  return undefined;
 }
 
 /**
@@ -88,6 +129,9 @@ export function voidImpact(db: DB, p: Purchase): string[] {
   const packets = (db.diamondPackets ?? []).filter(pk => pk.purchaseId === p.id);
   if (packets.length) out.push(`• ${packets.length} certified stone record${packets.length !== 1 ? "s" : ""} removed`);
   if (pooledStock(p) && qtyOf(p) > 0) out.push(`• ${qtyOf(p)}${unit} taken back out of Stock`);
+  const readyItem = readyItemOf(db, p);
+  if (readyItem) out.push(`• ${readyItem.quantity} piece${readyItem.quantity !== 1 ? "s" : ""} of ${readyItem.name} taken off Ready Stock (the piece is removed)`);
+  if (p.fromGoldLoan) out.push(`• ${qtyOf(p)}g fine goes back on the gold owed to ${sup?.name || "the supplier"} — no stock moves`);
   out.push("• nothing else changes — the client’s order value, their payments and every other purchase stay exactly as they are");
   return out;
 }
@@ -99,6 +143,9 @@ export function voidImpact(db: DB, p: Purchase): string[] {
  */
 export async function voidPurchase(db: DB, p: Purchase, userId: string): Promise<void> {
   const qty = qtyOf(p);
+  // A ready piece: checked again on the latest copy — a sale since the page opened must stop it.
+  const readyStop = readyPieceBlocker(loadDb(), p);
+  if (readyStop) throw new Error(readyStop);
 
   // 1. Pooled stock first — this is the only step that can legitimately fail
   //    (material already consumed). Doing it before any mutation means a
@@ -146,6 +193,16 @@ export async function voidPurchase(db: DB, p: Purchase, userId: string): Promise
     // 5. The purchase itself — clears it off the supplier's payable/statement.
     d.purchases = (d.purchases ?? []).filter(x => x.id !== p.id);
 
+    // Ready jewellery: the piece it put on Ready Stock (untouched — see readyPieceBlocker),
+    // and its admin-only cost with it.
+    const itemId = p.material === "readyPiece" ? p.piece?.readyStockId : undefined;
+    if (itemId) {
+      d.readyStock = (d.readyStock ?? []).filter(i => i.id !== itemId);
+      if ((d.adminRecords ?? []).some(r => r.kind === "stockCost" && r.itemId === itemId)) {
+        d.adminRecords = (d.adminRecords ?? []).filter(r => !(r.kind === "stockCost" && r.itemId === itemId));
+      }
+    }
+
     // 6. Unlink from the order and leave an audit line behind.
     if (p.orderId) {
       const o = d.orders.find(x => x.id === p.orderId);
@@ -162,7 +219,7 @@ export async function voidPurchase(db: DB, p: Purchase, userId: string): Promise
           type: "material_returned",
           at: new Date().toISOString(),
           employeeId: userId,
-          material: p.material,
+          material: p.material === "readyPiece" ? undefined : p.material,
           amountMaterial: qty,
           amountInr: p.totalInr,
           remarks: `Correction — removed duplicate purchase of ${purchaseLabel(p)} (${fmtMoneyInr(p.totalInr)}). Supplier due, factory issue and stock all reversed.`,
@@ -241,6 +298,11 @@ export function purchaseEditScope(db: DB, p: Purchase): {
   if (purchasePaid(p) > 0) {
     return { quantity: false, money: false, reason: "A payment has already been made against this purchase. Cancel that payment in Payments → Supplier payments first." };
   }
+  // Ready jewellery: the bill number, note, supplier and broker can be corrected;
+  // the pieces and their rate can't (EditPurchaseDialog locks them, editPurchase refuses).
+  if (p.material === "readyPiece") return { quantity: false, money: true, reason: READY_FIXED };
+  // A bill from borrowed gold: only its bill no. and note (editPurchase refuses the rest).
+  if (p.fromGoldLoan) return { quantity: false, money: true, reason: GOLD_LOAN_BILL };
   const issuances = (db.materialIssuances ?? []).filter(i => i.source === "purchase" && i.sourcePurchaseId === p.id);
   for (const i of issuances) {
     if (issuancePaid(i) > 0) {
@@ -275,6 +337,21 @@ export function canEditPurchase(db: DB, p: Purchase): { ok: boolean; reason?: st
  * purchase must never leave the ledgers disagreeing.
  */
 export async function editPurchase(db: DB, p: Purchase, edit: PurchaseEdit, userId: string): Promise<void> {
+  if (p.fromGoldLoan && (
+    Math.abs(edit.quantity - qtyOf(p)) > 0.0005 || Math.abs(edit.ratePerUnit - (p.gold?.ratePerGram ?? 0)) > 0.005
+    || (edit.discountPct || 0) !== (p.discountPct || 0) || edit.totalInr !== p.totalInr
+    || (edit.totalUsd !== undefined && edit.totalUsd !== p.totalUsd)
+    || (!!edit.supplierId && edit.supplierId !== p.supplierId) || !!edit.brokerage?.brokerId
+  )) throw new Error(GOLD_LOAN_BILL);
+  if (p.material === "readyPiece" && (
+    Math.abs(edit.quantity - qtyOf(p)) > 0.0005 || Math.abs(edit.ratePerUnit - (p.piece?.ratePerPiece ?? 0)) > 0.005
+    || (edit.discountPct || 0) !== (p.discountPct || 0) || edit.totalInr !== p.totalInr
+    || (edit.totalUsd !== undefined && edit.totalUsd !== p.totalUsd)
+    // The broker is part of what the piece cost us (its private cost on Ready Stock
+    // was worked out with it): changing it here would leave that cost wrong.
+    || (edit.brokerage !== undefined && ((edit.brokerage?.brokerId || "") !== (p.brokerId || "")
+      || (edit.brokerage?.brokerId ? Math.abs((edit.brokerage.brokerageInr || 0) - (p.brokerageInr || 0)) > 0.005 || edit.brokerage.brokeragePaidBy !== p.brokeragePaidBy : false)))
+  )) throw new Error(READY_FIXED);
   const oldQty = qtyOf(p);
   const newQty = edit.quantity;
   const delta = Math.round((newQty - oldQty) * 1000) / 1000;

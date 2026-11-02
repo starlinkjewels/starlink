@@ -282,6 +282,13 @@ function MaterialSection({ material }: { material: MaterialKey }) {
       return [view("View in Buy & Assign", "The sale is listed in its ledger", "/buy-assign", can("buyAssign"), "buyAssign"),
         ...locked("Cancel the sale in Buy & Assign — this line follows it")];
     }
+    if (m.refType === "supplierLoan") {
+      const to = m.link.supplierId;
+      return [
+        ...(to ? [view("View supplier", `${db.suppliers.find(x => x.id === to)?.name ?? "The supplier"}'s gold account`, `/suppliers/${to}`, can("suppliers"), "suppliers")] : []),
+        ...locked("Gold on loan from a supplier — delete it in their gold account; this line follows it"),
+      ];
+    }
     if (m.refType === "transfer") return locked("Moved between companies — move it back from the Stock page");
     if (m.refType === "bagMove") return locked("Moved between bags — open the bag above and move the stones back");
     if (m.pcsCount != null) return locked("A recount — open the bag above and recount it again");
