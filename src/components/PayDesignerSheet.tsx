@@ -5,8 +5,9 @@ import { updateDbAs, todayLocal, stampFor } from "@/lib/db";
 import { useDb } from "@/hooks/useDb";
 import { useAuth } from "@/lib/auth";
 import { useCan } from "@/hooks/useCan";
-import { ccy } from "@/lib/currency";
-import { fmtMoneyInr, lockerBalance } from "@/lib/manufacturing";
+import { fmtCcy } from "@/lib/currency";
+import { fmtMoneyInr, fmtLockerAmount, lockerBalance } from "@/lib/manufacturing";
+import { useRupeePay } from "@/components/RupeePay";
 import { confirmBox } from "@/lib/confirm";
 import { designerAccount, designerOf, jobPayState } from "@/lib/designers";
 import { writeDesignerPayment } from "@/lib/partyPayments";
@@ -18,7 +19,8 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 
 /**
- * Pay a freelance designer from a rupee account — against one approved design
+ * Pay a freelance designer — from a rupee account, or one in another currency at
+ * a rate (components/RupeePay.tsx) — against one approved design
  * or their oldest first. The same entry the Locker's "Record entry" makes
  * (lib/partyPayments.ts writeDesignerPayment); corrected there.
  */
@@ -38,26 +40,32 @@ export function PayDesignerSheet({ designerId, jobId, onClose }: { designerId: s
   const [date, setDate] = useState(todayLocal());
   const [note, setNote] = useState("");
   const [saving, setSaving] = useState(false);
-  const lockers = db.lockers.filter(l => l.active !== false && ccy(l.currency) === "INR");
+  const lockers = db.lockers.filter(l => l.active !== false);
   const locker = lockers.find(l => l.id === lockerId);
   const amt = Number(amount) || 0;
+  const fx = useRupeePay(lockerId, amt, designer ? `${designer.name}'s` : "their", () => setAmount(""));
   const allowed = user?.role === "admin" || can("payments", "add");
+
+  // A due (in rupees) in the account's currency — from a dollar account, at the rate.
+  const inCur = (inr: number) => (fx.foreign ? (fx.rate > 0 ? Math.round(inr / fx.rate * 100) / 100 : 0) : inr);
+  const dueNow = picked ? picked.due : acc && acc.due > 0 ? acc.due : 0;
 
   if (!designer) return null;
   const save = async () => {
     if (!allowed) { toast.error("You don't have access to record payments"); return; }
     if (!locker) { toast.error("Choose the account it is paid from"); return; }
     if (!(amt > 0)) { toast.error("Enter the amount"); return; }
+    if (fx.problem) { toast.error(fx.problem); return; }
     const bal = lockerBalance(locker, db.lockerTransactions);
-    if (amt > bal && !(await confirmBox(`${fmtMoneyInr(amt)} is more than ${locker.name}'s balance of ${fmtMoneyInr(bal)}.\n\nThe balance will go negative — continue only if a deposit is still missing.`))) return;
-    if (picked && amt > picked.due + 0.5 && !(await confirmBox(`${fmtMoneyInr(amt)} is more than the ${fmtMoneyInr(picked.due)} still due on ${picked.job!.orderNumber}. The rest settles their other designs, oldest first — continue?`))) return;
+    if (amt > bal && !(await confirmBox(`${fmtLockerAmount(amt, locker.currency)} is more than ${locker.name}'s balance of ${fmtLockerAmount(bal, locker.currency)}.\n\nThe balance will go negative — continue only if a deposit is still missing.`))) return;
+    if (picked && fx.inr > picked.due + 0.5 && !(await confirmBox(`${fx.text} is more than the ${fmtMoneyInr(picked.due)} still due on ${picked.job!.orderNumber}. The rest settles their other designs, oldest first — continue?`))) return;
     setSaving(true);
     try {
-      updateDbAs({ summary: `Paid ${fmtMoneyInr(amt)} to designer ${designer.name}` }, d => writeDesignerPayment(d, {
+      updateDbAs({ summary: `Paid ${fx.text} to designer ${designer.name}` }, d => writeDesignerPayment(d, {
         lockerId: locker.id, amount: amt, note, userId: user!.id, at: stampFor(date), designerId: designer.id,
-        cadJobId: against !== "__oldest" ? against : undefined,
+        cadJobId: against !== "__oldest" ? against : undefined, ...fx.args,
       }));
-      toast.success(`${fmtMoneyInr(amt)} paid to ${designer.name}`);
+      toast.success(`${fx.text} paid to ${designer.name}`);
       onClose();
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Couldn't save — nothing was recorded");
@@ -77,13 +85,14 @@ export function PayDesignerSheet({ designerId, jobId, onClose }: { designerId: s
         <div>
           <Label className="text-xs">From account</Label>
           <Select value={lockerId} onValueChange={setLockerId}>
-            <SelectTrigger className="h-10 rounded-xl mt-1" aria-label="From account"><SelectValue placeholder={lockers.length ? "Choose a rupee account" : "No rupee account"} /></SelectTrigger>
-            <SelectContent>{lockers.map(l => <SelectItem key={l.id} value={l.id}>{l.name} · {fmtMoneyInr(lockerBalance(l, db.lockerTransactions))}</SelectItem>)}</SelectContent>
+            <SelectTrigger className="h-10 rounded-xl mt-1" aria-label="From account"><SelectValue placeholder={lockers.length ? "Choose an account" : "No account"} /></SelectTrigger>
+            <SelectContent>{lockers.map(l => <SelectItem key={l.id} value={l.id}>{l.name} · {fmtLockerAmount(lockerBalance(l, db.lockerTransactions), l.currency)}</SelectItem>)}</SelectContent>
           </Select>
         </div>
+        {fx.box}
         <div>
           <Label className="text-xs">Against</Label>
-          <Select value={against} onValueChange={v => { setAgainst(v); const x = due.find(y => y.job!.id === v); if (x) setAmount(String(x.due)); }}>
+          <Select value={against} onValueChange={v => { setAgainst(v); const x = due.find(y => y.job!.id === v); if (x) setAmount(String(inCur(x.due))); }}>
             <SelectTrigger className="h-10 rounded-xl mt-1" aria-label="Against"><SelectValue /></SelectTrigger>
             <SelectContent>
               <SelectItem value="__oldest">Oldest approved designs first</SelectItem>
@@ -94,8 +103,13 @@ export function PayDesignerSheet({ designerId, jobId, onClose }: { designerId: s
         </div>
         <div className="grid grid-cols-2 gap-3">
           <div>
-            <Label className="text-xs">Amount (₹)</Label>
+            <Label className="text-xs">Amount ({fx.foreign ? fx.cur : "₹"})</Label>
             <Input type="number" min={0} step="0.01" inputMode="decimal" value={amount} onChange={e => setAmount(e.target.value)} className="h-10 rounded-xl mt-1" aria-label="Amount" />
+            {fx.foreign && fx.rate > 0 && dueNow > 0 && amt !== inCur(dueNow) && (
+              <button type="button" onClick={() => setAmount(String(inCur(dueNow)))} className="mt-1 text-[11px] text-primary hover:underline">
+                Due {fmtMoneyInr(dueNow)} = {fmtCcy(inCur(dueNow), fx.cur)}
+              </button>
+            )}
           </div>
           <div>
             <Label className="text-xs">Date</Label>

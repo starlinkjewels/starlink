@@ -19,6 +19,7 @@ import { needsAccess } from "@/lib/actionHints";
 import type { MoreAction } from "@/components/MoreMenu";
 import { MoneyEntryEditor, confirmDeleteEntry, entryRowActions } from "@/components/MoneyEntryEditor";
 import { ApplyToClientDialog, applyBlock } from "@/components/ApplyToClientDialog";
+import { useStickyFilter } from "@/hooks/useStickyFilter";
 
 /** One line of the book: the entry, and the account's balance after it. */
 type Line = { t: LockerTransaction; balance: number };
@@ -57,9 +58,12 @@ export function DayBook({ lockerId: chosen }: { lockerId?: string }) {
   const want = chosen ?? picked;
   const lockerId = lockers.some(l => l.id === want) ? want : (lockers[0]?.id ?? "");
   const [q, setQ] = useState("");
-  const [from, setFrom] = useState("");
-  const [to, setTo] = useState("");
-  const [dir, setDir] = useState("");
+  // The dates and the direction stay as they were left until cleared — the
+  // same for every account (the day being checked is the same day on each).
+  // Direction stays one choice: in or out.
+  const [from, setFrom] = useStickyFilter("daybook.from", "");
+  const [to, setTo] = useStickyFilter("daybook.to", "");
+  const [dir, setDir] = useStickyFilter("daybook.direction", "");
   // A line's ⋯ — the same as the Locker page's ledger: correct or cancel it,
   // apply loose money to a client's bill, or say where it is corrected.
   const [editing, setEditing] = useState<MoneyEntry | null>(null);

@@ -164,6 +164,36 @@ let visit = "";
 const idxNow = () => ((typeof window !== "undefined" ? window.history.state : null) as { idx?: number } | null)?.idx ?? 0;
 const mainEl = () => (typeof document !== "undefined" ? document.querySelector<HTMLElement>("main.app-main") : null);
 
+// A part of a page that scrolls on its own — the Orders board's row of stages
+// and each stage's column — is marked data-keep-scroll="<name>", and its scroll
+// is kept with the visit beside the page's (Back returns to the same card).
+const KEEP = "data-keep-scroll";
+const keepKey = (v: string, name: string) => `sl-scroll:${v}:k:${name}`;
+const keepers = () => (typeof document !== "undefined" ? [...document.querySelectorAll<HTMLElement>(`[${KEEP}]`)] : []);
+// Back to a page: where its parts were, read the moment it is named — before it
+// is drawn. Drawn again, a row of stages starts at its first stage and says so
+// with a scroll of its own; that must not be kept over the place it is about to
+// be put back to. Each part leaves this list once it is back (or the person scrolls).
+let pendingVisit = "";
+let pendingKeep = new Map<string, [number, number]>();
+function snapshotKeep(v: string): void {
+  pendingVisit = v;
+  pendingKeep = new Map();
+  try {
+    const pre = `sl-scroll:${v}:k:`;
+    for (let i = 0; i < sessionStorage.length; i++) {
+      const k = sessionStorage.key(i) ?? "";
+      if (k.startsWith(pre)) { const at = store.get<[number, number]>(k); if (at) pendingKeep.set(k.slice(pre.length), at); }
+    }
+  } catch { /* storage unavailable */ }
+}
+function saveKeeper(v: string, el: HTMLElement): void {
+  const name = el.getAttribute(KEEP);
+  if (!v || !name) return;
+  if (v === pendingVisit && pendingKeep.has(name)) return; // still to be put back
+  store.set(keepKey(v, name), [el.scrollLeft, el.scrollTop]);
+}
+
 /**
  * Called by the app frame as it draws each location, before the page under it:
  * notes the scroll of the page being left, then names the visit now on screen.
@@ -173,6 +203,7 @@ export function syncVisit(locKey: string, navType: string): string {
   // The page being left is still on screen: keep its scroll exactly as it is now.
   const leaving = mainEl();
   if (visit && leaving) store.set(`sl-scroll:${visit}`, leaving.scrollTop);
+  if (visit) for (const el of keepers()) saveKeeper(visit, el);
   lastLocKey = locKey;
   const idx = idxNow();
   const v = store.get<string[]>(VISITS) ?? [];
@@ -183,6 +214,10 @@ export function syncVisit(locKey: string, navType: string): string {
     prune(new Set(v));
   }
   visit = v[idx];
+  // A page that tidies its address as it loads (REPLACE) is the same visit: what
+  // is still to be put back stays.
+  if (navType === "POP") snapshotKeep(visit);
+  else if (navType === "PUSH" || pendingVisit !== visit) { pendingVisit = visit; pendingKeep = new Map(); }
   return visit;
 }
 export const currentVisit = () => visit;
@@ -246,6 +281,7 @@ export function useScrollMemory(): void {
     let t = 0;
     const onScroll = (e: Event) => {
       const el = e.target;
+      if (el instanceof HTMLElement && el.hasAttribute(KEEP)) { saveKeeper(visit, el); return; }
       if (!(el instanceof HTMLElement) || el !== mainEl()) return;
       window.clearTimeout(t);
       const at = visit, top = el.scrollTop;
@@ -254,6 +290,38 @@ export function useScrollMemory(): void {
     document.addEventListener("scroll", onScroll, true);
     return () => { document.removeEventListener("scroll", onScroll, true); window.clearTimeout(t); };
   }, []);
+
+  // The parts that scroll on their own: back where they were, once they are
+  // drawn and long enough — given up on as soon as the person scrolls.
+  useEffect(() => {
+    if (navType !== "POP") return;
+    let stop = false;
+    const quit = () => { stop = true; if (pendingVisit === v) pendingKeep.clear(); };
+    document.addEventListener("wheel", quit, { passive: true, once: true });
+    document.addEventListener("touchstart", quit, { passive: true, once: true });
+    const done = new Set<string>();
+    const started = Date.now();
+    const tryNow = () => {
+      if (stop || pendingVisit !== v) return;
+      for (const el of keepers()) {
+        const name = el.getAttribute(KEEP)!;
+        if (done.has(name)) continue;
+        const want = pendingKeep.get(name);
+        if (!want) { done.add(name); continue; }
+        const [left, top] = want;
+        const fits = el.scrollWidth - el.clientWidth >= left - 2 && el.scrollHeight - el.clientHeight >= top - 2;
+        if (fits || Date.now() - started > 3500) {
+          el.scrollLeft = left; el.scrollTop = top;
+          if (Date.now() - started > 600) { done.add(name); pendingKeep.delete(name); }
+        }
+      }
+      if (Date.now() - started < 4000) requestAnimationFrame(tryNow);
+      else pendingKeep.clear();
+    };
+    requestAnimationFrame(tryNow);
+    return () => { stop = true; document.removeEventListener("wheel", quit); document.removeEventListener("touchstart", quit); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [v]);
 
   useEffect(() => {
     const main = mainEl();

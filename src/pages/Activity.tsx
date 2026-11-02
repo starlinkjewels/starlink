@@ -4,6 +4,8 @@ import { fetchActivity, undoCheck, undoEntry } from "@/lib/activity";
 import { fieldLabel, type ActivityEntry, type LoggedChange } from "@/lib/activityFormat";
 import { MODULES, moduleLabel } from "@/lib/modules";
 import { useDbVersion } from "@/hooks/useDb";
+import { useStickyFilter } from "@/hooks/useStickyFilter";
+import { selHas } from "@/lib/filterSel";
 import { Button } from "@/components/ui/button";
 import { DataTable, CellMain, CellTag, type DataColumn } from "@/components/DataTable";
 import { PageHeader } from "@/components/PageHeader";
@@ -84,11 +86,13 @@ export function ActivityPage() {
   const [cursor, setCursor] = useState<QueryDocumentSnapshot<DocumentData> | null>(null);
   const [loading, setLoading] = useState(true);
   const [refused, setRefused] = useState(false);
-  const [from, setFrom] = useState("");
-  const [to, setTo] = useState("");
-  const [who, setWho] = useState("all");
-  const [mod, setMod] = useState("all");
-  const [kind, setKind] = useState("all");
+  // The filters stay as they were left (this browser, this person) until
+  // cleared; Person, Section and Kind can hold several (lib/filterSel.ts).
+  const [from, setFrom] = useStickyFilter("activity.from", "");
+  const [to, setTo] = useStickyFilter("activity.to", "");
+  const [who, setWho] = useStickyFilter("activity.person", "all");
+  const [mod, setMod] = useStickyFilter("activity.section", "all");
+  const [kind, setKind] = useStickyFilter("activity.kind", "all");
   const [q, setQ] = useState("");
   const [blocked, setBlocked] = useState<Record<string, { reason: string; moved?: string[] }>>({});
 
@@ -121,9 +125,9 @@ export function ActivityPage() {
   }, [entries]);
 
   const shown = entries.filter(e =>
-    (who === "all" || e.actorId === who)
-    && (mod === "all" || e.module === mod)
-    && (kind === "all" || e.kind === kind)
+    selHas(who, e.actorId)
+    && selHas(mod, e.module)
+    && selHas(kind, e.kind)
     && (!q.trim() || `${e.summary} ${e.actorName}`.toLowerCase().includes(q.trim().toLowerCase())));
 
   const tryUndo = async (e: ActivityEntry) => {
@@ -148,11 +152,11 @@ export function ActivityPage() {
   // decide what is fetched, as they always have.
   const filters: TableFilter[] = [
     { kind: "date", from, to, onChange: (f, t) => { setFrom(f); setTo(t); } },
-    { kind: "select", label: "Person", value: who === "all" ? "" : who, onChange: v => setWho(v || "all"),
+    { kind: "select", label: "Person", multi: true, value: who === "all" ? "" : who, onChange: v => setWho(v || "all"),
       options: people.map(([id, name]) => ({ value: id, label: name })), allLabel: "Everyone" },
-    { kind: "select", label: "Section", value: mod === "all" ? "" : mod, onChange: v => setMod(v || "all"),
+    { kind: "select", label: "Section", multi: true, value: mod === "all" ? "" : mod, onChange: v => setMod(v || "all"),
       options: MODULES.map(m => ({ value: m.key, label: m.label })), allLabel: "All sections" },
-    { kind: "select", label: "Kind", value: kind === "all" ? "" : kind, onChange: v => setKind(v || "all"),
+    { kind: "select", label: "Kind", multi: true, value: kind === "all" ? "" : kind, onChange: v => setKind(v || "all"),
       options: Object.entries(KIND_LABEL).map(([k, l]) => ({ value: k, label: l })), allLabel: "Every kind" },
   ];
   const clearFilters = () => { setFrom(""); setTo(""); setWho("all"); setMod("all"); setKind("all"); };

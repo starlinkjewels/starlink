@@ -106,6 +106,7 @@ import { IfExport } from "@/components/IfExport";
 import { ReturnDialog, OrderReturns, useMayReturn } from "@/components/SalesReturn";
 import { returnBlocker } from "@/lib/salesReturn";
 import { zoomable } from "@/components/ImageViewer";
+import { RateInput } from "@/components/CurrencyFields";
 
 const GOLD_PURITIES = ["9K", "14K", "18K", "22K", "24K"];
 
@@ -276,7 +277,8 @@ function OrderDetailPageBody() {
   const [priceValue, setPriceValue] = useState("");
   const [priceShipping, setPriceShipping] = useState("");
   // The certificate fee: set when the order was placed, or added here later (a client asks for one after).
-  const [priceCert, setPriceCert] = useState("");
+  const [priceCert, setPriceCert] = useState(""); // ₹, as the lab charges it
+  const [priceCertRate, setPriceCertRate] = useState<number | "">(""); // ₹ per $1 — the client is billed in dollars
   const [priceCharges, setPriceCharges] = useState<ChargeDraft[]>([]);
 
   // Manufacturing — record a purchase / issue material for THIS order directly,
@@ -1986,16 +1988,23 @@ function OrderDetailPageBody() {
   const fillPricing = () => {
     setPriceValue(order.amount ? String(order.amount) : "");
     setPriceShipping(order.shippingCharge ? String(order.shippingCharge) : "");
-    setPriceCert(order.certificateFee ? String(order.certificateFee) : "");
+    // In rupees. An older fee kept only in dollars is shown under the box, and kept unless one is typed.
+    setPriceCert(order.certificateFeeInr ? String(order.certificateFeeInr) : "");
+    setPriceCertRate(order.certificateRate ?? "");
     setPriceCharges(chargeDrafts(order.otherCharges));
   };
 
   const savePricing = async () => {
     const val = parseFloat(priceValue);
     const ship = parseFloat(priceShipping) || 0;
-    const cert = parseFloat(priceCert) || 0;
+    // The certificate fee, typed in rupees and billed in dollars at the rate. An older order's
+    // fee kept only in dollars stays as it is while the box is left empty.
+    const keepOldCert = priceCert.trim() === "" && !order.certificateFeeInr && (order.certificateFee || 0) > 0;
+    const certInr = parseFloat(priceCert) || 0;
     if (!val || val <= 0) { toast.error("Enter a valid order value"); return; }
-    if (cert < 0) { toast.error("The certificate fee can't be below 0"); return; }
+    if (certInr < 0) { toast.error("The certificate fee can't be below 0"); return; }
+    if (certInr > 0 && !(Number(priceCertRate) > 0)) { toast.error("Certificate fee: enter the rate (₹ for $1) — the client is billed in dollars"); return; }
+    const cert = keepOldCert ? order.certificateFee || 0 : certInr > 0 ? Math.round((certInr / Number(priceCertRate)) * 100) / 100 : 0;
     // A sales return has already worked out what goes back for the certificate; a
     // changed fee would no longer match its credit note.
     const certChanged = Math.abs(cert - (order.certificateFee || 0)) > 0.0001;
@@ -2007,7 +2016,15 @@ function OrderDetailPageBody() {
       o.amount = val;
       o.shippingCharge = ship;
       // A fee means a certificate goes with the piece; taking the fee off leaves the order's choice as it was.
-      if (cert > 0) { o.certificate = true; o.certificateFee = cert; } else if (o.certificateFee) o.certificateFee = 0;
+      if (!keepOldCert) {
+        if (certInr > 0) {
+          o.certificate = true; o.certificateFee = cert;
+          o.certificateFeeInr = certInr; o.certificateRate = Number(priceCertRate);
+        } else {
+          if (o.certificateFee) o.certificateFee = 0;
+          delete o.certificateFeeInr; delete o.certificateRate;
+        }
+      }
       const charges = chargesOf(priceCharges);
       if (charges.length) o.otherCharges = charges; else delete o.otherCharges;
       // The client is not told: a price set or changed here sends no notice.
@@ -2551,6 +2568,7 @@ function OrderDetailPageBody() {
                 <div className="min-w-0">
                   <p className="text-xs text-muted-foreground">Certificate</p>
                   <p className="mt-0.5 text-xl font-semibold text-foreground tabular-nums">{fmtMoney(order.certificateFee || 0)}</p>
+                  {(order.certificateFeeInr || 0) > 0 && <p className="text-xs text-muted-foreground mt-0.5">₹{order.certificateFeeInr!.toLocaleString("en-IN")}{order.certificateRate ? ` at ₹${order.certificateRate}/$` : ""}</p>}
                 </div>
               )}
               {(order.otherCharges?.length ?? 0) > 0 && (
@@ -2593,14 +2611,22 @@ function OrderDetailPageBody() {
                       />
                     </div>
                     <div className="space-y-1.5">
-                      <Label htmlFor="price-cert" className="text-xs">Certificate fee ($)</Label>
+                      <Label htmlFor="price-cert" className="text-xs">Certificate fee (₹)</Label>
                       <Input
                         id="price-cert" type="number" min={0} step="0.01"
                         value={priceCert}
                         onChange={e => setPriceCert(e.target.value)}
                         className="rounded-xl h-10"
-                        placeholder="0 — no certificate charge"
+                        placeholder="0 — what the lab charges, in ₹"
                       />
+                      {(parseFloat(priceCert) || 0) > 0 ? (
+                        <>
+                          <RateInput id="price-cert-rate" from="USD" to="INR" value={priceCertRate} onChange={setPriceCertRate} />
+                          {Number(priceCertRate) > 0 && <p className="text-[11px] text-muted-foreground">= {fmtMoney(Math.round(((parseFloat(priceCert) || 0) / Number(priceCertRate)) * 100) / 100)} on the client&rsquo;s bill</p>}
+                        </>
+                      ) : !order.certificateFeeInr && (order.certificateFee || 0) > 0 ? (
+                        <p className="text-[11px] text-muted-foreground">Now {fmtMoney(order.certificateFee || 0)} (entered in dollars) — leave empty to keep it, or type the fee in ₹.</p>
+                      ) : null}
                     </div>
                     <div className="space-y-1.5 sm:col-span-2">
                       <Label className="text-xs">Other charges ($)</Label>

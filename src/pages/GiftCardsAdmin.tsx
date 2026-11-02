@@ -1,6 +1,8 @@
 import { DataTable } from "@/components/DataTable";
 import { useState } from "react";
 import { useDb } from "@/hooks/useDb";
+import { useStickyFilter } from "@/hooks/useStickyFilter";
+import { selHas, selOn } from "@/lib/filterSel";
 import { fmtMoney, fmtDate, giftCardStats, giftCardRemaining, giftCardGranted, giftCardStatus, type GiftCard, type GiftCardStatus, worksOnClientId } from "@/lib/db";
 import { ExportDialog } from "@/components/ExportDialog";
 import { downloadLedgerPdf, downloadCsv } from "@/lib/ledgerExport";
@@ -29,7 +31,9 @@ export function GiftCardsAdminPage() {
   const can = useCan();
   const navigate = useNavigate();
   const [q, setQ] = useState("");
-  const [statusFilter, setStatusFilter] = useState<"all" | GiftCardStatus>("all");
+  // Stays as it was left (this browser, this person) until cleared; several
+  // statuses can be ticked (lib/filterSel.ts).
+  const [statusFilter, setStatusFilter] = useStickyFilter("giftCards.status", "all");
   const [showExport, setShowExport] = useState(false);
 
   const clientName = (id: string) => db.clients.find(c => c.id === id)?.companyName ?? "—";
@@ -42,7 +46,7 @@ export function GiftCardsAdminPage() {
 
   const ql = q.trim().toLowerCase();
   const rows = all.filter(c => {
-    if (statusFilter !== "all" && giftCardStatus(c, db.orders) !== statusFilter) return false;
+    if (selOn(statusFilter) && !selHas(statusFilter, giftCardStatus(c, db.orders))) return false;
     if (ql && !clientName(c.clientId).toLowerCase().includes(ql)) return false;
     return true;
   });
@@ -152,8 +156,8 @@ export function GiftCardsAdminPage() {
           <DataTable
             search={{ value: q, onChange: setQ, placeholder: "Search client…" }}
             filters={[{
-              kind: "select", label: "Status", allLabel: "All statuses", value: statusFilter === "all" ? "" : statusFilter,
-              onChange: v => setStatusFilter((v || "all") as "all" | GiftCardStatus),
+              kind: "select", label: "Status", allLabel: "All statuses", multi: true, value: statusFilter === "all" ? "" : statusFilter,
+              onChange: v => setStatusFilter(v || "all"),
               options: [
                 { value: "active", label: "Active" },
                 { value: "used", label: "Used" },
@@ -178,7 +182,7 @@ export function GiftCardsAdminPage() {
             details={cardDetails}
             rowActions={cardActions}
             defaultSort={{ key: "issued", dir: "desc" }}
-            emptyText={ql || statusFilter !== "all" ? "No gift cards match your filters." : "No gift cards issued yet."}
+            emptyText={ql || selOn(statusFilter) ? "No gift cards match your filters." : "No gift cards issued yet."}
             columns={[
               { key: "client", header: "Client", always: true, sortValue: c => clientName(c.clientId), cell: c => <span className="font-medium max-w-[180px] truncate block">{clientName(c.clientId)}</span> },
               { key: "source", header: "Source", sortValue: c => sourceLabel(c.source), cell: c => <span className="text-xs text-muted-foreground">{sourceLabel(c.source)}</span> },

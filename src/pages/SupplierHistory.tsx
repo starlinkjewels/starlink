@@ -14,7 +14,7 @@ import { OpeningBalanceFields } from "@/components/OpeningBalanceFields";
 import { useDb } from "@/hooks/useDb";
 import { useAuth } from "@/lib/auth";
 import {
-  supplierAccount, groupPaymentsAsMade, purchasePaid, purchasePending, allocateSupplierPaymentFIFO, fmtMoneyInr, lockerBalance, fmtLockerAmount,
+  supplierAccount, groupPaymentsAsMade, purchasePaid, purchasePending, fmtMoneyInr, lockerBalance, fmtLockerAmount,
 } from "@/lib/manufacturing";
 import {
   canVoidPurchase, canEditPurchase, editPurchase, voidPurchase as voidPurchaseCascade,
@@ -33,6 +33,8 @@ import { ActionSheet } from "@/components/ActionSheet";
 import { StatStrip } from "@/components/TableToolbar";
 import { joinDots } from "@/components/party/joinDots";
 import { lastPayLocker, rememberPayLocker } from "@/components/party/payLocker";
+import { useRupeePay } from "@/components/RupeePay";
+import { writeSupplierPayment } from "@/lib/partyPayments";
 import { Button } from "@/components/ui/button";
 import { AsyncButton } from "@/components/AsyncButton";
 import { Input } from "@/components/ui/input";
@@ -153,7 +155,10 @@ function SupplierHistoryPageBody() {
   const [payDate, setPayDate] = useState(todayLocal());
   // Shown in the panel's footer only; the save looks the locker up afresh.
   const payFromLocker = db.lockers.find(l => l.id === payLockerId);
-  const payLockers = db.lockers.filter(l => l.active !== false && (l.currency || "INR") === "INR");
+  // Any account: from one in another currency (a dollar account) the rate turns
+  // the amount into the rupees on their books (components/RupeePay.tsx).
+  const payLockers = db.lockers.filter(l => l.active !== false);
+  const fx = useRupeePay(payLockerId, Number(payAmount) || 0, `${supplier.name}'s`, () => setPayAmount(""));
   // Opens on the account this person last paid from, unless one is already picked.
   const openPay = () => {
     if (!payLockerId) { const last = lastPayLocker(user?.id); if (payLockers.some(l => l.id === last)) setPayLockerId(last); }
@@ -166,6 +171,7 @@ function SupplierHistoryPageBody() {
     if (!payLockerId) { toast.error("Choose which locker this payment came from"); return; }
     if (!payDate) { toast.error("Choose the date"); return; }
     if (payDate > todayLocal()) { toast.error("A payment can't be dated after today"); return; }
+    if (fx.problem) { toast.error(fx.problem); return; }
     // Overpayment allowed — the excess beyond what's owed is parked on the newest
     // purchase (shows as Overpaid), never silently lost.
     const payLocker = db.lockers.find(l => l.id === payLockerId);
@@ -175,48 +181,14 @@ function SupplierHistoryPageBody() {
     // entry alike — what was "now" before a date could be chosen.
     const now = stampFor(payDate);
 
-    updateDb(d => {
-      const supplierPurchases = d.purchases.filter(p => p.supplierId === id);
-      const asAdvance = (sum: number) => {
-        if (!d.supplierPayments) d.supplierPayments = [];
-        d.supplierPayments.push({ id: uid("spay_"), supplierId: id!, amountInr: sum, lockerId: payLockerId, recordedBy: user!.id, createdAt: now, note: payNote.trim() || undefined });
-      };
-      if (payTargetPurchase === "__advance") {
-        asAdvance(amt);
-      } else if (payTargetPurchase === "__fifo") {
-        const leftover = allocateSupplierPaymentFIFO(supplierPurchases, amt, payLockerId, user!.id, now, payNote.trim() || undefined);
-        if (leftover > 0) {
-          const newest = [...supplierPurchases].sort((a, b) => +new Date(b.createdAt) - +new Date(a.createdAt))[0];
-          if (newest) {
-            if (!newest.payments) newest.payments = [];
-            newest.payments.push({ id: uid("ppay_"), amountInr: leftover, lockerId: payLockerId, recordedBy: user!.id, createdAt: now, note: payNote.trim() || undefined });
-          } else {
-            // Nothing to settle — a supplier with no bills at all. Standing on
-            // its own is the only place this money can go; it used to vanish.
-            asAdvance(leftover);
-          }
-        }
-      } else {
-        const p = d.purchases.find(p => p.id === payTargetPurchase);
-        if (p) {
-          if (!p.payments) p.payments = [];
-          p.payments.push({ id: uid("ppay_"), amountInr: amt, lockerId: payLockerId, recordedBy: user!.id, createdAt: now, note: payNote.trim() || undefined });
-        } else {
-          // The bill went while the form was open. The money still left the
-          // account, so it is booked as an advance rather than discarded.
-          asAdvance(amt);
-        }
-      }
-      if (!d.lockerTransactions) d.lockerTransactions = [];
-      d.lockerTransactions.push({
-        id: uid("ltx_"), lockerId: payLockerId, type: "expense", amountInr: amt,
-        category: `Supplier Payment — ${supplier.name}`, refType: "purchase",
-        refId: payTargetPurchase === "__fifo" || payTargetPurchase === "__advance" ? undefined : payTargetPurchase,
-        note: payNote.trim() || undefined, recordedBy: user!.id, createdAt: now,
-      });
-    });
+    // The same write as every other supplier payment (lib/partyPayments.ts) — a
+    // dollar account's rupees at the rate given (fx).
+    updateDb(d => writeSupplierPayment(d, {
+      supplierId: id!, lockerId: payLockerId, amount: amt, target: payTargetPurchase,
+      note: payNote, userId: user!.id, at: now, ...fx.args,
+    }));
     rememberPayLocker(user?.id, payLockerId);
-    toast.success("Payment recorded");
+    toast.success(`Payment recorded · ${fx.text}`);
     setPayAmount(""); setPayNote(""); setPayTargetPurchase("__fifo"); setPayDate(todayLocal()); setShowPayForm(false);
   };
 
@@ -841,7 +813,7 @@ function SupplierHistoryPageBody() {
           <div className="flex items-center justify-between gap-3 flex-wrap">
             <div className="min-w-0">
               <p className="text-xs text-muted-foreground">Paying</p>
-              <p className="font-display text-lg font-bold text-brand-dark leading-tight">{fmtMoneyInr(Number(payAmount) || 0)}</p>
+              <p className="font-display text-lg font-bold text-brand-dark leading-tight">{fx.text}</p>
               {/* The locker's balance before the money leaves it — the save still
                   asks before letting it go negative. */}
               {payFromLocker && <p className="text-[11px] text-muted-foreground truncate">{payFromLocker.name} holds {fmtLockerAmount(lockerBalance(payFromLocker, db.lockerTransactions), payFromLocker.currency)}</p>}
@@ -856,7 +828,7 @@ function SupplierHistoryPageBody() {
         <div className="space-y-3">
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <Label className="text-xs">Amount (₹)</Label>
+              <Label className="text-xs">Amount ({fx.foreign ? fx.cur : "₹"})</Label>
               <Input type="number" min={1} value={payAmount} onChange={e => setPayAmount(e.target.value)} autoFocus className="rounded-xl h-10 mt-1" placeholder="0" aria-label="Amount" />
             </div>
             <div>
@@ -869,21 +841,24 @@ function SupplierHistoryPageBody() {
           {(() => {
             const bill = pendingPurchases.find(p => p.id === payTargetPurchase);
             const full = bill ? purchasePending(bill) : payTargetPurchase === "__fifo" ? account.net : 0;
-            if (!(full > 0) || Number(payAmount) === full) return null;
+            // From a dollar account: the full rupees in dollars, once the rate is in.
+            const inCur = fx.foreign ? (fx.rate > 0 ? Math.round(full / fx.rate * 100) / 100 : 0) : full;
+            if (!(full > 0) || !(inCur > 0) || Number(payAmount) === inCur) return null;
             return (
-              <button type="button" onClick={() => setPayAmount(String(full))}
+              <button type="button" onClick={() => setPayAmount(String(inCur))}
                 className="-mt-1 inline-flex items-center h-7 px-2.5 rounded-full border border-primary/30 bg-primary/5 text-xs font-medium text-primary hover:bg-primary/10">
-                Full amount · {fmtMoneyInr(full)}
+                Full amount · {fmtMoneyInr(full)}{fx.foreign ? ` = ${fmtCcy(inCur, fx.cur)}` : ""}
               </button>
             );
           })()}
           <div>
             <Label className="text-xs">From account</Label>
             <Select value={payLockerId} onValueChange={addNew("locker", setPayLockerId)}>
-              <SelectTrigger className="h-10 rounded-xl mt-1" aria-label="From account"><SelectValue placeholder="Choose a rupee account" /></SelectTrigger>
-              <SelectContent>{payLockers.map(l => <SelectItem key={l.id} value={l.id}>{l.name}</SelectItem>)}<AddNewItem kind="locker" /></SelectContent>
+              <SelectTrigger className="h-10 rounded-xl mt-1" aria-label="From account"><SelectValue placeholder="Choose an account" /></SelectTrigger>
+              <SelectContent>{payLockers.map(l => <SelectItem key={l.id} value={l.id}>{l.name}{(l.currency || "INR") !== "INR" ? ` (${l.currency})` : ""}</SelectItem>)}<AddNewItem kind="locker" /></SelectContent>
             </Select>
           </div>
+          {fx.box}
           <div>
             <Label className="text-xs">Against</Label>
             <Select value={payTargetPurchase} onValueChange={setPayTargetPurchase}>

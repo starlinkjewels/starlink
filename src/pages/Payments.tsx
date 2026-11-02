@@ -42,6 +42,7 @@ import { toast } from "sonner";
 import { confirmBox } from "@/lib/confirm";
 import { PayBrokerSheet } from "@/components/PayBrokerSheet";
 import { sheetFrame, type Frame } from "@/components/SheetFrame";
+import { useRupeePay } from "@/components/RupeePay";
 import { notifyClientPayment, writeAccountEntry, writeExpense, writeFactoryPayment, writeSupplierPayment, writeSupplierReceipt, writeTransfer } from "@/lib/partyPayments";
 import { ReceiveFromBrokerSheet } from "@/components/ReceiveFromBrokerSheet";
 import { RefundClientSheet } from "@/components/RefundClientSheet";
@@ -535,6 +536,10 @@ export function PaySupplier({ open, onOpenChange, preset, lockerId: fixedLocker,
     (db.supplierSales ?? []).filter(x => x.supplierId === supplierId),
   );
   const pendingPurchases = purchases.filter(p => purchasePending(p) > 0);
+  // Paying from an account in another currency (a dollar account): the rate turns
+  // it into the rupees on their books (components/RupeePay.tsx). Money back from
+  // a supplier still comes into a rupee account only.
+  const fx = useRupeePay(dir === "pay" ? lockerId : undefined, Number(amount) || 0, "their", () => setAmount(""));
 
   const submit = async () => {
     const s = db.suppliers.find(x => x.id === supplierId);
@@ -542,9 +547,11 @@ export function PaySupplier({ open, onOpenChange, preset, lockerId: fixedLocker,
     const amt = Number(amount);
     if (!amt || amt <= 0) { toast.error("Enter a valid amount"); return; }
     if (!lockerId) { toast.error(dir === "pay" ? "Choose which locker this was paid from" : "Choose which locker the money went into"); return; }
-    // Supplier bills are in rupees, so only a rupee locker can carry them (one
-    // made from "+ Add new" in another currency would otherwise slip through).
-    if (ccy(db.lockers.find(l => l.id === lockerId)?.currency) !== "INR") { toast.error("Supplier payments are in rupees — choose an INR locker"); return; }
+    // Supplier bills are in rupees: money back comes into a rupee account only (one
+    // made from "+ Add new" in another currency would otherwise slip through); a
+    // payment from another currency's account needs the rate.
+    if (dir === "receive" && ccy(db.lockers.find(l => l.id === lockerId)?.currency) !== "INR") { toast.error("Money back from a supplier goes into a rupee account — choose an INR locker"); return; }
+    if (dir === "pay" && fx.problem) { toast.error(fx.problem); return; }
     // ── Receive: money back FROM the supplier (refund / return credit). ──
     if (dir === "receive") {
       setSaving(true);
@@ -564,8 +571,8 @@ export function PaySupplier({ open, onOpenChange, preset, lockerId: fixedLocker,
     setSaving(true);
     try {
       const now = stampFor(date);
-      updateDb(d => writeSupplierPayment(d, { supplierId, lockerId, amount: amt, target, note, userId: user!.id, at: now }));
-      toast.success(`${fmtMoneyInr(amt)} paid to ${s.name}`);
+      updateDb(d => writeSupplierPayment(d, { supplierId, lockerId, amount: amt, target, note, userId: user!.id, at: now, ...fx.args }));
+      toast.success(`${fx.text} paid to ${s.name}`);
       setSupplierId(""); setAmount(""); setTarget("__fifo"); setNote(""); setLockerId(""); setDate(todayLocal());
       onOpenChange(false);
     } finally { setSaving(false); }
@@ -575,10 +582,10 @@ export function PaySupplier({ open, onOpenChange, preset, lockerId: fixedLocker,
   return frame({
     open, onOpenChange, size: "md", icon: Truck,
     title: "Supplier payment",
-    description: "Bills or refunds, in rupees",
+    description: "Bills or refunds, kept in rupees",
     footer: (
         <PanelFooter onCancel={() => onOpenChange(false)} summary={typed > 0 ? (
-          <MoveSummary label={dir === "pay" ? "Paying" : "Receiving"} value={fmtMoneyInr(typed)} tone={dir === "pay" ? "out" : "in"}
+          <MoveSummary label={dir === "pay" ? "Paying" : "Receiving"} value={dir === "pay" ? fx.text : fmtMoneyInr(typed)} tone={dir === "pay" ? "out" : "in"}
             lockerId={lockerId} change={dir === "pay" ? -typed : typed} />
         ) : undefined}>
           <AsyncButton onClick={submit} disabled={saving} className={SAVE_BTN}>{saving ? "Saving…" : dir === "pay" ? "Record Supplier Payment" : "Record Supplier Receipt"}</AsyncButton>
@@ -616,7 +623,7 @@ export function PaySupplier({ open, onOpenChange, preset, lockerId: fixedLocker,
           <Input type="date" value={date} onChange={e => setDate(e.target.value)} className="rounded-xl h-10 mt-1" />
         </div>
         <div>
-          <Label className="text-xs">Amount (₹)</Label>
+          <Label className="text-xs">Amount ({fx.foreign ? fx.cur : "₹"})</Label>
           <Input type="number" min={1} value={amount} onChange={e => setAmount(e.target.value)} className="rounded-xl h-10 mt-1" />
         </div>
         {dir === "pay" && (
@@ -640,10 +647,11 @@ export function PaySupplier({ open, onOpenChange, preset, lockerId: fixedLocker,
           <Label className="text-xs">{dir === "pay" ? "Paid from Locker *" : "Received into Locker *"}</Label>
           <Select value={lockerId} onValueChange={addNew("locker", setLockerId)}>
             <SelectTrigger className="h-10 rounded-xl mt-1"><SelectValue placeholder="Choose locker" /></SelectTrigger>
-            <SelectContent>{db.lockers.filter(l => l.active !== false && (l.currency || "INR") === "INR").map(l => <SelectItem key={l.id} value={l.id}>{l.name}</SelectItem>)}<AddNewItem kind="locker" /></SelectContent>
+            <SelectContent>{db.lockers.filter(l => l.active !== false && (dir === "pay" || (l.currency || "INR") === "INR")).map(l => <SelectItem key={l.id} value={l.id}>{l.name}{(l.currency || "INR") !== "INR" ? ` (${l.currency})` : ""}</SelectItem>)}<AddNewItem kind="locker" /></SelectContent>
           </Select>
         </div>
       )}
+      {fx.box}
     </div>
     ),
   });
@@ -673,6 +681,9 @@ export function PayFactory({ open, onOpenChange, lockerId: fixedLocker, frame = 
     (db.factoryPayments ?? []).filter(x => x.factoryId === factoryId),
   );
   const pendingIssuances = issuances.filter(i => issuancePending(i) > 0);
+  // Paying from an account in another currency (a dollar account): the rate turns
+  // it into the rupees on their books (components/RupeePay.tsx).
+  const fx = useRupeePay(lockerId, Number(amount) || 0, "their", () => setAmount(""));
 
   const submit = async () => {
     const f = db.factories.find(x => x.id === factoryId);
@@ -680,16 +691,16 @@ export function PayFactory({ open, onOpenChange, lockerId: fixedLocker, frame = 
     const amt = Number(amount);
     if (!amt || amt <= 0) { toast.error("Enter a valid amount"); return; }
     if (!lockerId) { toast.error("Choose which locker this was paid from"); return; }
-    // Making charges are in rupees, so only a rupee locker can pay them.
-    if (ccy(db.lockers.find(l => l.id === lockerId)?.currency) !== "INR") { toast.error("Factory payments are in rupees — choose an INR locker"); return; }
+    // Making charges are in rupees: from another currency's account, at a rate.
+    if (fx.problem) { toast.error(fx.problem); return; }
     // Overpayment is allowed (you can pay more than currently owed) — the extra
     // is recorded as an advance/overpay, never silently lost.
     if (!(await confirmOverdraw(db.lockers, db.lockerTransactions, lockerId, amt))) return;
     setSaving(true);
     try {
       const now = stampFor(date);
-      updateDb(d => writeFactoryPayment(d, { factoryId, lockerId, amount: amt, target, note, userId: user!.id, at: now }));
-      toast.success(`${fmtMoneyInr(amt)} paid to ${f.name}`);
+      updateDb(d => writeFactoryPayment(d, { factoryId, lockerId, amount: amt, target, note, userId: user!.id, at: now, ...fx.args }));
+      toast.success(`${fx.text} paid to ${f.name}`);
       setFactoryId(""); setAmount(""); setTarget("__fifo"); setNote(""); setLockerId(""); setDate(todayLocal());
       onOpenChange(false);
     } finally { setSaving(false); }
@@ -699,10 +710,10 @@ export function PayFactory({ open, onOpenChange, lockerId: fixedLocker, frame = 
   return frame({
     open, onOpenChange, size: "md", icon: FactoryIcon,
     title: "Factory payment",
-    description: "Making charges, in rupees",
+    description: "Making charges, kept in rupees",
     footer: (
         <PanelFooter onCancel={() => onOpenChange(false)} summary={typed > 0 ? (
-          <MoveSummary label="Paying" value={fmtMoneyInr(typed)} tone="out" lockerId={lockerId} change={-typed} />
+          <MoveSummary label="Paying" value={fx.text} tone="out" lockerId={lockerId} change={-typed} />
         ) : undefined}>
           <AsyncButton onClick={submit} disabled={saving} className={SAVE_BTN}>{saving ? "Saving…" : "Record Factory Payment"}</AsyncButton>
         </PanelFooter>
@@ -725,7 +736,7 @@ export function PayFactory({ open, onOpenChange, lockerId: fixedLocker, frame = 
           <Input type="date" value={date} onChange={e => setDate(e.target.value)} className="rounded-xl h-10 mt-1" />
         </div>
         <div>
-          <Label className="text-xs">Amount (₹)</Label>
+          <Label className="text-xs">Amount ({fx.foreign ? fx.cur : "₹"})</Label>
           <Input type="number" min={1} value={amount} onChange={e => setAmount(e.target.value)} className="rounded-xl h-10 mt-1" />
         </div>
         {/* Full width: a job reads "12g 18K — pending ₹4,500". */}
@@ -747,10 +758,11 @@ export function PayFactory({ open, onOpenChange, lockerId: fixedLocker, frame = 
           <Label className="text-xs">Paid from Locker *</Label>
           <Select value={lockerId} onValueChange={addNew("locker", setLockerId)}>
             <SelectTrigger className="h-10 rounded-xl mt-1"><SelectValue placeholder="Choose locker" /></SelectTrigger>
-            <SelectContent>{db.lockers.filter(l => l.active !== false && (l.currency || "INR") === "INR").map(l => <SelectItem key={l.id} value={l.id}>{l.name}</SelectItem>)}<AddNewItem kind="locker" /></SelectContent>
+            <SelectContent>{db.lockers.filter(l => l.active !== false).map(l => <SelectItem key={l.id} value={l.id}>{l.name}{(l.currency || "INR") !== "INR" ? ` (${l.currency})` : ""}</SelectItem>)}<AddNewItem kind="locker" /></SelectContent>
           </Select>
         </div>
       )}
+      {fx.box}
     </div>
     ),
   });

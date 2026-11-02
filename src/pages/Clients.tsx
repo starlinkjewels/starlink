@@ -30,6 +30,8 @@ import { PaginationBar } from "@/components/PaginationBar";
 import { clientDeleteBlocker, deleteClientFlow, toggleClientActive } from "@/lib/clientActions";
 import { needsAccess } from "@/lib/actionHints";
 import { useUrlState } from "@/hooks/useUrlState";
+import { useStickyFilter } from "@/hooks/useStickyFilter";
+import { selHas, selList, selOn } from "@/lib/filterSel";
 
 const PAGE_SIZE = 9;
 
@@ -141,10 +143,12 @@ export function ClientsPage() {
   const multiCo = hasCompanies(dbNow.settings);
   const meUser = dbNow.users.find(u => u.id === user!.id) ?? user!;
   const myCompanies = companiesForUser(dbNow.settings, meUser);
-  const [coFilter, setCoFilter] = useState("all");
+  // The filters stay as they were left (this browser, this person) until
+  // cleared — each can hold several choices (lib/filterSel.ts).
+  const [coFilter, setCoFilter] = useStickyFilter("clients.company", "all");
   // Whose clients: the person who handles them ("__none" = nobody yet).
-  const [byFilter, setByFilter] = useState("all");
-  const [countryFilter, setCountryFilter] = useState("all");
+  const [byFilter, setByFilter] = useStickyFilter("clients.handledBy", "all");
+  const [countryFilter, setCountryFilter] = useStickyFilter("clients.country", "all");
   const can = useCan();
   const mayExport = useMayExport();
   const db = useDb();
@@ -195,10 +199,19 @@ export function ClientsPage() {
     return a ? Math.max(a.dueNow, a.credit) : 0;
   };
   const onOrder = (c: Client) => accounts.get(c.id)?.notBilled ?? 0;
+  // Who handles them — everyone who handles one of the clients this person sees.
+  const handlers = [...new Map(scoped.map(c => handlerOf(db, c)).filter((u): u is NonNullable<typeof u> => !!u).map(u => [u.id, u])).values()]
+    .sort((a, b) => a.name.localeCompare(b.name));
+  const unhandled = scoped.some(c => !handlerOf(db, c));
+  // A remembered filter counts only while it is shown — one left over from when
+  // there were several companies (or handlers) must not hide clients with no chip to clear it.
+  const byShown = user!.role === "admin" && handlers.length + (unhandled ? 1 : 0) > 1;
+  const coNow = multiCo ? coFilter : "all";
+  const byNow = byShown ? byFilter : "all";
   const list = scoped
-    .filter(c => coFilter === "all" || companyIdOfClient(c) === coFilter)
-    .filter(c => byFilter === "all" || (byFilter === "__none" ? !handlerOf(db, c) : c.accountManagerId === byFilter))
-    .filter(c => countryFilter === "all" || (countryFilter === "__none" ? !countryOf(c) : countryOf(c).toLowerCase() === countryFilter))
+    .filter(c => selHas(coNow, companyIdOfClient(c)))
+    .filter(c => !selOn(byNow) || selList(byNow).some(b => (b === "__none" ? !handlerOf(db, c) : c.accountManagerId === b)))
+    .filter(c => !selOn(countryFilter) || selList(countryFilter).some(k => (k === "__none" ? !countryOf(c) : countryOf(c).toLowerCase() === k)))
     // Name, owner, country — and the phone, email, login or GST someone has to hand.
     .filter(c => {
       const t = q.trim().toLowerCase();
@@ -214,22 +227,18 @@ export function ClientsPage() {
   // The company filter, behind one Filters button in the table's (or the
   // grid's) toolbar — only once there is more than one company. "All" is the
   // page's own "all", so it narrows exactly as it did.
-  // Who handles them — everyone who handles one of the clients this person sees.
-  const handlers = [...new Map(scoped.map(c => handlerOf(db, c)).filter((u): u is NonNullable<typeof u> => !!u).map(u => [u.id, u])).values()]
-    .sort((a, b) => a.name.localeCompare(b.name));
-  const unhandled = scoped.some(c => !handlerOf(db, c));
   // Every country among the clients this person sees, however it was typed ("india", "India ").
   const countries = [...new Map(scoped.filter(c => countryOf(c)).map(c => [countryOf(c).toLowerCase(), countryOf(c)])).entries()]
     .sort((a, b) => a[1].localeCompare(b[1]));
   const noCountry = scoped.some(c => !countryOf(c));
   const filters: TableFilter[] = [
-    ...(countries.length > 0 ? [{ kind: "select" as const, label: "Country", value: countryFilter === "all" ? "" : countryFilter, onChange: (v: string) => setCountryFilter(v || "all"),
+    ...(countries.length > 0 ? [{ kind: "select" as const, label: "Country", multi: true, value: countryFilter === "all" ? "" : countryFilter, onChange: (v: string) => setCountryFilter(v || "all"),
       options: [...countries.map(([k, name]) => ({ value: k, label: `${name} · ${scoped.filter(c => countryOf(c).toLowerCase() === k).length}` })),
         ...(noCountry ? [{ value: "__none", label: `Not given · ${scoped.filter(c => !countryOf(c)).length}` }] : [])],
       allLabel: "All countries" }] : []),
-    ...(multiCo ? [{ kind: "select" as const, label: "Company", value: coFilter === "all" ? "" : coFilter, onChange: (v: string) => setCoFilter(v || "all"),
+    ...(multiCo ? [{ kind: "select" as const, label: "Company", multi: true, value: coFilter === "all" ? "" : coFilter, onChange: (v: string) => setCoFilter(v || "all"),
       options: companiesOf(dbNow.settings).map(co => ({ value: co.id, label: co.name })), allLabel: "All companies" }] : []),
-    ...(user!.role === "admin" && handlers.length + (unhandled ? 1 : 0) > 1 ? [{ kind: "select" as const, label: "Handled by", value: byFilter === "all" ? "" : byFilter, onChange: (v: string) => setByFilter(v || "all"),
+    ...(byShown ? [{ kind: "select" as const, label: "Handled by", multi: true, value: byFilter === "all" ? "" : byFilter, onChange: (v: string) => setByFilter(v || "all"),
       options: [...handlers.map(u => ({ value: u.id, label: `${u.name}${u.role === "admin" ? " (admin)" : ""} · ${scoped.filter(c => c.accountManagerId === u.id).length}` })),
         ...(unhandled ? [{ value: "__none", label: `Not assigned · ${scoped.filter(c => !handlerOf(db, c)).length}` }] : [])],
       allLabel: "Everyone" }] : []),
@@ -458,7 +467,7 @@ export function ClientsPage() {
             search={{ value: q, onChange: setQ, placeholder: "Search clients..." }}
             filters={filters}
             onClearFilters={clearFilters}
-            resetKey={`${q}|${coFilter}|${byFilter}`}
+            resetKey={`${q}|${coFilter}|${byFilter}|${countryFilter}`}
             rows={list}
             columns={columns}
             rowKey={c => c.id}

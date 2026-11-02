@@ -19,6 +19,8 @@ import {
 import { reachOf } from "@/lib/permissions";
 import type { Order, Invoice } from "@/lib/db";
 import { useDb } from "@/hooks/useDb";
+import { useStickyFilter } from "@/hooks/useStickyFilter";
+import { selHas, selList, selOn } from "@/lib/filterSel";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { FileText, CheckCircle2, Clock, Plus, DollarSign, Printer, Gift, Undo2, Eye, Pencil, Trash2, XCircle, MessageCircle, Mail } from "lucide-react";
 import { PageHeader } from "@/components/PageHeader";
@@ -72,9 +74,11 @@ export function InvoicesPage() {
   // searched for, rather than landing on the whole list to hunt for it.
   const [sp, setSp] = useSearchParams();
   const [q, setQ] = useState(sp.get("q") ?? "");
-  const [clientFilter, setClientFilter] = useState("all");
+  // The filters stay as they were left (this browser, this person) until
+  // cleared; Client and Company can hold several choices (lib/filterSel.ts).
+  const [clientFilter, setClientFilter] = useStickyFilter("invoices.client", "all");
   // Paid or still pending — the list's own filter, beside Client and Company.
-  const [statusFilter, setStatusFilter] = useState<"all" | "pending" | "paid">("all");
+  const [statusFilter, setStatusFilter] = useStickyFilter<"all" | "pending" | "paid">("invoices.status", "all");
   // Arriving with ?bill=<client> (the client page's "Create invoice", the
   // Clients list's ⋯): Create invoice opens on that client. Read once, then
   // taken off the address so a refresh doesn't open it again.
@@ -86,10 +90,10 @@ export function InvoicesPage() {
     setSp(next, { replace: true });
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
   // Each company bills on its own; shown once there is more than one.
-  const [companyFilter, setCompanyFilter] = useState("all");
+  const [companyFilter, setCompanyFilter] = useStickyFilter("invoices.company", "all");
   const multiCo = hasCompanies(db.settings);
   const [ledgerQ, setLedgerQ] = useState("");
-  const [ledgerClientFilter, setLedgerClientFilter] = useState("all");
+  const [ledgerClientFilter, setLedgerClientFilter] = useStickyFilter("invoices.advances.client", "all");
 
   // The client being invoiced. Its own choice, not the list's Client filter:
   // picking someone to bill used to filter the list behind the panel too, and
@@ -123,8 +127,8 @@ export function InvoicesPage() {
     const c = db.clients.find(x => x.id === i.clientId);
     return (!!c && worksOnClient(db, user!, c)) || invoiceOrderIds(i).some(oid => { const o = db.orders.find(x => x.id === oid); return !!o && worksOnOrder(db, user!, o); });
   });
-  if (isStaff && clientFilter !== "all") list = list.filter(i => i.clientId === clientFilter);
-  if (isStaff && companyFilter !== "all") list = list.filter(i => companyIdOfInvoice(i) === companyFilter);
+  if (isStaff && selOn(clientFilter)) list = list.filter(i => selHas(clientFilter, i.clientId));
+  if (isStaff && multiCo && selOn(companyFilter)) list = list.filter(i => selHas(companyFilter, companyIdOfInvoice(i)));
 
   const ql = q.trim().toLowerCase();
   if (ql) {
@@ -323,7 +327,7 @@ export function InvoicesPage() {
   if (user!.role === "client") ordersWithAdvanceBase = ordersWithAdvanceBase.filter(o => o.clientId === user!.clientId);
   if (ownReach) ordersWithAdvanceBase = ordersWithAdvanceBase.filter(o => worksOnOrder(db, user!, o));
   let ordersWithAdvance = ordersWithAdvanceBase;
-  if (isStaff && ledgerClientFilter !== "all") ordersWithAdvance = ordersWithAdvance.filter(o => o.clientId === ledgerClientFilter);
+  if (isStaff && selOn(ledgerClientFilter)) ordersWithAdvance = ordersWithAdvance.filter(o => selHas(ledgerClientFilter, o.clientId));
   const lq = ledgerQ.trim().toLowerCase();
   if (lq) {
     ordersWithAdvance = ordersWithAdvance.filter(o => {
@@ -348,12 +352,12 @@ export function InvoicesPage() {
   // behind the table's one Filters button.
   const invoiceFilters: TableFilter[] = [];
   if (isStaff) invoiceFilters.push({
-    kind: "select", label: "Client", allLabel: "All Clients", value: clientFilter === "all" ? "" : clientFilter,
+    kind: "select", label: "Client", allLabel: "All Clients", multi: true, value: clientFilter === "all" ? "" : clientFilter,
     onChange: v => pickClient(v || "all"),
     options: clientOptions.map(c => ({ value: c.id, label: c.companyName })),
   });
   if (isStaff && multiCo) invoiceFilters.push({
-    kind: "select", label: "Company", allLabel: "All companies", value: companyFilter === "all" ? "" : companyFilter,
+    kind: "select", label: "Company", allLabel: "All companies", multi: true, value: companyFilter === "all" ? "" : companyFilter,
     onChange: v => setCompanyFilter(v || "all"),
     options: companiesOf(db.settings).map(c => ({ value: c.id, label: c.name })),
   });
@@ -513,8 +517,10 @@ export function InvoicesPage() {
     <div className="max-w-7xl mx-auto space-y-5">
       <PageHeader title="Invoices"
         primary={isStaff && can("invoices", "add") ? { label: "Create Invoice", icon: Plus, onClick: () => {
-          // A list narrowed to one client opens the panel on them, as it always did.
-          if (clientFilter !== "all" && billClient === "all") pickBillClient(clientFilter);
+          // A list narrowed to one client opens the panel on them, as it always did
+          // (several ticked: the panel asks, as with none).
+          const one = selList(clientFilter);
+          if (one.length === 1 && billClient === "all") pickBillClient(one[0]);
           setCreating(true);
         } } : null} />
 
@@ -588,7 +594,7 @@ export function InvoicesPage() {
             <DataTable
               search={{ value: ledgerQ, onChange: setLedgerQ, placeholder: "Search order, client…" }}
               filters={[{
-                kind: "select", label: "Client", allLabel: "All Clients", value: ledgerClientFilter === "all" ? "" : ledgerClientFilter,
+                kind: "select", label: "Client", allLabel: "All Clients", multi: true, value: ledgerClientFilter === "all" ? "" : ledgerClientFilter,
                 onChange: v => setLedgerClientFilter(v || "all"),
                 options: clientOptions.map(c => ({ value: c.id, label: c.companyName })),
               }]}

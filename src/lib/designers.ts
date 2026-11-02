@@ -356,7 +356,10 @@ export function refreshBrief(d: DB, jobId: string, by: Who): string | undefined 
 
 /** What we paid a designer: account entries "designerPayment" to them. */
 export function designerPayments(db: Pick<DB, "lockerTransactions">, designerId: string): LockerTransaction[] {
-  return (db.lockerTransactions ?? []).filter(t => t.refType === "designerPayment" && t.refId === designerId && t.type === "expense");
+  // In rupees, as their account is kept: one paid from another currency's account counts
+  // the rupees it settled (partyAmountInr), not the dollars that left the account.
+  return (db.lockerTransactions ?? []).filter(t => t.refType === "designerPayment" && t.refId === designerId && t.type === "expense")
+    .map(t => (t.partyAmountInr != null ? { ...t, amountInr: t.partyAmountInr } : t));
 }
 
 /** Their approved designs that carry a charge, oldest approved first. */

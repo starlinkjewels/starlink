@@ -6,12 +6,13 @@ import { useDb } from "@/hooks/useDb";
 import { useAuth } from "@/lib/auth";
 import { useCan } from "@/hooks/useCan";
 import { useLoaded } from "@/hooks/useLoaded";
-import { ccy } from "@/lib/currency";
-import { factoryAccount, fmtMoneyInr, lockerBalance } from "@/lib/manufacturing";
+import { fmtCcy } from "@/lib/currency";
+import { factoryAccount, fmtMoneyInr, lockerBalance, fmtLockerAmount } from "@/lib/manufacturing";
 import { needsAccess } from "@/lib/actionHints";
 import { confirmBox } from "@/lib/confirm";
 import { writeFactoryPayment } from "@/lib/partyPayments";
 import { lastPayLocker, rememberPayLocker } from "@/components/party/payLocker";
+import { useRupeePay } from "@/components/RupeePay";
 import { ActionSheet } from "@/components/ActionSheet";
 import { AsyncButton } from "@/components/AsyncButton";
 import { AddNewItem, useAddNew } from "@/components/create/QuickCreate";
@@ -30,7 +31,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 const NEEDS = ["materialIssuances", "factoryPayments", "lockerTransactions"] as const;
 
 /**
- * Pay a factory's labour in one go, from a rupee account, oldest jobs first.
+ * Pay a factory's labour in one go, oldest jobs first — from a rupee account, or
+ * from one in another currency at a rate (components/RupeePay.tsx).
  * The same entry the Locker's "Record entry" makes for a factory
  * (lib/partyPayments.ts writeFactoryPayment with "__fifo"), so it shows in the
  * factory's ledger and in the Locker exactly as one made there; corrected there.
@@ -44,7 +46,7 @@ export function PayFactorySheet({ factoryId, open, onOpenChange }: {
   const addNew = useAddNew();
   const ready = useLoaded(open ? NEEDS : []);
   const factory = db.factories.find(f => f.id === factoryId);
-  const lockers = db.lockers.filter(l => l.active !== false && ccy(l.currency) === "INR");
+  const lockers = db.lockers.filter(l => l.active !== false);
 
   const [lockerId, setLockerId] = useState("");
   const [amount, setAmount] = useState("");
@@ -59,6 +61,10 @@ export function PayFactorySheet({ factoryId, open, onOpenChange }: {
     ? factoryAccount(db.materialIssuances.filter(i => i.factoryId === factory.id), factory, (db.factoryPayments ?? []).filter(x => x.factoryId === factory.id))
     : null;
   const owed = acc?.chargesPending ?? 0;
+  const fx = useRupeePay(lockerId, Number(amount) || 0, factory ? `${factory.name}'s` : "their", () => { setAmount(""); setTyped(false); });
+  // What is owed in the account's currency: rupees, or — from a dollar account,
+  // once the rate is in — the dollars that settle it.
+  const owedInCur = fx.foreign ? (fx.rate > 0 ? Math.round(owed / fx.rate * 100) / 100 : 0) : owed;
 
   // A fresh form each time it opens, on the account last paid from.
   useEffect(() => {
@@ -70,9 +76,9 @@ export function PayFactorySheet({ factoryId, open, onOpenChange }: {
   }, [open]);
   // What is owed, once the books are here — unless something was typed first.
   useEffect(() => {
-    if (open && ready && !typed) setAmount(owed > 0 ? String(owed) : "");
+    if (open && ready && !typed) setAmount(owedInCur > 0 ? String(owedInCur) : "");
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, ready, owed]);
+  }, [open, ready, owedInCur]);
 
   if (!factory) return null;
   const locker = lockers.find(l => l.id === lockerId);
@@ -86,9 +92,10 @@ export function PayFactorySheet({ factoryId, open, onOpenChange }: {
     if (!(amt > 0)) { toast.error("Enter the amount"); return; }
     if (!date) { toast.error("Choose the date"); return; }
     if (date > todayLocal()) { toast.error("A payment can't be dated after today"); return; }
+    if (fx.problem) { toast.error(fx.problem); return; }
     const bal = lockerBalance(locker, db.lockerTransactions);
-    if (amt > bal && !(await confirmBox(`${fmtMoneyInr(amt)} is more than ${locker.name}'s balance of ${fmtMoneyInr(bal)}.\n\nThe balance will go negative — continue only if a deposit is still missing.`))) return;
-    if (amt > owed + 0.5 && !(await confirmBox(`${fmtMoneyInr(amt)} is more than the ${fmtMoneyInr(owed)} owed to ${factory.name}.\n\nThe rest stays with them as money paid ahead — continue?`))) return;
+    if (amt > bal && !(await confirmBox(`${fmtLockerAmount(amt, locker.currency)} is more than ${locker.name}'s balance of ${fmtLockerAmount(bal, locker.currency)}.\n\nThe balance will go negative — continue only if a deposit is still missing.`))) return;
+    if (fx.inr > owed + 0.5 && !(await confirmBox(`${fx.text} is more than the ${fmtMoneyInr(owed)} owed to ${factory.name}.\n\nThe rest stays with them as money paid ahead — continue?`))) return;
     setSaving(true);
     try {
       let found = false;
@@ -96,11 +103,11 @@ export function PayFactorySheet({ factoryId, open, onOpenChange }: {
         // Looked up again on the live records: the factory may have gone while the panel was open.
         if (!d.factories.some(f => f.id === factory.id) || !d.lockers.some(l => l.id === locker.id)) return;
         found = true;
-        writeFactoryPayment(d, { lockerId: locker.id, amount: amt, note, userId: user!.id, at: stampFor(date), factoryId: factory.id, target: "__fifo" });
+        writeFactoryPayment(d, { lockerId: locker.id, amount: amt, note, userId: user!.id, at: stampFor(date), factoryId: factory.id, target: "__fifo", ...fx.args });
       });
       if (!found) { toast.error("That factory or account couldn't be found — nothing was recorded"); return; }
       rememberPayLocker(user?.id, locker.id);
-      toast.success(`${fmtMoneyInr(amt)} paid to ${factory.name}`);
+      toast.success(`${fx.text} paid to ${factory.name}`);
       onOpenChange(false);
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Couldn't save — nothing was recorded");
@@ -116,8 +123,8 @@ export function PayFactorySheet({ factoryId, open, onOpenChange }: {
         <div className="flex items-center justify-between gap-3 flex-wrap">
           <div className="min-w-0">
             <p className="text-xs text-muted-foreground">Paying</p>
-            <p className="text-lg font-semibold text-foreground tabular-nums leading-tight whitespace-nowrap">{fmtMoneyInr(amt)}</p>
-            {locker && <p className="text-[11px] text-muted-foreground truncate">{locker.name} holds {fmtMoneyInr(lockerBalance(locker, db.lockerTransactions))}</p>}
+            <p className="text-lg font-semibold text-foreground tabular-nums leading-tight whitespace-nowrap">{fx.text}</p>
+            {locker && <p className="text-[11px] text-muted-foreground truncate">{locker.name} holds {fmtLockerAmount(lockerBalance(locker, db.lockerTransactions), locker.currency)}</p>}
           </div>
           <div className="flex gap-2.5 ml-auto">
             <Button variant="outline" onClick={() => onOpenChange(false)} className="rounded-xl h-10">Cancel</Button>
@@ -129,13 +136,14 @@ export function PayFactorySheet({ factoryId, open, onOpenChange }: {
         <div>
           <Label className="text-xs">From account</Label>
           <Select value={lockerId} onValueChange={addNew("locker", setLockerId)}>
-            <SelectTrigger className={field} aria-label="From account"><SelectValue placeholder={lockers.length ? "Choose a rupee account" : "No rupee account"} /></SelectTrigger>
-            <SelectContent>{lockers.map(l => <SelectItem key={l.id} value={l.id}>{l.name} · {fmtMoneyInr(lockerBalance(l, db.lockerTransactions))}</SelectItem>)}<AddNewItem kind="locker" /></SelectContent>
+            <SelectTrigger className={field} aria-label="From account"><SelectValue placeholder={lockers.length ? "Choose an account" : "No account"} /></SelectTrigger>
+            <SelectContent>{lockers.map(l => <SelectItem key={l.id} value={l.id}>{l.name} · {fmtLockerAmount(lockerBalance(l, db.lockerTransactions), l.currency)}</SelectItem>)}<AddNewItem kind="locker" /></SelectContent>
           </Select>
         </div>
+        {fx.box}
         <div className="grid grid-cols-2 gap-3">
           <div>
-            <Label className="text-xs">Amount (₹)</Label>
+            <Label className="text-xs">Amount ({fx.foreign ? fx.cur : "₹"})</Label>
             <Input type="number" min={0} step="0.01" inputMode="decimal" value={amount} onChange={e => { setAmount(e.target.value); setTyped(true); }}
               className={field} placeholder="0" aria-label="Amount" />
           </div>
@@ -144,10 +152,10 @@ export function PayFactorySheet({ factoryId, open, onOpenChange }: {
             <Input type="date" value={date} max={todayLocal()} onChange={e => setDate(e.target.value)} className={field} aria-label="Date" />
           </div>
         </div>
-        {owed > 0 && amt !== owed && (
-          <button type="button" onClick={() => { setAmount(String(owed)); setTyped(true); }}
+        {owed > 0 && owedInCur > 0 && amt !== owedInCur && (
+          <button type="button" onClick={() => { setAmount(String(owedInCur)); setTyped(true); }}
             className="-mt-2 inline-flex items-center h-7 px-2.5 rounded-full border border-primary/30 bg-primary/5 text-xs font-medium text-primary hover:bg-primary/10">
-            Full amount · {fmtMoneyInr(owed)}
+            Full amount · {fmtMoneyInr(owed)}{fx.foreign ? ` = ${fmtCcy(owedInCur, fx.cur)}` : ""}
           </button>
         )}
         <div>

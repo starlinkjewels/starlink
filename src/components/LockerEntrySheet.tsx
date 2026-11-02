@@ -122,7 +122,9 @@ export function LockerEntrySheet({ open, onOpenChange, lockerId: startLocker }: 
   const whyNot = (w: Who): string | undefined => {
     if (w === "other") return can("locker", "add") ? undefined : "no access";
     if (!can("payments", "add")) return "no access to payments";
-    if (WHO[w].rupees && !rupees) return "rupee accounts only";
+    // Their books are in rupees. Paying them OUT from another currency's account is
+    // done at a rate (the rupees go on their books); money IN from them is rupees only.
+    if (WHO[w].rupees && !rupees && dir === "in") return "rupee accounts only";
     if (w === "broker" && dir === "in" && !isAdmin) return "admins only";
     return undefined;
   };
@@ -133,8 +135,18 @@ export function LockerEntrySheet({ open, onOpenChange, lockerId: startLocker }: 
     setCategory(w === "employee" ? "Salary" : "");
     setMethod(w === "client" ? (account?.type === "cash" ? "Cash" : "Bank Transfer") : "");
   };
+  // Another account: the rate starts again — set while drawing, so the rate boxes
+  // (drawn afresh per account) then fill in Settings → Exchange rates; and an
+  // amount typed for an account in another currency is cleared, never read again
+  // as this one's (₹84,000 becoming $84,000).
+  const [seenAcct, setSeenAcct] = useState({ id: accountId, cur });
+  if (seenAcct.id !== accountId) {
+    if (seenAcct.cur !== cur) setAmount("");
+    setSeenAcct({ id: accountId, cur });
+    setRate("");
+  }
   // A changed account can rule out the party picked (a rupee-only one on a dollar account).
-  useEffect(() => { if (who && whyNot(who)) { setWho(""); setPartyId(""); } setRate(""); setToAccount(t => (t === accountId ? "" : t));
+  useEffect(() => { if (who && whyNot(who)) { setWho(""); setPartyId(""); } setToAccount(t => (t === accountId ? "" : t));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [accountId]);
 
@@ -194,6 +206,10 @@ export function LockerEntrySheet({ open, onOpenChange, lockerId: startLocker }: 
 
   // A client's money is in dollars: on any other account, the rate turns the amount into their bill.
   const needsUsdRate = who === "client" && cur !== "USD";
+  // A supplier, factory, designer or broker is kept in rupees: paid from a dollar (or any
+  // non-rupee) account, the rate turns what leaves the account into rupees on their books.
+  const toRupeeParty = dir === "out" && !rupees && (who === "supplier" || who === "factory" || who === "designer" || who === "broker");
+  const partyAmt = toRupeeParty ? (Number(rate) > 0 ? r2(amt * Number(rate)) : 0) : amt;
   const usdRaw = who === "client" ? (cur === "USD" ? r2(amt) : Number(rate) > 0 ? r2(amt / Number(rate)) : 0) : 0;
   // "Refund all" typed back through a rate can land a cent either side of the credit.
   const heldCredit = who === "client" && dir === "out" && partyId ? refundable(db, partyId) : 0;
@@ -201,7 +217,7 @@ export function LockerEntrySheet({ open, onOpenChange, lockerId: startLocker }: 
   // Broker: oldest bills first after his brokerage, or simply held by him.
   const brokerage = brAcc ? Math.max(0, brAcc.due) : 0;
   const brokerAlloc = broker && against === "__oldest"
-    ? allocateOldestFirst(brBills, Math.max(0, r2(amt + (brAcc?.held ?? 0) - brokerage))).alloc : {};
+    ? allocateOldestFirst(brBills, Math.max(0, r2(partyAmt + (brAcc?.held ?? 0) - brokerage))).alloc : {};
   const brokerSettles = r2(Object.values(brokerAlloc).reduce((s, v) => s + v, 0));
   const target = lockers.find(l => l.id === toAccount);
   const crossTransfer = dir === "transfer" && !!target && ccy(target.currency) !== cur;
@@ -222,6 +238,7 @@ export function LockerEntrySheet({ open, onOpenChange, lockerId: startLocker }: 
       if ((who === "expense" || who === "other" || who === "employee") && !category) { toast.error("Choose a category"); return; }
       if (who === "expense" && !title.trim()) { toast.error("Say what it was for"); return; }
       if (needsUsdRate && !(Number(rate) > 0)) { toast.error("Enter the rate — the client's account is in USD"); return; }
+      if (toRupeeParty && !(Number(rate) > 0)) { toast.error(`Enter the rate — ${WHO[who].name.toLowerCase()} accounts are kept in rupees`); return; }
       if (who === "client" && !(usd >= 0.01)) { toast.error("That comes to less than one cent — check the amount and rate"); return; }
     }
     // Money leaving that the account doesn't hold is almost always a slip.
@@ -230,7 +247,8 @@ export function LockerEntrySheet({ open, onOpenChange, lockerId: startLocker }: 
     setSaving(true);
     try {
       const at = stampFor(date);
-      const base = { lockerId: account.id, amount: amt, note, userId: user!.id, at };
+      // From a non-rupee account to a party kept in rupees: the rate goes with it (lib/partyPayments.ts payInRupees).
+      const base = { lockerId: account.id, amount: amt, note, userId: user!.id, at, ...(toRupeeParty ? { rate: Number(rate) } : {}) };
       if (dir === "transfer" || who === "other") {
         // Checked before the number is taken — a number not used is a hole in the book.
         if (dir === "transfer" && (!db.lockers.some(l => l.id === toAccount) || toAccount === account.id)) { toast.error("That account couldn't be found — pick it again"); return; }
@@ -277,7 +295,7 @@ export function LockerEntrySheet({ open, onOpenChange, lockerId: startLocker }: 
             writeExpense(d, { ...base, title, category });
           }
         });
-        toast.success(`${fmtCcy(amt, cur)} ${dir === "in" ? "received from" : "paid to"} ${parties.find(p => p.id === partyId)?.label ?? title.trim()}`);
+        toast.success(`${fmtCcy(amt, cur)}${toRupeeParty ? ` (${fmtMoneyInr(partyAmt)})` : ""} ${dir === "in" ? "received from" : "paid to"} ${parties.find(p => p.id === partyId)?.label ?? title.trim()}`);
       }
       reset();
       onOpenChange(false);
@@ -396,13 +414,22 @@ export function LockerEntrySheet({ open, onOpenChange, lockerId: startLocker }: 
         {/* Rates: a client's dollars, or a transfer into another currency */}
         {needsUsdRate && (
           <div className="p-3 rounded-xl bg-secondary">
-            <RateInput id="entry-usd-rate" from="USD" to={cur} value={rate} onChange={setRate} at={date} />
+            <RateInput key={accountId} id="entry-usd-rate" from="USD" to={cur} value={rate} onChange={setRate} at={date} />
             <p className="text-[11px] text-muted-foreground mt-1">{usd > 0 ? `${fmtCcy(amt, cur)} = ${fmtMoney(usd)}` : "Clients are billed in USD."}</p>
+          </div>
+        )}
+        {toRupeeParty && (
+          <div className="p-3 rounded-xl bg-secondary">
+            <RateInput key={accountId} id="entry-inr-rate" from={cur} to="INR" value={rate} onChange={setRate} amount={amt || undefined} at={date} />
+            <p className="text-[11px] text-muted-foreground mt-1">
+              {partyAmt > 0 ? `${fmtCcy(amt, cur)} = ${fmtMoneyInr(partyAmt)} on ${parties.find(p => p.id === partyId)?.label ?? `the ${WHO[who as Who].name.toLowerCase()}`}'s account` : ""}
+              {partyAmt > 0 ? " — " : ""}{WHO[who as Who].name} accounts are kept in rupees; {account?.name} goes down in {cur}.
+            </p>
           </div>
         )}
         {crossTransfer && target && (
           <div className="p-3 rounded-xl bg-secondary">
-            <RateInput id="entry-xfer-rate" from={cur} to={ccy(target.currency)} value={rate} onChange={setRate} amount={amt || undefined} at={date} />
+            <RateInput key={`${accountId}:${toAccount}`} id="entry-xfer-rate" from={cur} to={ccy(target.currency)} value={rate} onChange={setRate} amount={amt || undefined} at={date} />
           </div>
         )}
 
@@ -465,7 +492,7 @@ export function LockerEntrySheet({ open, onOpenChange, lockerId: startLocker }: 
             {against !== "__hold" && amt > 0 && (
               <p className="text-[11px] text-muted-foreground mt-1">
                 {brokerSettles > 0 ? `Settles ${Object.keys(brokerAlloc).length} bill${Object.keys(brokerAlloc).length === 1 ? "" : "s"} for ${fmtMoneyInr(brokerSettles)}` : "No bills to settle"}
-                {brokerage > 0.5 ? ` · his brokerage ${fmtMoneyInr(Math.min(brokerage, amt + (brAcc?.held ?? 0)))}` : ""}. To pick bills one by one, use Payments → Pay through broker.
+                {brokerage > 0.5 ? ` · his brokerage ${fmtMoneyInr(Math.min(brokerage, partyAmt + (brAcc?.held ?? 0)))}` : ""}. To pick bills one by one, use Payments → Pay through broker.
               </p>
             )}
           </div>

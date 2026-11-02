@@ -290,7 +290,9 @@ function pairEntries(entries: MoneyEntry[], idx: TxnIndex, claimed: Set<string>,
     e.txnIds = ts.map(t => t.id);
     // A shared movement is not "no movement": it is there, and locked.
     if (!ts.length) { if (e.lockerId && !contested.has(e)) e.noTxn = true; continue; }
-    const sum = r2(ts.reduce((s, t) => s + t.amountInr, 0));
+    // A row paid from another currency's account (at a rate) is compared by the
+    // rupees it settled — its own figure is dollars, never a mismatch.
+    const sum = r2(ts.reduce((s, t) => s + (t.partyAmountInr ?? t.amountInr), 0));
     if (Math.abs(sum - e.amount) >= 0.01) e.txnAmount = sum;
   }
 }
@@ -595,7 +597,11 @@ function syncTxn(d: DB, entry: MoneyEntry, patch: EntryPatch) {
   for (const live of rows) {
     // One movement takes the new amount; several (an old payment written one
     // row per bill) cannot be split, and editRefusal() refuses that change.
-    if (patch.amount !== undefined && rows.length === 1) live.amountInr = roundCcy(patch.amount, entry.currency);
+    // A row paid at a rate from another currency's account (partyAmountInr) keeps
+    // its own figure: the entry's amount is the rupees, the row's is the dollars,
+    // and a change of amount was refused (entryEditRefusal) — a date or a note
+    // corrected must never write the rupees over the dollars.
+    if (patch.amount !== undefined && rows.length === 1 && live.partyAmountInr == null) live.amountInr = roundCcy(patch.amount, entry.currency);
     if (patch.date !== undefined) live.createdAt = patch.date;
     if (patch.note !== undefined) live.note = patch.note || undefined;
     if (patch.lockerId !== undefined) {
@@ -694,6 +700,18 @@ function planTransfer(d: DB, out: LockerTransaction, inn: LockerTransaction, pat
  *  anything is written, so a refusal leaves every record exactly as it was. */
 export function entryEditRefusal(d: DB, entry: MoneyEntry, patch: EntryPatch): string | undefined {
   if (entry.locked) return entry.locked;
+  // Paid to a party kept in rupees from an account in another currency, at a rate
+  // (partyAmountInr): the rupees on their books and the amount that left the account
+  // were worked out together. Changing either alone (or moving it to another account)
+  // would leave the two disagreeing — so not here. The date and the note can change.
+  const amountChanges = patch.amount !== undefined && Math.abs(patch.amount - entry.amount) >= 0.005;
+  const accountChanges = patch.lockerId !== undefined && patch.lockerId !== entry.lockerId;
+  if (amountChanges || accountChanges) {
+    const rows = entry.kind === "locker" ? (d.lockerTransactions ?? []).filter(t => t.id === entry.id) : liveTxns(d, entry);
+    if (rows.some(t => t.partyAmountInr != null)) {
+      return "This was paid from an account in another currency at an exchange rate — to change the amount or the account, cancel it and record it again.";
+    }
+  }
   // Paid from no account: giving it one here would have the books say the
   // money left that account while the account never moved — syncTxn moves
   // the rows an entry already has, it never makes one.

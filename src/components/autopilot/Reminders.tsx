@@ -15,6 +15,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { AddNewItem, useAddNew } from "@/components/create/QuickCreate";
 import { MoreMenu } from "@/components/MoreMenu";
+import { useStickyFilter } from "@/hooks/useStickyFilter";
 import {
   answerAsk, deleteReminder, newReminderId, reminderDone, saveReminder, snoozeReminder, subscribeMyAsks, subscribeReminders, type Ask, type Reminder,
 } from "@/lib/pipelines/client";
@@ -109,7 +110,9 @@ export function RemindersManager({ everyone, creating, onCreating }: { everyone?
   const { user } = useAuth();
   const isAdmin = user?.role === "admin";
   const [list, setList] = useState<Reminder[]>([]);
-  const [show, setShow] = useState<"open" | "done" | "all">("open");
+  // Not done / Done / All stays as it was left until cleared — one for my
+  // reminders, one for the admin's everyone view.
+  const [show, setShow] = useStickyFilter<"open" | "done" | "all">(`reminders.${everyone ? "everyone" : "mine"}.show`, "open");
   const [editing, setEditing] = useState<Reminder | null>(null);
   const [now, setNow] = useState(Date.now());
   useEffect(() => { const t = setInterval(() => setNow(Date.now()), 30_000); return () => clearInterval(t); }, []);

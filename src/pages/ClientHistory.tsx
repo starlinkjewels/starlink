@@ -13,6 +13,8 @@ import { SectionTitle } from "@/components/SectionTitle";
 import { StatStrip, type TableFilter } from "@/components/TableToolbar";
 import { advanceIds, receiptForAdvance } from "@/lib/receipts";
 import { useEffect, useState } from "react";
+import { useStickyFilter } from "@/hooks/useStickyFilter";
+import { selHas } from "@/lib/filterSel";
 import { useParams, Link, useNavigate, useSearchParams } from "react-router-dom";
 import { invoicedOrderIds, readyToBill, splitClientAccount } from "@/components/billing/clientBilling";
 import { collectionLoaded, worksOnClient, fmtMoney, fmtDate, totalAdvance, balanceDue, orderTotal, orderGrossTotal, updateDb, uid, settleClientAccount, applyCreditToBills, findInvoiceForOrder, invoiceOrderIds, hasOpeningBalance, openingDebitAmt, openingCreditAmt } from "@/lib/db";
@@ -104,6 +106,9 @@ function ClientHistoryPageBody() {
   const [refunding, setRefunding] = useState(false);
   // Taking money for a diamond sold to them on credit (lib/diamondSalePay.ts).
   const [paySale, setPaySale] = useState<DiamondSale | null>(null);
+  // Order History's status filter — stays as it was left (this browser, this
+  // person, every client's page alike) until cleared; several can be ticked.
+  const [statusFilter, setStatusFilter] = useStickyFilter("clientHistory.status", "all");
   // Arriving from the Clients list's ⋯ (Record payment, Send statement): the
   // page opens with that panel open. The ask is taken off the address once
   // read, so a refresh or Back doesn't open it again.
@@ -171,9 +176,6 @@ function ClientHistoryPageBody() {
 
   const statusCounts: Record<string, number> = {};
   allOrders.forEach(o => { statusCounts[o.status] = (statusCounts[o.status] || 0) + 1; });
-
-  // Filters
-  const [statusFilter, setStatusFilter] = useState("all");
 
   const [showExport, setShowExport] = useState(() => askedStatement && mayExport);
 
@@ -502,10 +504,10 @@ function ClientHistoryPageBody() {
 
 
   // The status filter narrows the rows; the table's own search box does the rest.
-  const filtered = allOrders.filter(o => statusFilter === "all" || o.status === statusFilter);
+  const filtered = allOrders.filter(o => selHas(statusFilter, o.status));
   // Behind the table's one Filters button; "All" is the page's own "all".
   const orderFilters: TableFilter[] = [
-    { kind: "select", label: "Status", value: statusFilter === "all" ? "" : statusFilter, onChange: v => setStatusFilter(v || "all"),
+    { kind: "select", label: "Status", multi: true, value: statusFilter === "all" ? "" : statusFilter, onChange: v => setStatusFilter(v || "all"),
       options: ["Waiting", "Approved", "In Production", "Ready", "Dispatched", "Delivered", "Rejected"].map(s => ({ value: s, label: s })), allLabel: "All Status" },
   ];
 

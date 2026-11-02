@@ -9,6 +9,7 @@ import { type TableFilter, StatStrip } from "@/components/TableToolbar";
 import { DataTable, CellMain, CellTag, type DataColumn } from "@/components/DataTable";
 import { SectionTitle } from "@/components/SectionTitle";
 import { finishRecordOf, isReworkIssue } from "@/lib/rework";
+import { useStickyFilter } from "@/hooks/useStickyFilter";
 
 // A zero prints as a dash, never as an empty cell. A blank reads as missing
 // data; "—" says plainly that nothing moved.
@@ -327,9 +328,11 @@ export function FactoryOrderLedger({
   onExport?: () => void;
 }) {
   const [q, setQ] = useState("");
-  const [from, setFrom] = useState("");
-  const [to, setTo] = useState("");
-  const [only, setOnly] = useState<"all" | "open" | "done">("all");
+  // The dates and the status stay as they were left until cleared — one
+  // setting for every factory's ledger (the choices are the same on each).
+  const [from, setFrom] = useStickyFilter("factory-order-ledger.from", "");
+  const [to, setTo] = useStickyFilter("factory-order-ledger.to", "");
+  const [only, setOnly] = useStickyFilter<"all" | "open" | "done">("factory-order-ledger.status", "all");
 
   const filtered = useMemo(() => {
     const ql = q.trim().toLowerCase();

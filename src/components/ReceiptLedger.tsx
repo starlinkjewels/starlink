@@ -14,6 +14,8 @@ import { filled, linkList, recorded, refLink, refNo, when, type Detail } from "@
 import { downloadCsv, downloadLedgerPdf } from "@/lib/ledgerExport";
 import { inDateRange, ledgerTable, rangeLabel } from "@/components/LedgerFilters";
 import { StatStrip } from "@/components/TableToolbar";
+import { useStickyFilter } from "@/hooks/useStickyFilter";
+import { selHas, selOn, selText } from "@/lib/filterSel";
 import { SectionTitle } from "@/components/SectionTitle";
 import { oneLine } from "@/components/MoneyEntryEditor";
 
@@ -31,11 +33,13 @@ export function ReceiptLedger() {
   const can = useCan();
   const db = useDb();
   const [q, setQ] = useState("");
-  const [from, setFrom] = useState("");
-  const [to, setTo] = useState("");
-  const [clientId, setClientId] = useState("");
-  const [acct, setAcct] = useState("");
-  const [mode, setMode] = useState("");
+  // The filters stay as they were left until cleared; client, account and mode
+  // can hold several choices (lib/filterSel.ts).
+  const [from, setFrom] = useStickyFilter("receipt-ledger.from", "");
+  const [to, setTo] = useStickyFilter("receipt-ledger.to", "");
+  const [clientId, setClientId] = useStickyFilter("receipt-ledger.client", "");
+  const [acct, setAcct] = useStickyFilter("receipt-ledger.account", "");
+  const [mode, setMode] = useStickyFilter("receipt-ledger.mode", "");
   // The receipt open in the correction panel — the same panel, and the same
   // checks, as everywhere else a payment is corrected (ReceiptEditSheet).
   const [editId, setEditId] = useState<string | null>(null);
@@ -45,9 +49,9 @@ export function ReceiptLedger() {
   const ql = q.trim().toLowerCase();
   const rows = allReceipts.filter(r => {
     if (!inDateRange(r.date, from, to)) return false;
-    if (clientId && r.clientId !== clientId) return false;
-    if (acct && (r.lockerId ?? "") !== acct) return false;
-    if (mode && r.method !== mode) return false;
+    if (!selHas(clientId, r.clientId)) return false;
+    if (!selHas(acct, r.lockerId ?? "")) return false;
+    if (!selHas(mode, r.method)) return false;
     if (!ql) return true;
     const client = db.clients.find(c => c.id === r.clientId)?.companyName ?? "";
     return r.receiptNo.includes(ql)
@@ -55,7 +59,7 @@ export function ReceiptLedger() {
       || (r.remarks ?? "").toLowerCase().includes(ql)
       || r.method.toLowerCase().includes(ql);
   });
-  const filtered = !!(ql || from || to || clientId || acct || mode);
+  const filtered = !!(ql || from || to || selOn(clientId) || selOn(acct) || selOn(mode));
   const totalReceived = rows.reduce((s, r) => s + r.amountUsd, 0);
   // Only clients who actually have a receipt — a list of every client would be
   // mostly dead options.
@@ -100,9 +104,9 @@ export function ReceiptLedger() {
     title: "Payments Received",
     subjectLines: [
       `${rows.length} receipt${rows.length !== 1 ? "s" : ""} · ${rangeLabel(from, to)}`,
-      [clientId && `Client: ${db.clients.find(c => c.id === clientId)?.companyName ?? ""}`,
-        acct && `Account: ${db.lockers.find(l => l.id === acct)?.name ?? acct}`,
-        mode && `Mode: ${mode}`,
+      [selOn(clientId) && `Client: ${selText(clientId, id => db.clients.find(c => c.id === id)?.companyName ?? "", "", 4)}`,
+        selOn(acct) && `Account: ${selText(acct, id => db.lockers.find(l => l.id === id)?.name, "", 4)}`,
+        selOn(mode) && `Mode: ${selText(mode, m => m, "", 4)}`,
         ql && `Search: "${q.trim()}"`].filter(Boolean).join(" · ") || "All receipts",
       `Report Generated: ${new Date().toLocaleDateString("en-IN", { month: "long", day: "numeric", year: "numeric" })}`,
     ],
@@ -194,10 +198,10 @@ export function ReceiptLedger() {
           q, onQ: setQ, placeholder: "Search receipt #, client, remark…",
           from, to, onFrom: setFrom, onTo: setTo,
           selects: [
-            { label: "Client", value: clientId, onChange: setClientId, options: payers },
-            { label: "Account", value: acct, onChange: setAcct,
+            { label: "Client", value: clientId, onChange: setClientId, options: payers, multi: true },
+            { label: "Account", value: acct, onChange: setAcct, multi: true,
               options: db.lockers.map(l => ({ value: l.id, label: l.name })) },
-            { label: "Mode", value: mode, onChange: setMode,
+            { label: "Mode", value: mode, onChange: setMode, multi: true,
               options: listOf("paymentMethods").map(m => ({ value: m, label: m })) },
           ],
           onPdf: exportPdf, onCsv: exportCsv,

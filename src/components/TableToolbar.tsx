@@ -9,6 +9,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { todayLocal } from "@/lib/db";
+import { selJoin, selList, selOn, selText } from "@/lib/filterSel";
 
 /**
  * The pieces of a table's one toolbar row (see DataTable): Filters — everything
@@ -17,10 +18,12 @@ import { todayLocal } from "@/lib/db";
  * date boxes and dropdowns above it; that is what made every page look busy.
  */
 
-/** Something that narrows a table's rows. "" / empty means not narrowed. */
+/** Something that narrows a table's rows. "" / empty means not narrowed.
+ *  `multi`: more than one choice can be ticked — the value is then read with
+ *  lib/filterSel.ts (selHas), and stays one string. */
 export type TableFilter =
   | { kind: "date"; label?: string; from: string; to: string; onChange: (from: string, to: string) => void }
-  | { kind: "select"; label: string; value: string; onChange: (v: string) => void; options: { value: string; label: string }[]; allLabel?: string };
+  | { kind: "select"; label: string; value: string; onChange: (v: string) => void; options: { value: string; label: string }[]; allLabel?: string; multi?: boolean };
 
 /** One way to download what the table shows. */
 export interface TableExport { label: string; icon?: LucideIcon; hint?: string; onSelect: () => void }
@@ -57,7 +60,7 @@ export function dateRangeText(from: string, to: string): string {
   return from ? `From ${short(from)}` : `Up to ${short(to)}`;
 }
 
-const isOn = (f: TableFilter) => (f.kind === "date" ? !!(f.from || f.to) : !!f.value);
+const isOn = (f: TableFilter) => (f.kind === "date" ? !!(f.from || f.to) : f.multi ? selOn(f.value) : !!f.value);
 
 /** How many filters are narrowing the rows. */
 export const activeFilterCount = (filters: TableFilter[]) => filters.filter(isOn).length;
@@ -118,6 +121,14 @@ function FilterFields({ filters }: { filters: TableFilter[] }) {
           );
         }
         const all = f.allLabel ?? "All";
+        if (f.multi) {
+          return (
+            <section key={`s${i}`} className="space-y-2.5">
+              <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">{f.label}</p>
+              <MultiPick f={f} all={all} />
+            </section>
+          );
+        }
         return (
           <section key={`s${i}`} className="space-y-2.5">
             <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">{f.label}</p>
@@ -133,6 +144,58 @@ function FilterFields({ filters }: { filters: TableFilter[] }) {
         );
       })}
     </div>
+  );
+}
+
+/**
+ * A filter where more than one can be ticked: a dropdown like the others, its
+ * list with a tick box each, "All" at the top (clears them), and a search box
+ * when the list is long (clients, parties).
+ */
+function MultiPick({ f, all }: { f: Extract<TableFilter, { kind: "select" }>; all: string }) {
+  const [open, setOpen] = useState(false);
+  const [q, setQ] = useState("");
+  const chosen = selList(f.value);
+  const on = chosen.length > 0;
+  const labelOf = (v: string) => f.options.find(o => o.value === v)?.label;
+  const toggle = (v: string) => f.onChange(selJoin(chosen.includes(v) ? chosen.filter(x => x !== v) : [...chosen, v]));
+  const needle = q.trim().toLowerCase();
+  const shown = needle ? f.options.filter(o => o.label.toLowerCase().includes(needle)) : f.options;
+  // A choice no longer in the list (a client since removed) stays visible, so it can be unticked.
+  const stale = chosen.filter(v => !f.options.some(o => o.value === v));
+  const row = (v: string, label: string, ticked: boolean, onClick: () => void) => (
+    <button key={v} type="button" role="menuitemcheckbox" aria-checked={ticked} onClick={onClick}
+      className={`w-full flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-left text-sm hover:bg-secondary/70 ${ticked ? "text-primary font-medium" : "text-brand-dark"}`}>
+      <span className={`h-4 w-4 shrink-0 grid place-items-center rounded border ${ticked ? "bg-primary border-primary text-primary-foreground" : "border-border bg-white"}`}>
+        {ticked && <Check className="h-3 w-3" />}
+      </span>
+      <span className="min-w-0 flex-1 truncate">{label}</span>
+    </button>
+  );
+  return (
+    <Popover open={open} onOpenChange={o => { setOpen(o); if (!o) setQ(""); }}>
+      <PopoverTrigger asChild>
+        <button type="button" aria-label={f.label}
+          className={`w-full h-10 px-3 inline-flex items-center gap-2 rounded-xl border text-sm text-left ${on ? "border-primary/50 bg-primary/[0.04] text-primary font-medium" : "border-input bg-white text-brand-dark"}`}>
+          <span className="flex-1 min-w-0 truncate">{selText(f.value, labelOf, all)}</span>
+          {chosen.length > 1 && <span className="h-5 min-w-5 px-1 grid place-items-center rounded-full bg-primary text-[11px] font-semibold text-primary-foreground tabular-nums">{chosen.length}</span>}
+          <ChevronDown className="h-4 w-4 shrink-0 opacity-50" />
+        </button>
+      </PopoverTrigger>
+      <PopoverContent align="start" collisionPadding={12}
+        className="w-[var(--radix-popover-trigger-width)] min-w-[14rem] p-1.5 rounded-xl flex flex-col max-h-[min(22rem,var(--radix-popover-content-available-height))]">
+        {f.options.length > 8 && (
+          <input value={q} onChange={e => setQ(e.target.value)} placeholder="Search…" aria-label={`Search ${f.label}`}
+            className="mb-1 h-9 w-full shrink-0 rounded-lg border border-border bg-white px-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary/30" />
+        )}
+        <div role="menu" className="min-h-0 overflow-y-auto">
+          {!needle && row("__all", all, !on, () => f.onChange(""))}
+          {stale.map(v => row(v, v, true, () => toggle(v)))}
+          {shown.map(o => row(o.value, o.label, chosen.includes(o.value), () => toggle(o.value)))}
+          {needle && !shown.length && <p className="px-2.5 py-2 text-xs text-muted-foreground">Nothing matches.</p>}
+        </div>
+      </PopoverContent>
+    </Popover>
   );
 }
 
@@ -202,7 +265,7 @@ export function FilterChips({ filters, onClear }: { filters: TableFilter[]; onCl
       {on.map((f, i) => {
         const [name, value, clear] = f.kind === "date"
           ? [f.label ?? "Date", dateRangeText(f.from, f.to), () => f.onChange("", "")]
-          : [f.label, f.options.find(o => o.value === f.value)?.label ?? f.value, () => f.onChange("")];
+          : [f.label, f.multi ? selText(f.value, v => f.options.find(o => o.value === v)?.label) : f.options.find(o => o.value === f.value)?.label ?? f.value, () => f.onChange("")];
         return (
           <span key={i} className="inline-flex items-center gap-1 h-7 pl-2.5 pr-1 rounded-lg bg-primary/[0.07] text-xs text-brand-dark ring-1 ring-primary/15">
             {f.kind === "date" && <CalendarDays className="h-3.5 w-3.5 text-primary/70" />}

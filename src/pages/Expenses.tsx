@@ -21,6 +21,8 @@ import { PageHeader, ScrollRow, TabBar } from "@/components/PageHeader";
 import { StatStrip, type TableFilter } from "@/components/TableToolbar";
 import { oneLine } from "@/components/MoneyEntryEditor";
 import { useSearchParams } from "react-router-dom";
+import { useStickyFilter } from "@/hooks/useStickyFilter";
+import { selHas, selOn } from "@/lib/filterSel";
 
 const FALLBACK_CATEGORY_STYLE = "bg-gray-50 text-gray-600 ring-1 ring-gray-200";
 
@@ -47,14 +49,21 @@ export function ExpensesPage() {
   const [tabSp] = useSearchParams();
   const [tab, setTab] = useState<"mine" | "passbook">(() => (tabSp.get("tab") === "mine" ? "mine" : "passbook"));
   const [showAdd, setShowAdd] = useState(false);
-  // "My Expenses" tab employee filter (admin only) — defaults to own id
-  const [mineFilter, setMineFilter] = useState<string>("self");
-  const [mineClientFilter, setMineClientFilter] = useState<string>("all");
-  const [filterEmployee, setFilterEmployee] = useState("all");
-  const [filterCategory, setFilterCategory] = useState("all");
+  // The filters stay as they were left (this browser, this person) until
+  // cleared; Client, Staff and Category can hold several (lib/filterSel.ts).
+  // "My Expenses" tab employee filter (admin only) — defaults to own id; one
+  // choice ("self", "all" or one person), as it always was.
+  const [mineFilter, setMineFilter] = useStickyFilter("expenses.mine.employee", "self");
+  const [mineClientFilter, setMineClientFilter] = useStickyFilter("expenses.mine.client", "all");
+  const [filterEmployee, setFilterEmployee] = useStickyFilter("expenses.staff", "all");
+  const [filterCategory, setFilterCategory] = useStickyFilter("expenses.category", "all");
+  // Which currencies (several can be ticked) — offered once expenses are in more than one.
+  const [filterCcy, setFilterCcy] = useStickyFilter("expenses.currency", "all");
+  const ccysUsed = useMemo(() => [...new Set(db.expenses.map(e => ccy(e.currency)))].sort(), [db.expenses]);
+  const ccyNow = ccysUsed.length > 1 ? filterCcy : "all";
   const [search, setSearch] = useState("");
-  const [dateFrom, setDateFrom] = useState(""); // YYYY-MM-DD
-  const [dateTo, setDateTo] = useState("");
+  const [dateFrom, setDateFrom] = useStickyFilter("expenses.from", ""); // YYYY-MM-DD
+  const [dateTo, setDateTo] = useStickyFilter("expenses.to", "");
   const [form, setForm] = useState(EMPTY_FORM);
   // The account last paid from (this person, this browser) — chosen already when it is still open.
   const [expLockerId, setExpLockerId] = useState(() => {
@@ -108,7 +117,7 @@ export function ExpensesPage() {
       if (mineFilter === "self") list = list.filter(e => e.employeeId === user?.id);
       else if (mineFilter !== "all") list = list.filter(e => e.employeeId === mineFilter);
       // "all" → no employee filter
-      if (mineClientFilter !== "all") list = list.filter(e => e.clientId === mineClientFilter);
+      if (selOn(mineClientFilter)) list = list.filter(e => selHas(mineClientFilter, e.clientId));
     } else {
       list = list.filter(e => e.employeeId === user?.id);
     }
@@ -120,8 +129,9 @@ export function ExpensesPage() {
   // Passbook (admin only) with filters applied
   const passbookExpenses = useMemo(() => {
     let list = [...db.expenses];
-    if (filterEmployee !== "all") list = list.filter(e => e.employeeId === filterEmployee);
-    if (filterCategory !== "all") list = list.filter(e => e.category === filterCategory);
+    if (selOn(filterEmployee)) list = list.filter(e => selHas(filterEmployee, e.employeeId));
+    if (selOn(filterCategory)) list = list.filter(e => selHas(filterCategory, e.category));
+    if (selOn(ccyNow)) list = list.filter(e => selHas(ccyNow, ccy(e.currency)));
     if (search.trim()) {
       // The one search box: everything the table shows about an expense —
       // what, category, note, who it was paid to, the client, who recorded it.
@@ -134,7 +144,7 @@ export function ExpensesPage() {
     list = list.filter(e => inDateRange(e.createdAt));
     return list.sort((a, b) => +new Date(b.createdAt) - +new Date(a.createdAt));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [db.expenses, db.users, db.clients, filterEmployee, filterCategory, search, dateFrom, dateTo]);
+  }, [db.expenses, db.users, db.clients, filterEmployee, filterCategory, ccyNow, search, dateFrom, dateTo]);
 
   const myTotals = totalsOf(myExpenses);
 
@@ -257,7 +267,7 @@ export function ExpensesPage() {
     });
     // Client — only when viewing all or a specific employee.
     if (mineFilter !== "self") mineFilters.push({
-      kind: "select", label: "Client", allLabel: "All Clients", value: mineClientFilter === "all" ? "" : mineClientFilter,
+      kind: "select", label: "Client", allLabel: "All Clients", multi: true, value: mineClientFilter === "all" ? "" : mineClientFilter,
       onChange: v => setMineClientFilter(v || "all"),
       options: db.clients.map(c => ({ value: c.id, label: c.companyName })),
     });
@@ -265,14 +275,16 @@ export function ExpensesPage() {
   const clearMine = () => { setDateFrom(""); setDateTo(""); setMineFilter("self"); setMineClientFilter("all"); };
   const passbookFilters: TableFilter[] = [
     dateRange,
-    { kind: "select", label: "Staff", allLabel: "All Staff", value: filterEmployee === "all" ? "" : filterEmployee,
+    { kind: "select", label: "Staff", allLabel: "All Staff", multi: true, value: filterEmployee === "all" ? "" : filterEmployee,
       onChange: v => setFilterEmployee(v || "all"),
       options: staffUsers.map(u => ({ value: u.id, label: `${u.name} (${u.role})` })) },
-    { kind: "select", label: "Category", allLabel: "All Categories", value: filterCategory === "all" ? "" : filterCategory,
+    { kind: "select", label: "Category", allLabel: "All Categories", multi: true, value: filterCategory === "all" ? "" : filterCategory,
       onChange: v => setFilterCategory(v || "all"),
       options: allCategoriesEverUsed.map(c => ({ value: c, label: c })) },
+    ...(ccysUsed.length > 1 ? [{ kind: "select" as const, label: "Currency", allLabel: "All currencies", multi: true, value: filterCcy === "all" ? "" : filterCcy,
+      onChange: (v: string) => setFilterCcy(v || "all"), options: ccysUsed.map(c => ({ value: c, label: c })) }] : []),
   ];
-  const clearPassbook = () => { setDateFrom(""); setDateTo(""); setFilterEmployee("all"); setFilterCategory("all"); };
+  const clearPassbook = () => { setDateFrom(""); setDateTo(""); setFilterEmployee("all"); setFilterCategory("all"); setFilterCcy("all"); };
 
   return (
     <div className="space-y-6 max-w-7xl mx-auto">
@@ -327,7 +339,7 @@ export function ExpensesPage() {
         <div className="space-y-4">
           {/* Employee summary cards — a tap narrows the list to that person. On a
               phone the row scrolls sideways. */}
-          {filterEmployee === "all" && employeeSummary.length > 0 && (
+          {!selOn(filterEmployee) && employeeSummary.length > 0 && (
             <ScrollRow className="flex gap-3 p-0.5 sm:p-0 sm:grid sm:grid-cols-3 md:grid-cols-4 sm:overflow-visible">
               {employeeSummary.map(({ user: u, totals, count }) => (
                 <motion.button
@@ -364,7 +376,7 @@ export function ExpensesPage() {
             search={{ value: search, onChange: setSearch, placeholder: "Search expense, person or client…" }}
             filters={passbookFilters}
             onClearFilters={clearPassbook}
-            resetKey={JSON.stringify(["passbook", dateFrom, dateTo, filterEmployee, filterCategory, search])}
+            resetKey={JSON.stringify(["passbook", dateFrom, dateTo, filterEmployee, filterCategory, ccyNow, search])}
           />
         </div>
       )}

@@ -34,6 +34,8 @@ import { ReadyStockItemDialog } from "@/components/ReadyStockItemDialog";
 import { officeLabel, officeOf, officeRank, officeTabs, otherLots, readyStockOffices } from "@/lib/offices";
 import { pieceTimeline, stepQty, whoOf } from "@/lib/readyStockHistory";
 import { useUrlState } from "@/hooks/useUrlState";
+import { useStickyFilter } from "@/hooks/useStickyFilter";
+import { selHas, selList, selOn } from "@/lib/filterSel";
 import { zoomable } from "@/components/ImageViewer";
 
 const PAGE_SIZE = 24;
@@ -68,13 +70,19 @@ export function ReadyStockPage() {
   const db = useDb();
   // Kept in the address: Back from a record returns to the list as it was left.
   const [q, setQ] = useUrlState("q");
-  const [avail, setAvail] = useState<"all" | "available" | "sold">("available"); // stock availability filter — what can be sold, first
-  // Each company has its own Ready Stock. Staff choose whose; a client sees the
-  // company they buy from.
+  // The filters stay as they were left (this browser, this person) until cleared.
+  // Availability is one mode at a time — what can be sold, first.
+  const [availStored, setAvail] = useStickyFilter<"all" | "available" | "sold">("ready-stock.availability", "available");
+  const avail = availStored === "all" || availStored === "sold" ? availStored : "available";
+  // Each company has its own Ready Stock. Staff choose whose — one or several
+  // (lib/filterSel.ts); a client sees the company they buy from.
   const multiCo = useMultiCo();
   const defaultCompany = useDefaultCompany();
-  const [coSel, setCoSel] = useState("all");
-  const coView = !multiCo ? "all" : user?.role === "client" ? companyIdOfClient(db.clients.find(c => c.id === user.clientId)) : coSel;
+  const [coSel, setCoSel] = useStickyFilter("ready-stock.company", "all");
+  // A remembered company counts only where its filter is shown (staff, several companies).
+  const coView = !multiCo ? "all" : user?.role === "client" ? companyIdOfClient(db.clients.find(c => c.id === user.clientId)) : canManage ? coSel : "all";
+  // Exactly one company in view: its pieces need no company badge.
+  const oneCo = selList(coSel).length === 1;
   const [bandItem, setBandItem] = useState<ReadyStockItem | null>(null); // item whose barcode band modal is open
   // Pieces being shared with a client (a PDF or a link).
   const [sharing, setSharing] = useState<ReadyStockItem[] | null>(null);
@@ -90,7 +98,7 @@ export function ReadyStockPage() {
   const [officesOpen, setOfficesOpen] = useState(false);
 
   // This company's shelf; then the office tab, the search and availability.
-  const shelf = db.readyStock.filter(i => coView === "all" || companyOf(i) === coView);
+  const shelf = db.readyStock.filter(i => selHas(coView, companyOf(i)));
   const tabs = officeTabs(db.settings, shelf).filter(t => canManage || t.items > 0);
   const tabKey = (o: string) => o || NO_OFFICE;
   // A remembered office that has since gone (or holds nothing for a client) falls back to all.
@@ -161,7 +169,9 @@ export function ReadyStockPage() {
   const openAdd = () => {
     // Added where it is being looked at: the office tab, else the first office.
     const here = officeSel !== "all" && officeSel !== NO_OFFICE ? officeSel : offices[0] ?? "";
-    setDlg({ defaults: { location: here, companyId: coSel !== "all" ? coSel : defaultCompany } });
+    // Added to the company in view; with several ticked, the usual one if it is among them, else the first.
+    const cos = multiCo ? selList(coSel) : [];
+    setDlg({ defaults: { location: here, companyId: !cos.length || cos.includes(defaultCompany) ? defaultCompany : cos[0] } });
   };
   const openEdit = (item: ReadyStockItem) => setDlg({ item });
 
@@ -311,7 +321,7 @@ export function ReadyStockPage() {
   // Company and availability narrow the shelf behind one Filters button; the
   // downloads hold what is ticked, else what the filters left.
   const filters: TableFilter[] = [
-    ...(canManage && multiCo ? [{ kind: "select" as const, label: "Company", value: coSel === "all" ? "" : coSel, onChange: (v: string) => { setCoSel(v || "all"); setPage(1); },
+    ...(canManage && multiCo ? [{ kind: "select" as const, label: "Company", multi: true, value: coSel === "all" ? "" : coSel, onChange: (v: string) => { setCoSel(v || "all"); setPage(1); },
       allLabel: "All companies", options: companiesOf(db.settings).map(c => ({ value: c.id, label: c.name })) }] : []),
     { kind: "select", label: "Availability", value: avail === "all" ? "" : avail, onChange: v => { setAvail((v || "all") as "all" | "available" | "sold"); setPage(1); },
       allLabel: "All items", options: [{ value: "available", label: "Available" }, { value: "sold", label: "Sold out" }] },
@@ -423,7 +433,7 @@ export function ReadyStockPage() {
             <FiltersButton filters={filters} onClear={clearFilters} count={countText} />
             <div className="ml-auto flex items-center gap-2">
               {chosen.length > 0 && <span className="text-xs text-muted-foreground tabular-nums whitespace-nowrap">{chosen.length} ticked</span>}
-              {mayExport && <ExportMenu exports={exports} scope={`${which}${chosen.length ? "" : (q || coSel !== "all" || avail !== "all" ? ", as filtered" : "")}`} />}
+              {mayExport && <ExportMenu exports={exports} scope={`${which}${chosen.length ? "" : (q || selOn(coSel) || avail !== "all" ? ", as filtered" : "")}`} />}
             </div>
           </div>
           <FilterChips filters={filters} onClear={clearFilters} />
@@ -480,10 +490,10 @@ export function ReadyStockPage() {
               <p className="text-[11px] text-muted-foreground mt-0.5 font-mono truncate">
                 ID {item.id.slice(-6).toUpperCase()}{item.sku ? ` · #${item.sku}` : ""}
               </p>
-              {canManage && (item.fromReturn || coSel === "all") && (
+              {canManage && (item.fromReturn || !oneCo) && (
                 <div className="flex flex-wrap gap-1 mt-1">
                   {item.fromReturn && <span title={item.notes} className="inline-flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded-full bg-amber-500/10 text-amber-800">Returned by a client</span>}
-                  {coSel === "all" && <CompanyBadge id={companyOf(item)} />}
+                  {!oneCo && <CompanyBadge id={companyOf(item)} />}
                 </div>
               )}
               <div className="flex items-center justify-between gap-2 mt-auto pt-3">
