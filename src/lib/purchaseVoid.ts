@@ -276,7 +276,16 @@ export interface PurchaseEdit {
   certificateLab?: string;
   /** The broker on this line and its brokerage (lib/brokers.ts); null takes the broker off. */
   brokerage?: Pick<Purchase, "brokerId" | "brokeragePct" | "brokerageInr" | "brokeragePaidBy"> | null;
+  /** In bill (GST, lib/purchaseGst.ts): on or off, its % and this line's GST in ₹.
+   *  totalInr / totalUsd above already include it. Unset leaves it as it was. */
+  gstBill?: boolean;
+  gstPct?: number;
+  gstInr?: number;
 }
+
+/** True when the edit turns GST on or off, or changes its %. */
+const gstChanged = (p: Purchase, edit: PurchaseEdit): boolean =>
+  edit.gstBill !== undefined && (!!edit.gstBill !== !!p.gstBill || (!!edit.gstBill && (edit.gstPct ?? 0) !== (p.gstPct ?? 0)));
 
 /**
  * What may still be corrected on this purchase.
@@ -342,11 +351,14 @@ export async function editPurchase(db: DB, p: Purchase, edit: PurchaseEdit, user
     || (edit.discountPct || 0) !== (p.discountPct || 0) || edit.totalInr !== p.totalInr
     || (edit.totalUsd !== undefined && edit.totalUsd !== p.totalUsd)
     || (!!edit.supplierId && edit.supplierId !== p.supplierId) || !!edit.brokerage?.brokerId
+    || gstChanged(p, edit)
   )) throw new Error(GOLD_LOAN_BILL);
   if (p.material === "readyPiece" && (
     Math.abs(edit.quantity - qtyOf(p)) > 0.0005 || Math.abs(edit.ratePerUnit - (p.piece?.ratePerPiece ?? 0)) > 0.005
     || (edit.discountPct || 0) !== (p.discountPct || 0) || edit.totalInr !== p.totalInr
     || (edit.totalUsd !== undefined && edit.totalUsd !== p.totalUsd)
+    // GST is part of what the piece cost us too.
+    || gstChanged(p, edit)
     // The broker is part of what the piece cost us (its private cost on Ready Stock
     // was worked out with it): changing it here would leave that cost wrong.
     || (edit.brokerage !== undefined && ((edit.brokerage?.brokerId || "") !== (p.brokerId || "")
@@ -403,6 +415,12 @@ export async function editPurchase(db: DB, p: Purchase, edit: PurchaseEdit, user
     pur.discountPct = edit.discountPct ? edit.discountPct : undefined;
     if (edit.totalUsd !== undefined) pur.totalUsd = edit.totalUsd;
     if (edit.exchangeRate !== undefined) pur.exchangeRate = edit.exchangeRate;
+    // In bill (GST): already inside the totals above; kept beside them so every screen can show it.
+    if (edit.gstBill !== undefined) {
+      pur.gstBill = edit.gstBill;
+      pur.gstPct = edit.gstBill ? edit.gstPct : undefined;
+      pur.gstInr = edit.gstBill ? edit.gstInr : undefined;
+    }
     // Both suppliers' dues follow from their purchases, so moving the purchase
     // moves the money with it. A purchase with a payment already against it is
     // refused upstream — that payment belongs to the supplier who received it.

@@ -7,6 +7,7 @@ import { SectionTitle } from "@/components/SectionTitle";
 import { AddNewItem, useAddNew } from "@/components/create/QuickCreate";
 import { bagNoOfPurchase } from "@/lib/diamondBags";
 import { diamondSpec, isOtherMaterial, isReadyPiece, materialName, materialUnit, purchaseQty, purchaseText, readyPieceSpec } from "@/lib/materials";
+import { gstTag, gstText, preGstInr, purchaseGstInr, pctText } from "@/lib/purchaseGst";
 import { useState } from "react";
 import { useParams, Link, useNavigate } from "react-router-dom";
 import { collectionLoaded, updateDb, uid, fmtDate, todayLocal, stampFor, KARAT_PURITY, hasOpeningBalance, openingDebitAmt, openingCreditAmt, type Purchase, type LedgerDir, type Supplier } from "@/lib/db";
@@ -424,7 +425,7 @@ function SupplierHistoryPageBody() {
       const unit = materialUnit(db.settings, p.material);
       rows.push({
         id: p.id, date: p.createdAt,
-        particulars: purchaseDesc(p),
+        particulars: [purchaseDesc(p), gstTag(p)].filter(Boolean).join(" · "),
         invoiceNo: p.invoiceNumber || undefined, orderNo,
         ref: orderNo,
         qty: qty || undefined, unit, rate: qty > 0 ? Math.round((p.totalInr / qty) * 100) / 100 : undefined,
@@ -490,13 +491,17 @@ function SupplierHistoryPageBody() {
   const exportCsv = (from: Date | null, to: Date | null) => {
     downloadCsv(
       `Supplier-${supplier.name.replace(/\s+/g, "_")}`,
-      ["Date", "Bill No", "Order No", "Particulars", "Weight", "Rate (INR)", "Bill Amount (INR)", "Paid (INR)", "Balance (INR)"],
-      statementAsc.filter(r => inDateRange(r.date, from, to)).map(r => [
-        r.id === "opening" ? "Opening" : fmtDate(r.date),
-        r.invoiceNo ?? "", r.orderNo ?? "", r.particulars,
-        r.qty ? `${r.qty}${r.unit ?? ""}` : "",
-        r.rate ?? "", r.debit || "", r.credit || "", r.balance,
-      ]),
+      ["Date", "Bill No", "Order No", "Particulars", "Weight", "Rate (INR)", "GST (INR)", "Bill Amount (INR)", "Paid (INR)", "Balance (INR)"],
+      statementAsc.filter(r => inDateRange(r.date, from, to)).map(r => {
+        // A purchase's GST, inside its bill amount (lib/purchaseGst.ts).
+        const pur = r.kind === "Purchase" ? purchases.find(x => x.id === r.id) : undefined;
+        return [
+          r.id === "opening" ? "Opening" : fmtDate(r.date),
+          r.invoiceNo ?? "", r.orderNo ?? "", r.particulars,
+          r.qty ? `${r.qty}${r.unit ?? ""}` : "",
+          r.rate ?? "", pur && purchaseGstInr(pur) ? purchaseGstInr(pur) : "", r.debit || "", r.credit || "", r.balance,
+        ];
+      }),
     );
   };
 
@@ -510,6 +515,8 @@ function SupplierHistoryPageBody() {
       ].filter(Boolean),
       summary: [
         { label: "Total Purchased", value: fmtInrPlain(account.totalPurchased) },
+        // The GST inside those purchases (In bill).
+        ...(purchases.some(x => purchaseGstInr(x) > 0) ? [{ label: "GST in bills", value: fmtInrPlain(purchases.reduce((t, x) => t + purchaseGstInr(x), 0)) }] : []),
         { label: "Total Paid", value: fmtInrPlain(account.totalPaid) },
         { label: "Balance Owed", value: fmtInrPlain(account.balanceOwed) },
         // The figure the table below actually closes on: what is owed after any
@@ -611,6 +618,11 @@ function SupplierHistoryPageBody() {
       cell: p => <CellDate>{fmtDate(p.createdAt)}</CellDate> },
     { key: "purchase", header: "Purchase", always: true, sortValue: p => purchaseTitle(p), csv: p => purchaseTitle(p),
       cell: p => <CellMain title={purchaseTitle(p)} sub={[purchaseSub(p), p.currency === "USD" ? `$${p.totalUsd} @ ₹${p.exchangeRate}/$` : undefined].filter(Boolean).join(" · ") || undefined} /> },
+    // In bill (GST) or not — older purchases say nothing.
+    { key: "gst", header: "GST", align: "right", kind: "number", sortValue: p => (p.gstBill === undefined ? null : purchaseGstInr(p)),
+      csv: p => (p.gstBill === true ? purchaseGstInr(p) : p.gstBill === false ? "No bill" : ""),
+      cell: p => (p.gstBill === true ? <span className="tabular-nums whitespace-nowrap" title={gstText(p)}>{fmtMoneyInr(purchaseGstInr(p))} <span className="text-[10px] text-muted-foreground">{pctText(p.gstPct)}%</span></span>
+        : p.gstBill === false ? <CellTag>No bill</CellTag> : <span className="text-muted-foreground/50">—</span>) },
     { key: "for", header: "For", sortValue: p => (p.purpose === "order" ? `Order ${orderOf(p)?.orderNumber ?? ""}` : "Stock"),
       csv: p => (p.purpose === "order" ? `Order ${orderOf(p)?.orderNumber ?? ""}`.trim() : "Stock"),
       cell: p => {
@@ -648,6 +660,7 @@ function SupplierHistoryPageBody() {
       { label: "Rate", value: purchaseRate(p) },
       !!p.discountPct && { label: p.discountPct > 0 ? "Discount" : "Added on", value: `${Math.abs(p.discountPct)}%` },
       !!p.roundOffInr && { label: "Rounded off", value: `${p.roundOffInr > 0 ? "+" : "−"}${fmtMoneyInr(Math.abs(p.roundOffInr))}` },
+      p.gstBill !== undefined && { label: "GST", value: p.gstBill ? `${pctText(p.gstPct)}% · ${fmtMoneyInr(purchaseGstInr(p))} on ${fmtMoneyInr(preGstInr(p))}` : "No bill — no GST" },
       !!p.invoiceDate && { label: "Bill date", value: fmtDate(p.invoiceDate) },
       { label: "Notes", value: noteText(p.notes) },
       hasCompanies(db.settings) && { label: "Company", value: companyById(db.settings, p.companyId).name },
@@ -670,7 +683,10 @@ function SupplierHistoryPageBody() {
   // typed, and who recorded it; a purchase, its notes.
   const statementDetails = (r: StatementRow): Detail[] => {
     const p = purchases.find(x => x.id === r.id);
-    if (p) return filled([{ label: "Notes", value: noteText(p.notes) }, { label: "Recorded", value: recorded(db, p.createdAt, p.createdBy) }]);
+    if (p) return filled([
+      p.gstBill !== undefined && { label: "GST", value: p.gstBill ? `${pctText(p.gstPct)}% · ${fmtMoneyInr(purchaseGstInr(p))} on ${fmtMoneyInr(preGstInr(p))}` : "No bill — no GST" },
+      { label: "Notes", value: noteText(p.notes) }, { label: "Recorded", value: recorded(db, p.createdAt, p.createdBy) },
+    ]);
     const pay = purchases.flatMap(x => x.payments ?? []).find(x => x.id === r.id);
     if (pay) {
       // One payment split across bills: what each bill got.

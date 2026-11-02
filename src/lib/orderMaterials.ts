@@ -11,6 +11,7 @@ import { bagNoOf, bagNoOfPurchase } from "./diamondBags";
 import { fmtMoneyInr, issuancePending, issuanceUsed, purchasePending } from "./manufacturing";
 import { diamondSpec, fmtQty, isOtherMaterial, materialName, materialUnit, purchaseQty, type MaterialKey, type MaterialUnit } from "./materials";
 import { finishRecordOf, isReworkIssue } from "./rework";
+import { gstText } from "./purchaseGst";
 
 export interface MaterialLine {
   id: string;
@@ -61,7 +62,8 @@ export function orderMaterialLines(db: DB, order: Order, faDone: boolean): Mater
   const repairs = repairIssuesOf(db, order);
   const repairIds = new Set(repairs.map(i => i.id));
 
-  const supplierText = (p: Purchase) => `${db.suppliers.find(s => s.id === p.supplierId)?.name || "Supplier"}${p.invoiceNumber ? ` · bill ${p.invoiceNumber}` : ""}`;
+  // The supplier and bill, and whether it was bought in bill (GST, inside the cost) or without one.
+  const supplierText = (p: Purchase) => [`${db.suppliers.find(s => s.id === p.supplierId)?.name || "Supplier"}${p.invoiceNumber ? ` · bill ${p.invoiceNumber}` : ""}`, gstText(p)].filter(Boolean).join(" · ");
   const brokerText = (p: Purchase) => {
     const br = p.brokerId ? (db.brokers ?? []).find(x => x.id === p.brokerId) : undefined;
     return br && p.brokerageInr ? `brokerage ${fmtMoneyInr(p.brokerageInr)} to ${br.name}${p.brokeragePaidBy === "supplier" ? " (supplier pays)" : ""}` : undefined;

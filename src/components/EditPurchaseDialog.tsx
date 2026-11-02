@@ -20,6 +20,8 @@ import { bagNoOf } from "@/lib/diamondBags";
 import { refilePurchaseLot } from "@/lib/openingStock";
 import { LooseLotFields, lotFromDraft, type LooseLotDraft } from "@/components/LotFields";
 import { useAuth } from "@/lib/auth";
+import { Checkbox } from "@/components/ui/checkbox";
+import { cleanGstPct, defaultPurchaseGstPct, gstOn, pctText, usdWithGst } from "@/lib/purchaseGst";
 
 /**
  * Correct a purchase that was entered wrong (wrong carat, rate, invoice no.).
@@ -59,6 +61,9 @@ export function EditPurchaseDialog({ purchase, onClose, onSave, lockQuantity, lo
   const [pcs, setPcs] = useState("");
   // The broker on this line (lib/brokers.ts).
   const [brokerage, setBrokerage] = useState<BillBrokerage>(emptyBillBrokerage());
+  // In bill (GST) — on or off, and its % (lib/purchaseGst.ts).
+  const [gstBill, setGstBill] = useState(false);
+  const [gstPctText, setGstPctText] = useState("");
 
   // Reload the form whenever a different purchase is opened.
   useEffect(() => {
@@ -72,6 +77,8 @@ export function EditPurchaseDialog({ purchase, onClose, onSave, lockQuantity, lo
     setQuality(purchase.diamond?.quality ?? "");
     setCertNo(purchase.diamond?.certificateNumber ?? "");
     setLab(purchase.diamond?.certificateLab ?? "");
+    setGstBill(purchase.gstBill === true);
+    setGstPctText(pctText(purchase.gstBill ? purchase.gstPct : defaultPurchaseGstPct(loadDb().settings)));
     if (purchase.material === "diamond" && purchase.diamond?.kind !== "certified") {
       const lp = lotParts(purchaseBucket(purchase), { shape: purchase.diamond?.shape ?? "", type: purchase.diamond?.type, size: purchase.diamond?.size, mm: purchase.diamond?.mm, color: purchase.diamond?.color, clarity: purchase.diamond?.clarity });
       setLot({ shape: lp.shape, type: lp.type ?? "", mm: lp.mm ?? "", size: lp.size ?? "", color: lp.color ?? "", clarity: lp.clarity ?? "" });
@@ -95,9 +102,19 @@ export function EditPurchaseDialog({ purchase, onClose, onSave, lockQuantity, lo
   // exactly as it does when the purchase is first recorded.
   const disc = Math.min(Math.max(Number(discount) || 0, -100), 100);
   const net = applyDiscountPct(q * r, disc);
+  // GST is fixed with the bill on a ready piece and on a bill made from borrowed gold.
+  const gstLocked = isReady || !!purchase.fromGoldLoan;
+  const gstPct = gstBill ? cleanGstPct(gstPctText) : 0;
+  // The line in rupees before GST, its GST, and the bill's rounding when this is its first line.
+  const lineInr = isUsd ? Math.round(net * fx) : Math.round(net);
+  const gstInr = gstOn(lineInr, gstPct);
+  const roundOff = purchase.roundOffInr ?? 0;
   // A ready piece's amount never changes here — kept exactly as billed (with any rounding on it).
-  const totalUsd = isReady ? purchase.totalUsd : isUsd ? Math.round(net * 100) / 100 : undefined;
-  const totalInr = isReady ? purchase.totalInr : isUsd ? Math.round(net * fx) : Math.round(net);
+  const totalUsd = isReady ? purchase.totalUsd : isUsd ? usdWithGst(net, gstPct) : undefined;
+  const totalInr = isReady ? purchase.totalInr : lineInr + gstInr + roundOff;
+  // The GST fields to save: always once a purchase says in bill or not; an older one only if ticked now.
+  const gstEdit = gstLocked || (purchase.gstBill === undefined && !gstBill) ? {}
+    : gstBill ? { gstBill: true, gstPct, gstInr } : { gstBill: false };
 
   const loose = purchase.material === "diamond" && !isCertified;
   const forOrder = purchase.purpose === "order" || !!purchase.orderId;
@@ -109,6 +126,7 @@ export function EditPurchaseDialog({ purchase, onClose, onSave, lockQuantity, lo
   const submit = async () => {
     const brokerProblem = billBrokerageProblem(brokerage);
     if (brokerProblem) { toast.error(brokerProblem); return; }
+    if (gstBill && !gstLocked && !(gstPct > 0)) { toast.error("Enter the GST % — or untick In bill"); return; }
     setSaving(true);
     try {
       await onSave({
@@ -125,7 +143,9 @@ export function EditPurchaseDialog({ purchase, onClose, onSave, lockQuantity, lo
         quality: purchase.material === "diamond" ? (loose ? [lot.color, lot.clarity].filter(Boolean).join(" ") || quality : quality) : undefined,
         certificateNumber: isCertified ? certNo : undefined,
         certificateLab: isCertified ? lab : undefined,
-        brokerage: brokerage.brokerId ? brokerageForLines(brokerage, [totalInr])[0] : null,
+        // Brokerage on the line before GST, as when it was bought.
+        brokerage: brokerage.brokerId ? brokerageForLines(brokerage, [isReady ? totalInr : lineInr + roundOff])[0] : null,
+        ...gstEdit,
       });
       // Then the bag, worked out from the purchase as it now stands.
       if (lotChanged) {
@@ -236,7 +256,21 @@ export function EditPurchaseDialog({ purchase, onClose, onSave, lockQuantity, lo
         {/* Ready jewellery: the broker is part of the piece's cost — fixed with the bill. */}
         {isReady
           ? (purchase.brokerId ? <p className="text-xs text-muted-foreground">The broker is part of what the piece cost — to change it, void the purchase and enter it again.</p> : null)
-          : <BillBrokerFields value={brokerage} onChange={setBrokerage} billTotalInr={totalInr} />}
+          : <BillBrokerFields value={brokerage} onChange={setBrokerage} billTotalInr={lineInr + roundOff} />}
+
+        {/* In bill (GST): on or off, at what % — the total below carries it. */}
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-2 rounded-xl border border-border/60 bg-secondary/30 px-3 py-2">
+          <label className={`flex items-center gap-2 text-sm font-medium text-brand-dark ${gstLocked ? "opacity-60" : "cursor-pointer"}`}>
+            <Checkbox checked={gstBill} disabled={gstLocked} onCheckedChange={v => setGstBill(v === true)} aria-label="In bill (GST)" />
+            In bill (GST)
+          </label>
+          {gstBill && (
+            <div className="w-24"><Input type="number" min={0} max={100} step="0.01" value={gstPctText} onChange={e => setGstPctText(e.target.value)} disabled={gstLocked} aria-label="GST %" className="rounded-xl h-9 text-right disabled:opacity-60" /></div>
+          )}
+          <span className="text-xs text-muted-foreground">
+            {gstLocked ? "Fixed with the bill." : gstBill ? `GST ${pctText(gstPct)}% · ${fmtMoneyInr(gstInr)} on this line` : purchase.gstBill === false ? "No bill — no GST." : "Tick if it was bought on a GST bill."}
+          </span>
+        </div>
 
         <div className="rounded-xl bg-secondary/60 border border-border/60 px-4 py-3 text-sm flex items-center justify-between">
           <span className="text-muted-foreground">New total</span>

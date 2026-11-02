@@ -3,7 +3,8 @@ import { companyOf } from "@/lib/companies";
 import { useMemo } from "react";
 import { Link } from "react-router-dom";
 import { ResponsiveContainer, BarChart, Bar as RBar, XAxis, YAxis, CartesianGrid, Tooltip, Legend } from "recharts";
-import { Coins, Gem, Landmark, Factory, Scale, ShoppingCart, Truck, Handshake } from "lucide-react";
+import { Coins, Gem, Landmark, Factory, Scale, ShoppingCart, Truck, Handshake, Receipt } from "lucide-react";
+import { purchaseGstInr } from "@/lib/purchaseGst";
 import { toPureGold } from "@/lib/db";
 import { inPeriod, payables, purchasesMonthly } from "@/lib/analytics";
 import { fineGoldRate } from "@/lib/orderCost";
@@ -36,6 +37,10 @@ export function PurchasesTab({ ctx }: { ctx: ReportCtx }) {
       brokerageInr: inP.reduce((s, p) => s + brokerageWePay(p), 0),
       brokersOwed: (db.brokers ?? []).reduce((s, b) => s + Math.max(0, brokerAccount(db, b).due), 0),
       hasBrokers: (db.brokers ?? []).length > 0,
+      // GST paid on the period's bills (In bill) — inside the amounts above; and the bills bought without one.
+      gstInr: inP.reduce((s, p) => s + purchaseGstInr(p), 0),
+      gstBills: inP.filter(p => p.gstBill === true).length,
+      noBill: inP.filter(p => p.gstBill === false).reduce((s, p) => s + p.totalInr, 0),
       pay: payables(db),
       fine: fineGoldRate(db, period.to ? `${period.to}T23:59:59` : new Date().toISOString()),
       months: purchasesMonthly(db, period, orders, ctx.companyId),
@@ -53,12 +58,13 @@ export function PurchasesTab({ ctx }: { ctx: ReportCtx }) {
       {ctx.companyId && (
         <p className="text-[11px] text-muted-foreground px-1">Purchases are this company&rsquo;s; dues are for the whole business.</p>
       )}
-      <div className={`grid grid-cols-2 gap-3 ${data.hasBrokers ? "lg:grid-cols-6" : "lg:grid-cols-5"}`}>
+      <div className={`grid grid-cols-2 gap-3 ${[data.hasBrokers, data.gstBills > 0].filter(Boolean).length === 2 ? "lg:grid-cols-7" : data.hasBrokers || data.gstBills > 0 ? "lg:grid-cols-6" : "lg:grid-cols-5"}`}>
         <KpiCard icon={Coins} label="Gold bought" value={inr(data.goldInr, true)} sub={`${num(Math.round(data.goldG * 1000) / 1000, " g")} · ${num(Math.round(data.goldFine * 1000) / 1000, " g fine")}`} tone="gold" />
         <KpiCard icon={Gem} label="Diamonds bought" value={inr(data.diaInr, true)} sub={`${num(Math.round(data.diaCt * 100) / 100, " ct")}${data.diaCt ? ` · ${inr(data.diaInr / data.diaCt)}/ct avg` : ""}${data.othCount ? ` · other materials ${inr(data.othInr, true)}` : ""}${data.readyPcs ? ` · ready jewellery ${inr(data.readyInr, true)} (${num(data.readyPcs, " pcs")})` : ""}`} tone="sky" />
         <KpiCard icon={Scale} label="Fine gold cost" value={data.fine ? `${inr(data.fine.rate)}/g` : "—"} sub={data.fine ? "Average, 24KT" : "No priced gold yet"} tone="violet" />
         <KpiCard icon={Landmark} label="Owed to suppliers" value={inr(data.pay.suppliersInr, true)} sub="As of today" tone="rose" />
         <KpiCard icon={Factory} label="Owed to factories" value={inr(data.pay.factoriesInr, true)} sub="Labour, as of today" tone="rose" />
+        {data.gstBills > 0 && <KpiCard icon={Receipt} label="GST on purchases" value={inr(data.gstInr, true)} sub={`${data.gstBills} bill line${data.gstBills !== 1 ? "s" : ""} in bill${data.noBill > 0 ? ` · ${inr(data.noBill, true)} bought without a bill` : ""}`} tone="violet" />}
         {data.hasBrokers && <KpiCard icon={Handshake} label="Brokerage" value={inr(data.brokerageInr, true)} sub={`We pay, on these bills · ${inr(data.brokersOwed, true)} owed now`} tone="rose" />}
       </div>
 

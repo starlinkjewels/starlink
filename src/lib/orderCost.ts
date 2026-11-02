@@ -1,5 +1,6 @@
 import { orderUse } from "./clientMaterial";
 import { brokerageWePay, landedInr } from "./brokers";
+import { pctText, purchaseGstInr } from "./purchaseGst";
 import { ccy, ccyOrder, inrPerUnit, roundCcy, sumByCcy, type CurrencyCode } from "@/lib/currency";
 import { orderTotal, returnedCredit, returnedQty, dayOf, fxTableOf, stockCostOf, toPureGold, pureFromPurity, isDiamondOnlyOrder, type DB, type Expense, type MaterialIssuance, type Order, type Purchase } from "@/lib/db";
 import { freightRecorded } from "@/lib/dispatch";
@@ -386,7 +387,7 @@ export function orderCost(db: DB, order: Order, depth = 0): OrderCost {
       // The bill's own rate, applied to what was used — a bill for more than
       // the piece took is not all this order's cost.
       bucket.push({
-        label: `${used}${unit} ${what} · bought for this order${p.invoiceNumber ? ` (bill ${p.invoiceNumber})` : ""}${brokerageWePay(p) > 0 ? " · incl. brokerage" : ""}`,
+        label: `${used}${unit} ${what} · bought for this order${p.invoiceNumber ? ` (bill ${p.invoiceNumber})` : ""}${purchaseGstInr(p) > 0 ? ` · incl. GST ${pctText(p.gstPct)}%` : ""}${brokerageWePay(p) > 0 ? " · incl. brokerage" : ""}`,
         amountInr: r2((landedInr(p) / bought) * used),
       });
       continue;
@@ -451,7 +452,7 @@ export function orderCost(db: DB, order: Order, depth = 0): OrderCost {
     const what = p.material === "gold" ? p.gold?.purity ?? "" : p.material === "diamond" ? p.diamond?.shape ?? ""
       : `${p.other?.grade ? `${p.other.grade} ` : ""}${materialName(db.settings, p.material)}`;
     (p.material === "gold" ? out.gold : p.material === "diamond" ? out.diamond : out.materials).push({
-      label: `${q}${unit} ${what} · bought for this order${p.invoiceNumber ? ` (bill ${p.invoiceNumber})` : ""}${brokerageWePay(p) > 0 ? " · incl. brokerage" : ""}`,
+      label: `${q}${unit} ${what} · bought for this order${p.invoiceNumber ? ` (bill ${p.invoiceNumber})` : ""}${purchaseGstInr(p) > 0 ? ` · incl. GST ${pctText(p.gstPct)}%` : ""}${brokerageWePay(p) > 0 ? " · incl. brokerage" : ""}`,
       amountInr: r2(landedInr(p)),
     });
   }

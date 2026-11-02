@@ -28,6 +28,7 @@ import { downloadCsv, downloadLedgerPdf } from "@/lib/ledgerExport";
 import { inDateRange, ledgerTable, rangeLabel } from "@/components/LedgerFilters";
 import { confirmBox } from "@/lib/confirm";
 import { materialName, materialUnit, purchaseQty, materialDefs, diamondSpec, purchaseUnitInr, isReadyPiece, readyPieceSpec, type MaterialUnit } from "@/lib/materials";
+import { gstKind, gstTag, purchaseGstInr } from "@/lib/purchaseGst";
 import { companyOf, companiesOf, hasCompanies } from "@/lib/companies";
 import { oneLine } from "@/components/MoneyEntryEditor";
 import { bagNoOf, bagNoOfPurchase } from "@/lib/diamondBags";
@@ -57,8 +58,12 @@ interface Row {
   amountInr?: number;
   remark?: string;
   /** A bill's own lines, when this row is a whole bill. */
-  items?: { id: string; material: string; detail?: string; rate?: number; qty: number; unit: MaterialUnit; amountInr: number; discountPct?: number }[];
+  items?: { id: string; material: string; detail?: string; rate?: number; qty: number; unit: MaterialUnit; amountInr: number; discountPct?: number; gstTag?: string; gstInr?: number }[];
   billNo?: string;
+  /** A purchase: bought in bill (GST), without a bill, a bill of both, or not known (older entries). */
+  gst?: "gst" | "nobill" | "mixed" | "";
+  /** The GST inside amountInr. */
+  gstInr?: number;
   /** Set when the purchase was bought for one order rather than into stock. */
   forOrder?: string;
 }
@@ -231,8 +236,13 @@ export function StockActivityLedger({ onTotals }: { onTotals?: (t: LedgerTotals)
       ? `${p.supplierId}|no:${p.invoiceNumber.trim()}`
       : `${p.supplierId}|at:${p.createdAt}`;
     const existing = bills.get(key);
+    // In bill (GST) or not (lib/purchaseGst.ts).
+    const gk = gstKind(p), gInr = purchaseGstInr(p), gTag = gstTag(p);
     if (existing) {
-      existing.items!.push({ id: p.id, material: label, detail, rate, qty, unit, amountInr: p.totalInr, discountPct: p.discountPct });
+      existing.items!.push({ id: p.id, material: label, detail, rate, qty, unit, amountInr: p.totalInr, discountPct: p.discountPct, gstTag: gTag, gstInr: gInr });
+      // An older line (not known) leaves the bill as its other lines say.
+      if (gk && existing.gst !== gk) existing.gst = existing.gst ? "mixed" : gk;
+      existing.gstInr = (existing.gstInr ?? 0) + gInr;
       existing.qty = Math.round((existing.qty + qty) * 1000) / 1000;
       existing.amountInr = (existing.amountInr ?? 0) + p.totalInr;
       if (!existing.mats.includes(p.material)) existing.mats.push(p.material);
@@ -247,7 +257,8 @@ export function StockActivityLedger({ onTotals }: { onTotals?: (t: LedgerTotals)
       material: label, detail, rate, mats: [p.material], co: companyOf(p), qty, unit, amountInr: p.totalInr,
       billNo: p.invoiceNumber?.trim() || undefined,
       remark: p.notes || undefined,
-      items: [{ id: p.id, material: label, detail, rate, qty, unit, amountInr: p.totalInr, discountPct: p.discountPct }],
+      gst: gk, gstInr: gInr,
+      items: [{ id: p.id, material: label, detail, rate, qty, unit, amountInr: p.totalInr, discountPct: p.discountPct, gstTag: gTag, gstInr: gInr }],
     });
   }
   for (const b of bills.values()) {
@@ -332,6 +343,9 @@ export function StockActivityLedger({ onTotals }: { onTotals?: (t: LedgerTotals)
       // Purchases entered before the bill number was required — the ones that
       // still need tying back to a chitthi.
       if (billFilter === "none" && r.billNo) return false;
+      // Bought in bill (with GST) or without a bill — purchases only.
+      if (billFilter === "gst" && !(r.kind === "Purchase" && (r.gst === "gst" || (r.gst === "mixed" && (r.gstInr ?? 0) > 0)))) return false;
+      if (billFilter === "nobill" && !(r.kind === "Purchase" && (r.gst === "nobill" || (r.gst === "mixed" && (r.items ?? []).some(it => it.gstTag === "No bill"))))) return false;
       return !ql || r.party.toLowerCase().includes(ql)
         || r.material.toLowerCase().includes(ql)
         || (r.detail ?? "").toLowerCase().includes(ql)
@@ -348,6 +362,8 @@ export function StockActivityLedger({ onTotals }: { onTotals?: (t: LedgerTotals)
   const totalIn = rows.filter(r => r.kind === "Purchase" || r.kind === "Opening stock").reduce((s, r) => s + (r.amountInr ?? 0), 0);
   const totalOut = rows.filter(r => r.kind === "Diamond sold" || r.kind === "Sold to supplier").reduce((s, r) => s + (r.amountInr ?? 0), 0);
   const nBought = rows.filter(r => r.kind === "Purchase" || r.kind === "Opening stock").length;
+  // The GST inside what was bought (In bill).
+  const totalGst = rows.reduce((s, r) => s + (r.kind === "Purchase" ? r.gstInr ?? 0 : 0), 0);
   const nSold = rows.filter(r => r.kind === "Diamond sold" || r.kind === "Sold to supplier").length;
   // The totals show in the page's figure strip, beside the month's — handed up
   // whenever the rows (or the filters on them) change.
@@ -355,15 +371,20 @@ export function StockActivityLedger({ onTotals }: { onTotals?: (t: LedgerTotals)
     onTotals?.({ totalIn, nBought, totalOut, nSold, filtered });
   }, [onTotals, totalIn, nBought, totalOut, nSold, filtered]);
 
-  const HEAD = ["Sr", "Date", "Entry", "Bill no.", "Party", "Material", "Details", "Quantity", "Unit", "Rate (INR)", "Amount (INR)", "Remark"];
+  /** What a purchase row says about its bill: "GST 1.5%", "No bill", "GST / no bill"; nothing for an older one. */
+  const rowGst = (r: Row): string | undefined => r.kind !== "Purchase" ? undefined
+    : r.gst === "gst" ? r.items?.find(it => it.gstTag)?.gstTag
+    : r.gst === "nobill" ? "No bill"
+    : r.gst === "mixed" ? "GST / no bill" : undefined;
+  const HEAD = ["Sr", "Date", "Entry", "Bill no.", "Party", "Material", "Details", "Quantity", "Unit", "Rate (INR)", "GST", "GST (INR)", "Amount (INR)", "Remark"];
   const body: (string | number)[][] = [];
   rows.forEach((r, i) => {
-    body.push([i + 1, fmtDate(r.date), r.kind, r.billNo ?? "", r.party, r.material, r.detail ?? "", r.qty, r.unit, r.rate ?? "", r.amountInr ?? "", r.remark ?? ""]);
+    body.push([i + 1, fmtDate(r.date), r.kind, r.billNo ?? "", r.party, r.material, r.detail ?? "", r.qty, r.unit, r.rate ?? "", rowGst(r) ?? "", r.gstInr || "", r.amountInr ?? "", r.remark ?? ""]);
     // A bill's own lines follow it, so a download can be checked against the
     // chitthi a line at a time and not only on the total.
     if (r.items && r.items.length > 1) {
       for (const it of r.items) {
-        body.push(["", "", "  item", "", "", it.material, it.detail ?? "", it.qty, it.unit, it.rate ?? "", it.amountInr, it.discountPct ? discountLabel(it.discountPct) : ""]);
+        body.push(["", "", "  item", "", "", it.material, it.detail ?? "", it.qty, it.unit, it.rate ?? "", it.gstTag ?? "", it.gstInr || "", it.amountInr, it.discountPct ? discountLabel(it.discountPct) : ""]);
       }
     }
   });
@@ -382,6 +403,7 @@ export function StockActivityLedger({ onTotals }: { onTotals?: (t: LedgerTotals)
     ],
     summary: [
       { label: "Bought in", value: fmtMoneyInr(totalIn) },
+      ...(totalGst > 0 ? [{ label: "GST in bills", value: fmtMoneyInr(totalGst) }] : []),
       { label: "Sold", value: fmtMoneyInr(totalOut) },
     ],
     landscape: true,
@@ -392,7 +414,7 @@ export function StockActivityLedger({ onTotals }: { onTotals?: (t: LedgerTotals)
     ],
     align: ["left", "left", "left", "left", "left", "left", "right", "right", "left"],
     rows: rows.map((r, i) => [
-      String(i + 1), fmtDate(r.date), r.kind, (r.billNo ?? "").slice(0, 16),
+      String(i + 1), fmtDate(r.date), r.kind, [r.billNo, r.gst === "gst" ? "GST" : r.gst === "nobill" ? "No bill" : undefined].filter(Boolean).join(" · ").slice(0, 18),
       r.party.slice(0, 26), (r.detail ? `${r.material} · ${r.detail}` : r.material).slice(0, 26),
       `${r.qty}${r.unit}`, r.amountInr != null ? fmtMoneyInr(r.amountInr) : "",
       (r.remark ?? "").slice(0, 16),
@@ -491,13 +513,19 @@ export function StockActivityLedger({ onTotals }: { onTotals?: (t: LedgerTotals)
     { key: "entry", header: "Entry", sortValue: r => r.kind, cell: r => <CellTag tone={TONE[r.kind]}>{r.kind}</CellTag> },
     { key: "date", header: "Date", kind: "date", sortValue: r => +new Date(r.date), csv: r => fmtDate(r.date),
       cell: r => <CellDate>{fmtDate(r.date)}</CellDate> },
-    { key: "bill", header: "Bill no.", sortValue: r => r.billNo ?? "",
-      cell: r => r.billNo
-        ? <button type="button" onClick={() => setQ(r.billNo!)}
-            title="Show everything on this bill" className="font-mono text-[11px] text-primary hover:underline whitespace-nowrap">
-            {r.billNo}
-          </button>
-        : <span className="font-mono text-[11px] text-muted-foreground">—</span> },
+    { key: "bill", header: "Bill no.", sortValue: r => r.billNo ?? "", csv: r => [r.billNo, rowGst(r)].filter(Boolean).join(" · "),
+      cell: r => (
+        <div className="leading-tight">
+          {r.billNo
+            ? <button type="button" onClick={() => setQ(r.billNo!)}
+                title="Show everything on this bill" className="font-mono text-[11px] text-primary hover:underline whitespace-nowrap">
+                {r.billNo}
+              </button>
+            : <span className="font-mono text-[11px] text-muted-foreground">—</span>}
+          {/* In bill (GST) or not — older purchases say nothing. */}
+          {rowGst(r) && <span className={`block text-[10px] whitespace-nowrap ${r.gst === "nobill" ? "text-muted-foreground" : "text-primary"}`} title={r.gstInr ? `GST ${fmtMoneyInr(r.gstInr)} inside the amount` : undefined}>{rowGst(r)}{r.gstInr ? ` · ${fmtMoneyInr(r.gstInr)}` : ""}</span>}
+        </div>
+      ) },
     { key: "material", card: "first" as const, header: "Material", sortValue: r => r.material, csv: r => (r.detail ? `${r.material} · ${r.detail}` : r.material),
       cell: r => <div className="max-w-[240px]" title={r.detail ? `${r.material} · ${r.detail}` : r.material}><CellMain title={r.material} sub={r.detail} /></div> },
     { key: "qty", header: "Quantity", align: "right", kind: "number", sortValue: r => r.qty,
@@ -513,7 +541,7 @@ export function StockActivityLedger({ onTotals }: { onTotals?: (t: LedgerTotals)
   // as on the total — and each line corrected on its own.
   const lineColumns: DataColumn<Item>[] = [
     { key: "material", card: "first" as const, header: "Item", always: true, sortValue: it => it.material,
-      cell: it => <CellMain title={it.material} sub={[it.detail, it.discountPct ? discountLabel(it.discountPct) : undefined].filter(Boolean).join(" · ") || undefined} /> },
+      cell: it => <CellMain title={it.material} sub={[it.detail, it.discountPct ? discountLabel(it.discountPct) : undefined, it.gstTag ? `${it.gstTag}${it.gstInr ? ` ${fmtMoneyInr(it.gstInr)}` : ""}` : undefined].filter(Boolean).join(" · ") || undefined} /> },
     { key: "qty", header: "Quantity", align: "right", kind: "number", sortValue: it => it.qty,
       cell: it => <span className="tabular-nums whitespace-nowrap">{it.qty}{it.unit}</span> },
     { key: "rate", header: "Rate", align: "right", kind: "number", sortValue: it => it.rate ?? 0,
@@ -533,7 +561,7 @@ export function StockActivityLedger({ onTotals }: { onTotals?: (t: LedgerTotals)
       <DataTable
         summary={!onTotals && (totalIn > 0 || totalOut > 0) ? (
           <StatStrip items={[
-            ...(totalIn > 0 ? [{ label: "Bought in", value: fmtMoneyInr(totalIn), icon: ShoppingCart, sub: `${nBought} ${nBought === 1 ? "entry" : "entries"}` }] : []),
+            ...(totalIn > 0 ? [{ label: "Bought in", value: fmtMoneyInr(totalIn), icon: ShoppingCart, sub: `${nBought} ${nBought === 1 ? "entry" : "entries"}${totalGst > 0 ? ` · GST ${fmtMoneyInr(totalGst)}` : ""}` }] : []),
             ...(totalOut > 0 ? [{ label: "Sold", value: fmtMoneyInr(totalOut), tone: "in" as const, icon: Gem, sub: `${nSold} ${nSold === 1 ? "sale" : "sales"}` }] : []),
           ]} note={filtered ? `For what the filters show${from || to ? ` · ${rangeLabel(from, to)}` : ""}` : undefined} />
         ) : undefined}
@@ -551,7 +579,7 @@ export function StockActivityLedger({ onTotals }: { onTotals?: (t: LedgerTotals)
                 // Bought ready-made: the bills show here too, though the pieces went to Ready Stock.
                 ...((db.purchases ?? []).some(p => isReadyPiece(p)) ? [{ value: "readyPiece", label: "Ready jewellery" }] : [])] },
             { label: "Bill", value: billFilter, onChange: setBillFilter, allLabel: "Any bill",
-              options: [{ value: "none", label: "No bill number" }] },
+              options: [{ value: "gst", label: "In bill (with GST)" }, { value: "nobill", label: "Without bill (no GST)" }, { value: "none", label: "No bill number" }] },
             ...(hasCompanies(db.settings) ? [{ label: "Company", value: company, onChange: setCompany, multi: true,
               options: companiesOf(db.settings).map(c => ({ value: c.id, label: c.name })) }] : []),
           ],
