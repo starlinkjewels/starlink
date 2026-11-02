@@ -2,7 +2,7 @@ import { ListCombo } from "@/components/ListCombo";
 import { useState } from "react";
 import { choicesOf } from "@/lib/optionLists";
 import { toast } from "sonner";
-import { KeyRound, Loader2, Mail, UserRound, Wallet } from "lucide-react";
+import { FolderLock, KeyRound, Loader2, Mail, UserRound, Wallet } from "lucide-react";
 import { httpsCallable } from "firebase/functions";
 import { loadDb, updateDb, type User } from "@/lib/db";
 import { useDb } from "@/hooks/useDb";
@@ -15,6 +15,7 @@ import { ActionSheet } from "@/components/ActionSheet";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Switch } from "@/components/ui/switch";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 
 /** The departments the Create Employee form offers (EmployeeCreateDialog). */
@@ -47,6 +48,8 @@ function EmployeeSheet({ u, onClose }: { u: User; onClose: () => void }) {
     openingDate: u.openingPaidDate?.slice(0, 10) ?? "",
   });
   const [coIds, setCoIds] = useState<string[]>(u.companyIds ?? []);
+  // Documents (the business's own papers) — an admin lets an employee in, one by one.
+  const [docs, setDocs] = useState(u.documentsAccess === true);
   const depts = choicesOf("departments", f.department);
 
   const save = () => {
@@ -63,6 +66,8 @@ function EmployeeSheet({ u, onClose }: { u: User; onClose: () => void }) {
       if (x.role === "employee") {
         x.department = f.department || undefined;
         if (multiCo) { if (coIds.length) x.companyIds = coIds; else delete x.companyIds; }
+        // Kept only while on; their security index follows (db.ts indexOf → canDocs in the rules).
+        if (docs) x.documentsAccess = true; else delete x.documentsAccess;
       }
       // Already paid before the app: folded into their total paid to date and
       // the first line of their salary ledger. Cleared, all three go.
@@ -112,6 +117,16 @@ function EmployeeSheet({ u, onClose }: { u: User; onClose: () => void }) {
           )}
         </div>
         {isEmployee && multiCo && <CompanyTicks value={coIds} onChange={setCoIds} />}
+        {isEmployee && (
+          <div className="rounded-xl border border-border/70 p-3.5 flex items-start gap-3">
+            <FolderLock className="h-4 w-4 text-muted-foreground mt-0.5 shrink-0" />
+            <div className="min-w-0 flex-1">
+              <Label htmlFor="ee-docs" className="text-sm font-semibold text-brand-dark">Documents access</Label>
+              <p className="text-[11px] text-muted-foreground mt-0.5">Lets them open Documents: see, upload, scan and share the business's papers.</p>
+            </div>
+            <Switch id="ee-docs" checked={docs} onCheckedChange={setDocs} className="mt-0.5" />
+          </div>
+        )}
 
         {/* An employee's login: any admin can change its email and password; an
             admin's (a partner's), only the main owner login. An owner's is shown,

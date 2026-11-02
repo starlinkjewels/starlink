@@ -240,7 +240,7 @@ export function ReadyStockItemDialog({ item, defaults, onClose, onSaved }: {
               <div key={i} className="relative group aspect-square rounded-xl overflow-hidden border border-border">
                 <img src={src} alt={`Photo ${i + 1}`} className="w-full h-full object-cover" />
                 <button type="button" onClick={() => removeImage(i)}
-                  className="absolute top-1 right-1 h-7 w-7 rounded-full bg-destructive text-white grid place-items-center shadow-md opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity">
+                  className="absolute top-1 right-1 h-7 w-7 rounded-full bg-destructive text-white grid place-items-center shadow-md ">
                   <X className="h-3.5 w-3.5" />
                 </button>
               </div>

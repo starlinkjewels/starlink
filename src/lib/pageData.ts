@@ -94,6 +94,8 @@ const PAGE: Record<string, readonly LazyCol[]> = {
   "/employees/:id": ["lockerTransactions"],
   "/profile": [],
   "/ai": [],
+  // Its folders, files and links are read straight from their own collections (lib/documents.ts).
+  "/documents": [],
 };
 
 /** The page an address opens: "/orders/SLJ-0042" → "/orders/:id". */

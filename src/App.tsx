@@ -37,6 +37,7 @@ const IncomePage = lazy(() => import("./pages/Income").then(m => ({ default: m.I
 const CatalogPage = lazy(() => import("./pages/Catalog").then(m => ({ default: m.CatalogPage })));
 const ProductPhotosPage = lazy(() => import("./pages/ProductPhotos").then(m => ({ default: m.ProductPhotosPage })));
 const SharedGalleryPage = lazy(() => import("./pages/SharedGallery").then(m => ({ default: m.SharedGalleryPage })));
+const DocShareViewPage = lazy(() => import("./pages/DocShareView").then(m => ({ default: m.DocShareViewPage })));
 const StarlinkAiPage = lazy(() => import("./pages/StarlinkAi").then(m => ({ default: m.StarlinkAiPage })));
 const LockerPage = lazy(() => import("./pages/Locker").then(m => ({ default: m.LockerPage })));
 const SuppliersPage = lazy(() => import("./pages/Suppliers").then(m => ({ default: m.SuppliersPage })));
@@ -57,6 +58,7 @@ const BuyAssignPage = lazy(() => import("./pages/BuyAssign").then(m => ({ defaul
 const AutopilotPage = lazy(() => import("./pages/Autopilot").then(m => ({ default: m.AutopilotPage })));
 const AutopilotEditorPage = lazy(() => import("./pages/AutopilotEditor").then(m => ({ default: m.AutopilotEditorPage })));
 const RemindersPage = lazy(() => import("./pages/Reminders").then(m => ({ default: m.RemindersPage })));
+const DocumentsPage = lazy(() => import("./pages/Documents").then(m => ({ default: m.DocumentsPage })));
 
 function Protected({ children, roles }: { children: React.ReactNode; roles?: Role[] }) {
   const { user } = useAuth();
@@ -64,6 +66,14 @@ function Protected({ children, roles }: { children: React.ReactNode; roles?: Rol
   if (!user) return <Navigate to="/login" state={{ from: loc }} replace />;
   if (roles && !roles.includes(user.role)) return <Navigate to="/" replace />;
   return <>{children}</>;
+}
+
+/** Documents: admins, and the employees an admin has let in (User.documentsAccess) —
+ *  the rule of lib/documents.ts canUseDocuments and of the database (canDocs). */
+function DocumentsGuard({ children }: { children: React.ReactNode }) {
+  const { user } = useAuth();
+  const ok = !!user && (user.role === "admin" || (user.role === "employee" && user.documentsAccess === true));
+  return ok ? <>{children}</> : <Navigate to="/" replace />;
 }
 
 export function App() {
@@ -178,6 +188,8 @@ export function App() {
         <Route path="/login" element={<LoginPage />} />
         {/* Public, no-login shared folder gallery */}
         <Route path="/s/:id" element={<Suspense fallback={<div className="min-h-screen grid place-items-center bg-[#F7F9FC] text-muted-foreground">Loading…</div>}><SharedGalleryPage /></Suspense>} />
+        {/* Public, no-login Documents password link (the server checks the password) */}
+        <Route path="/d/:id" element={<Suspense fallback={<div className="min-h-screen grid place-items-center bg-[#F7F9FC] text-muted-foreground">Loading…</div>}><DocShareViewPage /></Suspense>} />
         <Route element={<Protected><AppLayout /></Protected>}>
           <Route index element={<Dashboard />} />
           <Route path="orders" element={<OrdersPage />} />
@@ -218,6 +230,7 @@ export function App() {
           <Route path="gift-cards" element={<Protected roles={["admin","employee"]}><GiftCardsAdminPage /></Protected>} />
           <Route path="payments" element={<Protected roles={["admin","employee"]}><PaymentsPage /></Protected>} />
           <Route path="buy-assign" element={<Protected roles={["admin","employee"]}><BuyAssignPage /></Protected>} />
+          <Route path="documents" element={<DocumentsGuard><DocumentsPage /></DocumentsGuard>} />
           <Route path="profile" element={<ProfilePage />} />
         </Route>
         <Route path="*" element={<Navigate to="/" replace />} />

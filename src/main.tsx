@@ -83,6 +83,19 @@ if (/^\/s\/[^/]+/.test(window.location.pathname)) {
       </BrowserRouter>
     </React.StrictMode>,
   ));
+} else if (/^\/d\/[^/]+/.test(window.location.pathname)) {
+  // A Documents password link (/d/:id): public too — no sign-in, no app; the
+  // server checks the password (functions/src/docShare.ts).
+  void import("./pages/DocShareView").then(({ DocShareViewPage }) => root.render(
+    <React.StrictMode>
+      <BrowserRouter>
+        <ErrorBoundary fullScreen>
+          <Routes><Route path="/d/:id" element={<DocShareViewPage />} /></Routes>
+        </ErrorBoundary>
+        <Toaster position="top-center" richColors />
+      </BrowserRouter>
+    </React.StrictMode>,
+  ));
 } else
 // AuthProvider owns the boot sequence: it shows a splash until Firebase Auth
 // resolves, loads Firestore data only after sign-in, and renders the app.

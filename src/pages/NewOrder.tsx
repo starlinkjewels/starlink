@@ -1361,12 +1361,12 @@ function NewOrderForm() {
             {images.map((src, i) => (
               <div key={i} className="relative group aspect-square rounded-xl overflow-hidden border border-border">
                 <img src={src} alt={`Ref ${i + 1}`} className="w-full h-full object-cover" />
-                {/* Always visible on mobile (touch can't hover), hover-only on desktop */}
+                {/* Always there — a tablet or phone has no hover to bring it up (a picture added by mistake). */}
                 <button
                   type="button"
                   onClick={() => removeImage(i)}
-                  className="absolute top-1 right-1 h-7 w-7 rounded-full bg-destructive text-white grid place-items-center shadow-md
-                    opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity"
+                  aria-label={`Remove picture ${i + 1}`}
+                  className="absolute top-1.5 right-1.5 h-8 w-8 rounded-full bg-destructive text-white grid place-items-center shadow-md ring-2 ring-white"
                 >
                   <X className="h-3.5 w-3.5" />
                 </button>

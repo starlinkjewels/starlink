@@ -54,6 +54,11 @@ export interface User {
   /** The companies an employee sells for — the ones they may put a new client
    *  under. Unset or empty = every company (all staff from before companies). */
   companyIds?: string[];
+  /** An employee an admin has let into Documents (the business's own papers).
+   *  Carried to their security index as `docs: true` — only an admin's session
+   *  can write that, and the rules stop a person setting it on their own profile.
+   *  Admins always have Documents; ignored for clients. */
+  documentsAccess?: boolean;
   createdAt: string;
   // Firebase Auth uid — set only on the admin profile (admins authenticate via
   // Firebase Authentication). Used to match the profile independently of email.
@@ -2678,6 +2683,9 @@ interface IndexDoc {
   clientId: string | null;
   appId: string; // the user's app id (User.id), for scoping references
   status: "active" | "inactive";
+  /** An employee let into Documents (User.documentsAccess) — firestore.rules' canDocs().
+   *  Present only when true, so nobody else's index document changes. */
+  docs?: true;
 }
 // Last-known Firestore state of the index (uid → serialised IndexDoc), for diffing.
 const remoteIdx: Record<string, string> = {};
@@ -2685,7 +2693,10 @@ let idxSeeded = false; // remoteIdx baseline taken from the users collection at 
 
 /** The index record for a user (stable key order — used for both write & diff). */
 function indexOf(u: User): IndexDoc {
-  return { role: u.role, clientId: u.clientId ?? null, appId: u.id, status: u.status };
+  const d: IndexDoc = { role: u.role, clientId: u.clientId ?? null, appId: u.id, status: u.status };
+  // Last, and only when on — every other index document stays exactly as it was.
+  if (u.role === "employee" && u.documentsAccess === true) d.docs = true;
+  return d;
 }
 
 /** Firestore document id for an item in a given collection. */
@@ -3604,7 +3615,7 @@ async function reconcileRoleIndex(): Promise<void> {
     for (const k of Object.keys(remoteIdx)) delete remoteIdx[k];
     for (const d of snap.docs) {
       const v = d.data() as IndexDoc;
-      remoteIdx[d.id] = JSON.stringify({ role: v.role, clientId: v.clientId ?? null, appId: v.appId ?? "", status: v.status });
+      remoteIdx[d.id] = JSON.stringify({ role: v.role, clientId: v.clientId ?? null, appId: v.appId ?? "", status: v.status, ...(v.docs === true ? { docs: true } : {}) });
     }
     idxSeeded = true;
     const missing = cache.users.filter(u => u.authUid && remoteIdx[u.authUid] !== JSON.stringify(indexOf(u)));

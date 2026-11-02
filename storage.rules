@@ -19,8 +19,19 @@ service firebase.storage {
       allow read, write, delete: if isAdmin();
     }
 
-    match /{allPaths=**} {
-      allow read, write: if request.auth != null;
+    // Documents (the business's own papers, src/lib/documents.ts): never LISTED —
+    // a signed-in client must not be able to see what is there. A file is read or
+    // written only by its exact address (documents/<random id>/<name>), which only
+    // people with Documents access are given (firestore.rules canDocs()).
+    match /documents/{rest=**} {
+      allow get, write: if request.auth != null;
+    }
+
+    // Everything else, as before. Written as "top folder + the rest" so that the
+    // documents folder above is the only rule for its files (Storage rules add up:
+    // a catch-all that also matched documents/ would let it be listed again).
+    match /{top}/{rest=**} {
+      allow read, write: if request.auth != null && top != 'documents';
     }
   }
 }

@@ -7,7 +7,7 @@ import { studioSidebarGroups, StudioTabBar, StudioBackButton, parentPath } from 
 import { applyAppearance, appearanceOf, rememberAppearance, type AppearanceUi } from "@/lib/appearance";
 import { QuickCreateProvider } from "@/components/create/QuickCreate";
 import { Outlet, NavLink, useNavigate, useLocation, useNavigationType } from "react-router-dom";
-import { LayoutDashboard, Package, Users, Briefcase, MessageSquare, Bell, FileText, BarChart3, Settings, Search, LogOut, Plus, User, ChevronDown, UserCircle, ListTodo, MoreHorizontal, X, ChevronRight, Search as SearchIcon, Wallet, BookOpen, FolderOpen, Sparkles, Landmark, Truck, Boxes, Factory, Gem, CreditCard, ShoppingCart, Camera, Gift, ScanLine, History, Workflow, AlarmClock, PenTool } from "lucide-react";
+import { LayoutDashboard, Package, Users, Briefcase, MessageSquare, Bell, FileText, BarChart3, Settings, Search, LogOut, Plus, User, ChevronDown, UserCircle, ListTodo, MoreHorizontal, X, ChevronRight, Search as SearchIcon, Wallet, BookOpen, FolderOpen, Sparkles, Landmark, Truck, Boxes, Factory, Gem, CreditCard, ShoppingCart, Camera, Gift, ScanLine, History, Workflow, AlarmClock, PenTool, FolderLock } from "lucide-react";
 import { useAuth } from "@/lib/auth";
 import { motion, AnimatePresence } from "framer-motion";
 import { loadDb, collectionsLoaded, ensureCollections, summariesSettled } from "@/lib/db";
@@ -55,6 +55,7 @@ const NAV: NavItem[] = [
   { to: "/reminders", label: "Reminders", icon: AlarmClock, roles: ["admin", "employee"] },
   { to: "/reports", label: "Reports", icon: BarChart3 },
   { to: "/autopilot", label: "Autopilot", icon: Workflow, roles: ["admin"] },
+  { to: "/documents", label: "Documents", icon: FolderLock, roles: ["admin", "employee"] },
   { to: "/settings", label: "Settings", icon: Settings, roles: ["admin"] },
 ];
 
@@ -101,6 +102,7 @@ const NAV_GROUPS: { title: string; items: NavItem[] }[] = [
     { to: "/employees", label: "Employees", icon: Briefcase, roles: ["admin"] },
     { to: "/activity", label: "Activity", icon: History, roles: ["admin"] },
     { to: "/autopilot", label: "Autopilot", icon: Workflow, roles: ["admin"] },
+    { to: "/documents", label: "Documents", icon: FolderLock, roles: ["admin", "employee"] },
     { to: "/settings", label: "Settings", icon: Settings, roles: ["admin"] },
   ] },
 ];
@@ -138,6 +140,7 @@ const MORE_NAV: NavItem[] = [
   { to: "/payments", label: "Payments", icon: CreditCard, roles: ["admin","employee"] },
   { to: "/reports", label: "Reports", icon: BarChart3 },
   { to: "/autopilot", label: "Autopilot", icon: Workflow, roles: ["admin"] },
+  { to: "/documents", label: "Documents", icon: FolderLock, roles: ["admin", "employee"] },
   { to: "/settings", label: "Settings", icon: Settings, roles: ["admin"] },
   { to: "/notifications", label: "Alerts", icon: Bell },
   { to: "/reminders", label: "Reminders", icon: AlarmClock, roles: ["admin","employee"] },
@@ -174,6 +177,7 @@ const PAGE_TITLES: Record<string, string> = {
   "/giftcard": "Gift Card",
   "/gift-cards": "Gift Cards",
   "/payments": "Payments",
+  "/documents": "Documents",
 };
 
 const ROLE_LABEL: Record<string, string> = {
@@ -206,6 +210,7 @@ const ICON_COLORS: Record<string, string> = {
   "/giftcard": "bg-primary/15 text-primary",
   "/gift-cards": "bg-primary/15 text-primary",
   "/payments": "bg-indigo-500/15 text-indigo-600",
+  "/documents": "bg-slate-500/15 text-slate-600",
 };
 
 /**
@@ -347,6 +352,10 @@ export function AppLayout() {
   // Gift Card is opt-in per client — a client only sees it when an admin has
   // turned it on for their record (staff never see this client-only entry).
   const canSeeGiftCard = user!.role === "client" && !!db.clients.find(c => c.id === user!.clientId)?.giftCardEnabled;
+  // Documents: admins, and the people an admin has let in (Edit details → Documents
+  // access) — the same rule as lib/documents.ts canUseDocuments, kept here so the
+  // frame doesn't load the Documents code just to draw the menu.
+  const canSeeDocuments = user!.role === "admin" || (user!.role === "employee" && user!.documentsAccess === true);
   // An employee's sidebar is drawn from their role: a section they may not see
   // is not offered. Admins see everything; a client's portal is unaffected.
   // Temporary access starts and ends on the clock, not on a save: redraw at
@@ -367,6 +376,7 @@ export function AppLayout() {
     (!n.roles || n.roles.includes(user!.role))
     && (n.to !== "/product-photos" || canSeeProductPhotos)
     && (n.to !== "/giftcard" || canSeeGiftCard)
+    && (n.to !== "/documents" || canSeeDocuments)
     && roleAllows(n.to);
 
   const nav = NAV.filter(navFilter);
