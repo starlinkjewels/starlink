@@ -16,7 +16,7 @@ import { useMemo, useState } from "react";
 import { filled, when, userName, refLink, noteText, refNo, type Detail } from "@/components/rowDetails";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { useAuth } from "@/lib/auth";
-import { loadDb, fmtMoney, fmtDate, currentUserOrders, worksOnClientId, findInvoiceForOrder, keptValue, returnedQty, orderImage, isDiamondOnlyOrder, orderTotal, totalAdvance, balanceDue } from "@/lib/db";
+import { loadDb, fmtMoney, fmtDate, byNewestEntered, currentUserOrders, worksOnClientId, findInvoiceForOrder, keptValue, returnedQty, orderImage, isDiamondOnlyOrder, orderTotal, totalAdvance, balanceDue } from "@/lib/db";
 import { useDb, useDbVersion } from "@/hooks/useDb";
 import { StatusBadge } from "@/components/StatusBadge";
 import { TrackingModal } from "@/components/TrackingModal";
@@ -211,7 +211,8 @@ export function OrdersPage() {
     // A copy: for the admin with no filter, `list` is the store's own array,
     // and sorting it in place reordered every other page's lists too.
     if (statuses.length && statuses.every(st => st === "delayed" || st === "nodiamonds")) return [...list].sort((a, b) => (tracks.get(b.id)?.days ?? 0) - (tracks.get(a.id)?.days ?? 0));
-    return [...list].sort((a, b) => +new Date(b.createdAt) - +new Date(a.createdAt));
+    // The order entered last on top — by its number, so a back-dated order date never sends it down the list.
+    return [...list].sort(byNewestEntered);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [db, dbVersion, user, q, status, clientFilter, employeeFilter, companyFilter, tracks, multiCo, isStaff]);
 
@@ -770,7 +771,7 @@ export function OrdersPage() {
             rowHref={o => `/orders/${o.id}`}
             details={orderDetails}
             rowActions={orderActions}
-            defaultSort={{ key: "placed", dir: "desc" }}
+            // No sort of its own: the rows come newest-entered first (byNewestEntered above).
             selected={isStaff ? sel : undefined}
             onSelectedChange={isStaff ? setSel : undefined}
             totals={{ amount: rows => fmtMoney(rows.reduce((s, o) => s + (o.returns?.length ? keptValue(o) : o.amount), 0)) }}

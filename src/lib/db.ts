@@ -258,6 +258,22 @@ export function isDiamondOnlyOrder(o: { metal: string }): boolean {
 /** The picture that stands for an order: its CAD, else a photo of the finished
  *  piece, else a reference image. A diamond-only order never has a CAD, so its
  *  product photo or reference image is what shows. */
+/**
+ * Where an order stands in the order it was ENTERED: its number's running count
+ * (SLJ-2026-1105 → 1105 — one series, counting up across the years). The order
+ * date can be set back (a back-dated order), so sorting by it put a just-entered
+ * order somewhere down the list; the number never moves. Older numbers without
+ * a count fall back to their date.
+ */
+export function orderEntrySeq(o: { orderNumber?: string; createdAt?: string }): number {
+  const m = /(\d+)\s*$/.exec(o.orderNumber ?? "");
+  return m ? Number(m[1]) : 0;
+}
+/** Newest ENTERED first — the order just placed is always at the top, whatever its date. */
+export function byNewestEntered(a: { orderNumber?: string; createdAt?: string }, b: { orderNumber?: string; createdAt?: string }): number {
+  return orderEntrySeq(b) - orderEntrySeq(a) || +new Date(b.createdAt ?? 0) - +new Date(a.createdAt ?? 0);
+}
+
 export function orderImage(o: { cadImage?: string; productPhotos?: string[]; images?: string[] }): string | undefined {
   return o.cadImage || o.productPhotos?.[0] || o.images?.[0] || undefined;
 }
