@@ -380,6 +380,17 @@ export function resolveStockMovementLink(m: StockMovement, ctx: StockLinkContext
     if (m.type === "purchase_in") return { label: `Sale to ${name ?? "a supplier"} deleted — back in stock`, ...(supplierId ? { supplierId } : {}) };
     return { label: name ? `Sold to ${name} (supplier)` : m.note || "Sold to a supplier", ...(supplierId ? { supplierId } : {}) };
   }
+  // Gold borrowed from a supplier, or given back (lib/supplierGold.ts) — never a purchase or an opening.
+  // refId is the supplier; a line cancelling another (reversesId) says which way it put the gold.
+  if (m.refType === "supplierLoan") {
+    const supplier = m.refId ? ctx.suppliers.find(s => s.id === m.refId) : undefined;
+    const name = supplier?.name ?? "a supplier";
+    const to = supplier ? { supplierId: supplier.id } : {};
+    if (m.reversesId) {
+      return { label: m.type === "purchase_in" ? `Return to ${name} deleted — back in stock` : `Gold loan from ${name} deleted — taken back out of stock`, ...to };
+    }
+    return { label: m.type === "purchase_in" ? `Gold loan from ${name}` : `Gold returned to ${name}`, ...to };
+  }
   return { label: m.note || "Manual adjustment" };
 }
 

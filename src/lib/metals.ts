@@ -41,3 +41,12 @@ export function metalColour(m: string): "White" | "Rose" | "Yellow" {
 export function metalOptions(current?: string, settings?: Settings): string[] {
   return choicesOf("metals", current === DIAMOND_ONLY_METAL ? undefined : current, settings, { builtIn: false });
 }
+
+/** The metal a piece is made of, as people shop for it: "Gold" (any colour or
+ *  karat), "Silver", "Platinum"… — or the metal's own name for anything else.
+ *  "" for a piece with no metal (loose stones). */
+export function metalFamily(m: string | undefined): string {
+  if (!m || m === DIAMOND_ONLY_METAL) return "";
+  for (const f of ["Gold", "Silver", "Platinum", "Palladium", "Titanium"]) if (new RegExp(`\\b${f}\\b`, "i").test(m)) return f;
+  return metalLabel(m).trim();
+}

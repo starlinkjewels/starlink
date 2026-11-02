@@ -1254,6 +1254,38 @@ export interface Supplier {
   openingBalance?: number;
   openingDir?: LedgerDir;
   openingDate?: string;
+  /** Fine (24K) grams of their gold we already owed when the app started —
+   *  the first line of their gold account (lib/supplierGold.ts). Set once. */
+  openingGoldFine?: number;
+  openingGoldDate?: string;
+}
+
+/**
+ * One line of a supplier's gold account (lib/supplierGold.ts), in grams —
+ * worked out, never stored: each line is a record of its own already.
+ *   loanIn    — they lent us gold: a stock movement IN (refType "supplierLoan")
+ *   returnOut — we gave gold back: a stock movement OUT (refType "supplierLoan")
+ *   toBill    — gold owed turned into a rupee bill: a Purchase with fromGoldLoan
+ * Owed to them, in fine grams = opening + loanIn − returnOut − toBill.
+ */
+export interface SupplierGoldEntry {
+  id: string;
+  kind: "loanIn" | "returnOut" | "toBill";
+  /** As weighed, and its purity bucket ("22K"); a bill is in fine grams at "24K". */
+  grams: number;
+  purity: string;
+  /** Fine (24K) grams it makes. */
+  fine: number;
+  /** Whose stock it went into or came out of — unset is the first company. */
+  companyId?: string;
+  at: string;
+  note?: string;
+  by: string;
+  /** loanIn / returnOut: the stock movement it is. */
+  movementId?: string;
+  /** toBill: the bill it is, and the rate (₹ a fine gram). */
+  purchaseId?: string;
+  rateInr?: number;
 }
 
 /**
@@ -1388,8 +1420,11 @@ export interface CadJob {
   updatedAt?: string;
 }
 
-/** "gold", "diamond", or an admin-defined material's id (lib/materials.ts). */
-export type PurchaseMaterial = MaterialKey;
+/** "gold", "diamond", an admin-defined material's id (lib/materials.ts) — or
+ *  "readyPiece": finished jewellery bought ready-made, which goes onto Ready
+ *  Stock as pieces and never into the gold/diamond stock (see Purchase.piece).
+ *  Kept off MaterialKey on purpose: a ready piece is never a stock material. */
+export type PurchaseMaterial = MaterialKey | "readyPiece";
 export type PurchasePurpose = "order" | "stock";
 export type PurchaseCurrency = "INR" | "USD";
 
@@ -1433,6 +1468,25 @@ export interface OtherPurchaseDetail {
   grade?: string;
   ratePerUnit: number; // in the purchase's billing currency
   pieces?: number;     // how many, when counted by weight (stones in a parcel)
+}
+
+/** Ready-made jewellery bought from a supplier (material "readyPiece"): the
+ *  bill's own record of what was bought, so the statement still reads right
+ *  if the Ready Stock piece is edited, moved or sold later. */
+export interface ReadyPiecePurchaseDetail {
+  /** The Ready Stock item this line created (one item per line). */
+  readyStockId: string;
+  qty: number;           // pieces
+  ratePerPiece: number;  // in the purchase's billing currency
+  name: string;
+  jewelleryType: string;
+  metal: string;
+  karat?: string;
+  grossWeight?: number;  // g, each piece
+  netWeight?: number;    // g, each piece
+  diamondWeight?: number; // ct, each piece
+  diamondType?: string;
+  sku?: string;
 }
 
 /**
@@ -1681,6 +1735,7 @@ export interface Purchase {
   gold?: GoldPurchaseDetail; // present iff material === "gold"
   diamond?: DiamondPurchaseDetail; // present iff material === "diamond"
   other?: OtherPurchaseDetail; // present iff material is an admin-defined material
+  piece?: ReadyPiecePurchaseDetail; // present iff material === "readyPiece"
   /** The company this belongs to — each company holds its own stock. Unset = the first company. */
   companyId?: string;
   purpose: PurchasePurpose;
@@ -1713,6 +1768,11 @@ export interface Purchase {
   brokerageInr?: number;
   brokeragePaidBy?: "us" | "supplier";
   notes?: string;
+  /** Gold borrowed from this supplier, paid for in money (lib/supplierGold.ts):
+   *  this bill's gold.weightGrams of fine gold come off what is owed to them. The
+   *  gold is already in stock, so this bill moves no stock — added, voided or
+   *  corrected. Voiding it puts the gold back on what is owed. */
+  fromGoldLoan?: boolean;
   createdBy: string;
   createdAt: string;
 }
@@ -1927,9 +1987,18 @@ export interface StockMovement {
    *  not moved. Written on an "adjustment" of 0 ct; the bag's count is this from then on. */
   pcsCount?: number;
   /** "transfer": moved between our companies (in at the sending company's average cost).
-   *  "bagMove": stones moved from one bag into another (in at the first bag's average cost). */
-  refType?: "purchase" | "materialIssuance" | "order" | "diamondSale" | "supplierSale" | "manual" | "opening" | "transfer" | "bagMove";
+   *  "bagMove": stones moved from one bag into another (in at the first bag's average cost).
+   *  "supplierLoan": gold borrowed from a supplier (in), or given back (out) —
+   *  refId is the SUPPLIER; the line is their gold account (lib/supplierGold.ts).
+   *  It carries no cost of ours. */
+  refType?: "purchase" | "materialIssuance" | "order" | "diamondSale" | "supplierSale" | "manual" | "opening" | "transfer" | "bagMove" | "supplierLoan";
   refId?: string;
+  /** "supplierLoan": the fine (24K) grams it makes, worked out when it was written. */
+  fine?: number;
+  /** A line that cancels another (a loan or a return deleted): that line's id. The
+   *  two net to nothing; the gold account leaves both out. Its own id is
+   *  "<that id>_rev", so the same line can never be cancelled twice. */
+  reversesId?: string;
   // Value of this movement in ₹ — set for an "opening" stock entry (migration
   // stock already owned). Lets the stock ledger show the opening amount without
   // any supplier purchase (so it never touches a supplier's dues). Purchases

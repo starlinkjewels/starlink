@@ -122,8 +122,11 @@ export function docLabel(col: string, d: Record<string, unknown> | null | undefi
       const g = d.gold as { weightGrams?: number; purity?: string } | undefined;
       const dm = d.diamond as { carat?: number; shape?: string } | undefined;
       const ot = d.other as { qty?: number; grade?: string } | undefined;
+      const pc = d.piece as { qty?: number; name?: string } | undefined;
       const what = d.material === "gold" ? `${g?.weightGrams ?? ""}g ${g?.purity ?? ""}`
         : d.material === "diamond" ? `${dm?.carat ?? ""}ct ${dm?.shape ?? ""}`
+        // Ready jewellery bought ready-made (Purchase.piece).
+        : d.material === "readyPiece" ? `${pc?.qty ?? ""} pcs ${s(pc?.name) || "ready jewellery"}`
         : `${ot?.qty ?? ""} ${ot?.grade ?? ""}`;
       return `${what.trim()} · ₹${num(d.totalInr)}${d.invoiceNumber ? ` · bill ${s(d.invoiceNumber)}` : ""}`;
     }
@@ -247,6 +250,13 @@ export function undoBlocker(changes: LoggedChange[], truncated: boolean): string
     (c.col === "clients" && JSON.stringify(c.after?.materialLedger ?? null) !== JSON.stringify(c.before?.materialLedger ?? null))
     || (c.col === "materialIssuances" && (c.after?.source === "client" || c.before?.source === "client")))) {
     return "The client's own material moved with this. Use Hand back on the client's page, or Undo on the order's send, instead.";
+  }
+  // A supplier's gold account (lib/supplierGold.ts): a bill made from gold on loan, or
+  // the gold owed before the app. Put back here, what is owed could run below nothing.
+  if (changes.some(c =>
+    (c.col === "suppliers" && (c.after?.openingGoldFine ?? null) !== (c.before?.openingGoldFine ?? null))
+    || (c.col === "purchases" && (c.after?.fromGoldLoan || c.before?.fromGoldLoan)))) {
+    return "The supplier's gold account moved with this. Void the bill, or change the opening gold, on the supplier's page instead.";
   }
   if (changes.some(c => c.col === "stockMovements")) {
     return "Stock levels moved with this. Reverse it with the record's own Remove or Cancel, which puts the stock back too.";

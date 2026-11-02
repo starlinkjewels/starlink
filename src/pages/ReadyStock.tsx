@@ -1,6 +1,6 @@
 import { DataTable, CellTag, CellAmount, CellDate, type DataColumn } from "@/components/DataTable";
 import { WebVideo } from "@/components/ProductVideo";
-import { metalLabel } from "@/lib/metals";
+import { metalFamily, metalLabel } from "@/lib/metals";
 import { useCan, useMayExport } from "@/hooks/useCan";
 import { Fragment, useState, type MouseEvent } from "react";
 import { Link, useNavigate } from "react-router-dom";
@@ -28,14 +28,14 @@ import { CompanyBadge, useMultiCo, useDefaultCompany } from "@/components/Compan
 import { companiesOf, companyOf, companyIdOfClient } from "@/lib/companies";
 import { MoreMenu, type MoreAction } from "@/components/MoreMenu";
 import { PageHeader, TabBar, ViewSwitch } from "@/components/PageHeader";
-import { ExportMenu, FilterChips, FiltersButton, StatStrip, useNarrow, type TableExport, type TableFilter } from "@/components/TableToolbar";
+import { ExportMenu, FilterChips, FiltersButton, StatStrip, rangeText, useNarrow, type TableExport, type TableFilter } from "@/components/TableToolbar";
 import { MoveOfficeDialog, OfficesDialog, OfficeChip } from "@/components/ReadyStockOffices";
 import { ReadyStockItemDialog } from "@/components/ReadyStockItemDialog";
 import { officeLabel, officeOf, officeRank, officeTabs, otherLots, readyStockOffices } from "@/lib/offices";
 import { pieceTimeline, stepQty, whoOf } from "@/lib/readyStockHistory";
 import { useUrlState } from "@/hooks/useUrlState";
 import { useStickyFilter } from "@/hooks/useStickyFilter";
-import { selHas, selList, selOn } from "@/lib/filterSel";
+import { selHas, selList, selOn, selText } from "@/lib/filterSel";
 import { zoomable } from "@/components/ImageViewer";
 
 const PAGE_SIZE = 24;
@@ -43,6 +43,14 @@ const PAGE_SIZE = 24;
 const NO_OFFICE = "__none";
 
 /** A tick-box riding on top of a card, which must not trigger the card itself. */
+/** "Not given" in a filter — a piece with no metal, karat or stones. */
+const NONE = "__none";
+/** A piece's stones, as the Stones filter reads them: their type ("Natural",
+ *  "Lab Grown", "Moissanite"…) when it has some, else none. */
+const stoneOf = (i: ReadyStockItem) => (Number(i.diamondWeight) > 0 ? (i.diamondType || "").trim() || "Diamond" : NONE);
+const stoneLabel = (v: string) => (v === NONE ? "No stones"
+  : /diamond|moissan|gem|stone|sapphire|ruby|emerald|zircon|cz/i.test(v) ? v : `${v} diamond`);
+
 function SelectBox({ checked, onToggle, className = "" }: { checked: boolean; onToggle: () => void; className?: string }) {
   return (
     <button
@@ -81,6 +89,15 @@ export function ReadyStockPage() {
   const [coSel, setCoSel] = useStickyFilter("ready-stock.company", "all");
   // A remembered company counts only where its filter is shown (staff, several companies).
   const coView = !multiCo ? "all" : user?.role === "client" ? companyIdOfClient(db.clients.find(c => c.id === user.clientId)) : canManage ? coSel : "all";
+  // What the piece is — several can be ticked in each, all remembered until cleared:
+  // the kind of jewellery, the metal (gold of any colour, silver, platinum…), the
+  // karat, the stones (natural, lab-grown, moissanite… or none) and a price range.
+  const [typeSel, setTypeSel] = useStickyFilter("ready-stock.type", "all");
+  const [metalSel, setMetalSel] = useStickyFilter("ready-stock.metal", "all");
+  const [karatSel, setKaratSel] = useStickyFilter("ready-stock.karat", "all");
+  const [stoneSel, setStoneSel] = useStickyFilter("ready-stock.stone", "all");
+  const [priceMin, setPriceMin] = useStickyFilter("ready-stock.priceMin", "");
+  const [priceMax, setPriceMax] = useStickyFilter("ready-stock.priceMax", "");
   // Exactly one company in view: its pieces need no company badge.
   const oneCo = selList(coSel).length === 1;
   const [bandItem, setBandItem] = useState<ReadyStockItem | null>(null); // item whose barcode band modal is open
@@ -112,11 +129,15 @@ export function ReadyStockPage() {
   // Commas separate alternatives — a few SKUs read off a list can be pasted in
   // as written and the sheet drawn from exactly those pieces.
   const terms = q.split(",").map(t => t.trim().toLowerCase()).filter(Boolean);
+  const lo = priceMin === "" ? null : Number(priceMin), hi = priceMax === "" ? null : Number(priceMax);
   const items = shelf
     .filter(inOffice)
     .filter(i => !terms.length || terms.some(t =>
       i.name.toLowerCase().includes(t) || (i.sku || "").toLowerCase().includes(t)))
     .filter(i => avail === "all" ? true : avail === "available" ? i.quantity > 0 : i.quantity === 0)
+    .filter(i => selHas(typeSel, i.jewelleryType) && selHas(metalSel, metalFamily(i.metal) || NONE)
+      && selHas(karatSel, (i.productKarats ?? "").trim() || NONE) && selHas(stoneSel, stoneOf(i))
+      && (lo == null || !(lo > 0) || i.price >= lo) && (hi == null || !(hi > 0) || i.price <= hi))
     // Office by office (in the admin's order), newest first within each.
     .sort((a, b) => officeRank(db.settings, officeOf(a)) - officeRank(db.settings, officeOf(b))
       || officeOf(a).localeCompare(officeOf(b))
@@ -158,6 +179,11 @@ export function ReadyStockPage() {
     : [
         officeName,
         avail === "all" ? "All items" : avail === "available" ? "Available only" : "Sold out only",
+        selOn(typeSel) ? selText(typeSel, v => v, "", 3) : "",
+        selOn(metalSel) ? selText(metalSel, v => (v === NONE ? "No metal" : v), "", 3) : "",
+        selOn(karatSel) ? selText(karatSel, v => (v === NONE ? "Karat not given" : v), "", 3) : "",
+        selOn(stoneSel) ? selText(stoneSel, stoneLabel, "", 3) : "",
+        priceMin || priceMax ? `Price ${rangeText({ min: priceMin, max: priceMax, prefix: "$" })}` : "",
         q.trim() ? `Search: "${q.trim()}"` : "",
       ]).filter(Boolean).join(" · ");
 
@@ -318,6 +344,19 @@ export function ReadyStockPage() {
     </span>
   );
 
+  // One more filter for each thing a piece is: its choices are what this shelf
+  // holds (most first), plus anything still ticked so it can be unticked.
+  const pickFilter = (label: string, allLabel: string, value: string, set: (v: string) => void,
+    of: (i: ReadyStockItem) => string, labelOf: (v: string) => string): TableFilter[] => {
+    const count = new Map<string, number>();
+    for (const i of shelf.filter(inOffice)) { const v = of(i); if (v) count.set(v, (count.get(v) ?? 0) + 1); }
+    for (const v of selList(value)) if (!count.has(v)) count.set(v, 0);
+    if (count.size < 2 && !selOn(value)) return [];
+    const opts = [...count.entries()].sort((a, b) => (a[0] === NONE ? 1 : b[0] === NONE ? -1 : b[1] - a[1] || a[0].localeCompare(b[0])))
+      .map(([v, n]) => ({ value: v, label: labelOf(v), count: n }));
+    return [{ kind: "select", label, allLabel, multi: true, value: value === "all" ? "" : value, onChange: v => { set(v || "all"); setPage(1); }, options: opts }];
+  };
+  const narrowed = selOn(typeSel) || selOn(metalSel) || selOn(karatSel) || selOn(stoneSel) || !!priceMin || !!priceMax;
   // Company and availability narrow the shelf behind one Filters button; the
   // downloads hold what is ticked, else what the filters left.
   const filters: TableFilter[] = [
@@ -325,8 +364,17 @@ export function ReadyStockPage() {
       allLabel: "All companies", options: companiesOf(db.settings).map(c => ({ value: c.id, label: c.name })) }] : []),
     { kind: "select", label: "Availability", value: avail === "all" ? "" : avail, onChange: v => { setAvail((v || "all") as "all" | "available" | "sold"); setPage(1); },
       allLabel: "All items", options: [{ value: "available", label: "Available" }, { value: "sold", label: "Sold out" }] },
+    // Each list holds only what this shelf has (and anything still ticked), so no choice leads to nothing.
+    ...pickFilter("Type", "All types", typeSel, setTypeSel, i => i.jewelleryType, v => v),
+    ...pickFilter("Metal", "All metals", metalSel, setMetalSel, i => metalFamily(i.metal) || NONE, v => (v === NONE ? "No metal" : v)),
+    ...pickFilter("Karat", "All karats", karatSel, setKaratSel, i => (i.productKarats ?? "").trim() || NONE, v => (v === NONE ? "Not given" : v)),
+    ...pickFilter("Stones", "All stones", stoneSel, setStoneSel, stoneOf, stoneLabel),
+    { kind: "range", label: "Price", prefix: "$", min: priceMin, max: priceMax, onChange: (a: string, b: string) => { setPriceMin(a); setPriceMax(b); setPage(1); } },
   ];
-  const clearFilters = () => { setCoSel("all"); setAvail("all"); setPage(1); };
+  const clearFilters = () => {
+    setCoSel("all"); setAvail("all"); setTypeSel("all"); setMetalSel("all"); setKaratSel("all"); setStoneSel("all");
+    setPriceMin(""); setPriceMax(""); setPage(1);
+  };
   const onSearch = (v: string) => { setQ(v); setPage(1); };
   const searchHint = "Search name or SKU — SKU-1, SKU-2";
   // A phone: just "Search…" in the box — the hint was cut off beside the buttons (it stays as its name).
@@ -378,6 +426,19 @@ export function ReadyStockPage() {
       )}
       {mayExport && <span className="text-xs text-muted-foreground">Downloads hold just these.</span>}
       <div className="ml-auto flex items-center gap-2">
+        {/* Sell the ticked pieces to one client in one go — an order each (New Order). */}
+        {mayOrder && chosen.some(i => i.quantity > 0) && (
+          <Button size="sm" variant="outline" className="h-8 rounded-lg gap-1.5"
+            onClick={() => {
+              const onSale = chosen.filter(i => i.quantity > 0);
+              const cos = new Set(onSale.map(i => companyOf(i)));
+              if (multiCo && cos.size > 1) { toast.error("These pieces belong to different companies — sell each company's pieces on their own order."); return; }
+              if (onSale.length < chosen.length) toast.info(`${chosen.length - onSale.length} sold-out piece${chosen.length - onSale.length !== 1 ? "s" : ""} left out.`);
+              nav(`/orders/new?readyStock=${encodeURIComponent(onSale.map(i => i.id).join(","))}`);
+            }}>
+            <ShoppingBag className="h-3.5 w-3.5" />Sell {chosen.filter(i => i.quantity > 0).length > 1 ? `${chosen.filter(i => i.quantity > 0).length} pieces` : "piece"}
+          </Button>
+        )}
         {mayExport && chosen.length > 0 && (
           <Button size="sm" onClick={() => setSharing(chosen)} className="h-8 rounded-lg gap-1.5 btn-hero"><Share2 className="h-3.5 w-3.5" />Share / PDF</Button>
         )}
@@ -433,7 +494,7 @@ export function ReadyStockPage() {
             <FiltersButton filters={filters} onClear={clearFilters} count={countText} />
             <div className="ml-auto flex items-center gap-2">
               {chosen.length > 0 && <span className="text-xs text-muted-foreground tabular-nums whitespace-nowrap">{chosen.length} ticked</span>}
-              {mayExport && <ExportMenu exports={exports} scope={`${which}${chosen.length ? "" : (q || selOn(coSel) || avail !== "all" ? ", as filtered" : "")}`} />}
+              {mayExport && <ExportMenu exports={exports} scope={`${which}${chosen.length ? "" : (q || selOn(coSel) || avail !== "all" || narrowed ? ", as filtered" : "")}`} />}
             </div>
           </div>
           <FilterChips filters={filters} onClear={clearFilters} />
@@ -530,7 +591,7 @@ export function ReadyStockPage() {
             onClearFilters={clearFilters}
             exports={exports}
             summary={<>{summary}{selectionBar}</>}
-            resetKey={JSON.stringify([officeSel, q, coSel, avail])}
+            resetKey={JSON.stringify([officeSel, q, coSel, avail, typeSel, metalSel, karatSel, stoneSel, priceMin, priceMax])}
             columns={listColumns}
             rowKey={i => i.id}
             rowHref={pieceHref}

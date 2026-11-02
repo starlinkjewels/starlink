@@ -41,6 +41,27 @@ export const UNIT_LABEL: Record<MaterialUnit, string> = { g: "grams", ct: "carat
 /** What a kind is counted in, unless the admin says otherwise. */
 export const KIND_UNIT: Record<MaterialKind, MaterialUnit> = { metal: "g", stone: "ct", finding: "pcs" };
 
+/** A purchase of finished jewellery, bought ready-made (Purchase.piece) — it
+ *  goes onto Ready Stock, never into the gold/diamond/material stock. */
+export const READY_PIECE = "readyPiece" as const;
+export function isReadyPiece(p: { material?: string } | undefined | null): boolean {
+  return p?.material === READY_PIECE;
+}
+
+/** "Ring · 18K Yellow Gold · 4.250 g · 0.30 ct" — a ready piece in one line. */
+export function readyPieceSpec(pc: Partial<NonNullable<Purchase["piece"]>> | undefined): string {
+  if (!pc) return "";
+  const metal = [pc.karat, pc.metal].map(x => x?.trim()).filter(Boolean).join(" ");
+  const named = pc.name?.trim() && pc.name.trim() !== [pc.jewelleryType, metal].filter(Boolean).join(" ") ? pc.name.trim() : "";
+  return [
+    named, pc.jewelleryType, metal,
+    pc.grossWeight ? `GW ${(Math.round(pc.grossWeight * 1000) / 1000).toFixed(3)} g` : undefined,
+    pc.netWeight ? `NW ${(Math.round(pc.netWeight * 1000) / 1000).toFixed(3)} g` : undefined,
+    pc.diamondWeight ? `${Math.round(pc.diamondWeight * 1000) / 1000} ct${pc.diamondType ? ` ${pc.diamondType}` : ""}` : undefined,
+    pc.sku?.trim() ? `#${pc.sku.trim()}` : undefined,
+  ].map(x => (typeof x === "string" ? x.trim() : x)).filter(Boolean).join(" · ");
+}
+
 export function isOtherMaterial(m: string | undefined): m is `mat_${string}` {
   return !!m && m.startsWith("mat_");
 }
@@ -63,6 +84,7 @@ export function materialDef(s: Pick<Settings, "materials"> | undefined, key: str
 export function materialName(s: Pick<Settings, "materials"> | undefined, key: string | undefined): string {
   if (key === "gold") return "Gold";
   if (key === "diamond") return "Diamond";
+  if (key === READY_PIECE) return "Ready jewellery";
   return materialDef(s, key)?.name ?? "Other material";
 }
 
@@ -75,6 +97,7 @@ export function isMetalMaterial(s: Pick<Settings, "materials"> | undefined, key:
 export function materialUnit(s: Pick<Settings, "materials"> | undefined, key: string | undefined): MaterialUnit {
   if (key === "gold") return "g";
   if (key === "diamond") return "ct";
+  if (key === READY_PIECE) return "pcs";
   return materialDef(s, key)?.unit ?? "pcs";
 }
 
@@ -100,32 +123,40 @@ export function gramsOf(unit: MaterialUnit, qty: number): number {
  * to stock a second time. */
 
 /** How much a purchase bought, in its material's unit. */
-export function purchaseQty(p: Pick<Purchase, "material" | "gold" | "diamond" | "other">): number {
+export function purchaseQty(p: Pick<Purchase, "material" | "gold" | "diamond" | "other"> & { piece?: Purchase["piece"] }): number {
   if (p.material === "gold") return p.gold?.weightGrams ?? 0;
   if (p.material === "diamond") return p.diamond?.carat ?? 0;
+  if (p.material === READY_PIECE) return p.piece?.qty ?? 0;
   return p.other?.qty ?? 0;
 }
 
 /** Its rate per unit, in the purchase's own currency. */
-export function purchaseRate(p: Pick<Purchase, "material" | "gold" | "diamond" | "other">): number {
+export function purchaseRate(p: Pick<Purchase, "material" | "gold" | "diamond" | "other"> & { piece?: Purchase["piece"] }): number {
   if (p.material === "gold") return p.gold?.ratePerGram ?? 0;
   if (p.material === "diamond") return p.diamond?.ratePerCarat ?? 0;
+  if (p.material === READY_PIECE) return p.piece?.ratePerPiece ?? 0;
   return p.other?.ratePerUnit ?? 0;
 }
 
 /** The stock bucket it lands in: a purity, a loose diamond's lot (or "Certified"), or a grade.
- *  A loose lot with only a shape is the shape, as it always was (lib/diamondLots.ts). */
-export function purchaseBucket(p: Pick<Purchase, "material" | "gold" | "diamond" | "other">): string {
+ *  A loose lot with only a shape is the shape, as it always was (lib/diamondLots.ts).
+ *  A ready piece lands in no bucket (it is a Ready Stock item): its jewellery type. */
+export function purchaseBucket(p: Pick<Purchase, "material" | "gold" | "diamond" | "other"> & { piece?: Purchase["piece"] }): string {
   if (p.material === "gold") return p.gold?.purity ?? "";
+  if (p.material === READY_PIECE) return p.piece?.jewelleryType || "Ready jewellery";
   if (p.material === "diamond") return p.diamond?.kind === "certified" ? "Certified"
     : !p.diamond?.shape ? "unspecified"
     : lotKey({ shape: p.diamond.shape, type: p.diamond.type, size: p.diamond.size, mm: p.diamond.mm, color: p.diamond.color, clarity: p.diamond.clarity });
   return p.other?.grade || "—";
 }
 
-/** "2.5 g 950 Platinum", "0.42 ct Round diamond", "12 pcs Lobster lock". */
-export function purchaseText(s: Pick<Settings, "materials"> | undefined, p: Pick<Purchase, "material" | "gold" | "diamond" | "other">): string {
+/** "2.5 g 950 Platinum", "0.42 ct Round diamond", "12 pcs Lobster lock", "2 pcs ready jewellery · Ring · 18K Yellow Gold". */
+export function purchaseText(s: Pick<Settings, "materials"> | undefined, p: Pick<Purchase, "material" | "gold" | "diamond" | "other"> & { piece?: Purchase["piece"] }): string {
   const unit = materialUnit(s, p.material);
+  if (p.material === READY_PIECE) {
+    const spec = readyPieceSpec(p.piece);
+    return `${fmtQty(purchaseQty(p), "pcs")} ready jewellery${spec ? ` · ${spec}` : ""}`;
+  }
   if (p.material === "gold") return `${fmtQty(purchaseQty(p), unit)} ${p.gold?.purity ?? ""} gold`;
   if (p.material === "diamond") {
     const spec = diamondSpec(p.diamond);
@@ -157,7 +188,7 @@ export function diamondSpec(
 }
 
 /** The bill's rate per unit in rupees (₹/g, ₹/ct, ₹/pc…), before any discount. */
-export function purchaseUnitInr(p: Pick<Purchase, "material" | "gold" | "diamond" | "other" | "currency" | "exchangeRate">): number | undefined {
+export function purchaseUnitInr(p: Pick<Purchase, "material" | "gold" | "diamond" | "other" | "currency" | "exchangeRate"> & { piece?: Purchase["piece"] }): number | undefined {
   const r = purchaseRate(p) * (p.currency === "USD" ? Number(p.exchangeRate) || 0 : 1);
   return r > 0 ? Math.round(r * 100) / 100 : undefined;
 }

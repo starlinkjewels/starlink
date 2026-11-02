@@ -7,7 +7,7 @@ import { PeriodPicker } from "./ui";
 import { StatusBadge } from "@/components/StatusBadge";
 import { SectionTitle } from "@/components/SectionTitle";
 import { DataTable, CellMain, CellTag, CellAmount, CellDate } from "@/components/DataTable";
-import { purchaseQty as qtyOfPurchase, materialName, materialUnit, diamondSpec } from "@/lib/materials";
+import { purchaseQty as qtyOfPurchase, materialName, materialUnit, diamondSpec, readyPieceSpec } from "@/lib/materials";
 import { useState, useMemo, useEffect } from "react";
 import { loadDb, fmtMoney, fmtDate, currentUserOrders, totalAdvance, balanceDue, orderTotal, TIMELINE_STEPS, logEvent, keptValue, findInvoiceForOrder } from "@/lib/db";
 import type { Order, Purchase } from "@/lib/db";
@@ -30,7 +30,7 @@ import {
 import {
   Download, Package, Truck, CheckCircle2, DollarSign,
   Clock, TrendingUp, BarChart3,
-  Coins, Gem, Award, Boxes, ShoppingCart, FileSpreadsheet, FileText, Factory, Gift,
+  Coins, Gem, Award, Boxes, ShoppingCart, FileSpreadsheet, FileText, Factory, Gift, Crown,
 } from "lucide-react";
 import jsPDF from "jspdf";
 import { toast } from "sonner";
@@ -49,8 +49,10 @@ function ymd(iso: string): string {
 
 /** Which report bucket a purchase belongs to. Diamonds without an explicit
  *  kind are treated as loose (matches the DiamondPurchaseDetail contract). */
-function purchaseCategory(p: Purchase): "gold" | "diamond" | "cert" | "other" {
+function purchaseCategory(p: Purchase): "gold" | "diamond" | "cert" | "other" | "ready" {
   if (p.material === "gold") return "gold";
+  // Finished pieces bought ready-made (Ready Stock) — counted in pieces, never as gold or diamonds.
+  if (p.material === "readyPiece") return "ready";
   if (p.material !== "diamond") return "other"; // platinum, gemstones, findings — Settings → Materials
   return p.diamond?.kind === "certified" ? "cert" : "diamond";
 }
@@ -206,12 +208,12 @@ export function ReportSections({ embedded = false, show, period, clientId, scope
     // Purchase date = supplier invoice date when recorded, else when it was entered.
     const rows = (db.purchases ?? []).filter(p => inRange(p.invoiceDate || p.createdAt) && (!companyId || companyOf(p) === companyId));
     const mk = () => ({ qty: 0, amount: 0, count: 0, stockQty: 0, stockAmt: 0, orderQty: 0, orderAmt: 0 });
-    const g = mk(), dl = mk(), dc = mk(), ot = mk();
+    const g = mk(), dl = mk(), dc = mk(), ot = mk(), rd = mk();
     const byPurity = new Map<string, { qty: number; amount: number }>();
     const byShape  = new Map<string, { qty: number; amount: number }>();
     for (const p of rows) {
       const c = purchaseCategory(p);
-      const bucket = c === "gold" ? g : c === "cert" ? dc : c === "other" ? ot : dl;
+      const bucket = c === "gold" ? g : c === "cert" ? dc : c === "other" ? ot : c === "ready" ? rd : dl;
       const qty = purchaseQty(p);
       bucket.qty += qty; bucket.amount += p.totalInr; bucket.count++;
       if (p.purpose === "stock") { bucket.stockQty += qty; bucket.stockAmt += p.totalInr; }
@@ -222,15 +224,17 @@ export function ReportSections({ embedded = false, show, period, clientId, scope
       } else if (c === "other") {
         const key = `${materialName(db.settings, p.material)}${p.other?.grade && p.other.grade !== "—" ? ` · ${p.other.grade}` : ""}`;
         const e = byShape.get(key) || { qty: 0, amount: 0 }; e.qty += qty; e.amount += p.totalInr; byShape.set(key, e);
+      } else if (c === "ready") {
+        // Not a shape: kept off the gold-purity and diamond-shape tables (its own card says it all).
       } else {
         const key = p.diamond?.shape || p.diamond?.quality || (c === "cert" ? "Certified" : "—");
         const e = byShape.get(key) || { qty: 0, amount: 0 }; e.qty += qty; e.amount += p.totalInr; byShape.set(key, e);
       }
     }
-    const grand = g.amount + dl.amount + dc.amount + ot.amount;
+    const grand = g.amount + dl.amount + dc.amount + ot.amount + rd.amount;
     return {
       rows: [...rows].sort((a, b) => +new Date(b.invoiceDate || b.createdAt) - +new Date(a.invoiceDate || a.createdAt)),
-      g, dl, dc, ot, grand,
+      g, dl, dc, ot, rd, grand,
       byPurity: [...byPurity.entries()].sort((a, b) => b[1].amount - a[1].amount),
       byShape:  [...byShape.entries()].sort((a, b) => b[1].amount - a[1].amount),
     };
@@ -267,6 +271,7 @@ export function ReportSections({ embedded = false, show, period, clientId, scope
       section("Metal (Gold)", "g", r.g);
       section("Diamond (Loose)", "ct", r.dl);
       section("Certified Diamond", "ct", r.dc);
+      if (r.rd.count) section("Ready jewellery", "pcs", r.rd);
       doc.setFont("helvetica", "bold"); doc.setFontSize(13);
       doc.text(`Grand Total Purchases: ${money(r.grand)}`, 20, y + 2);
 
@@ -287,7 +292,7 @@ export function ReportSections({ embedded = false, show, period, clientId, scope
       const ordered = [...r.rows].sort((a, b) => +new Date(a.invoiceDate || a.createdAt) - +new Date(b.invoiceDate || b.createdAt));
       for (const p of ordered) {
         const c = purchaseCategory(p); const qty = purchaseQty(p); const unit = materialUnit(db.settings, p.material);
-        const label = c === "gold" ? "Gold" : c === "cert" ? "Cert.Dia" : c === "other" ? materialName(db.settings, p.material).slice(0, 10) : "Diamond";
+        const label = c === "gold" ? "Gold" : c === "cert" ? "Cert.Dia" : c === "other" ? materialName(db.settings, p.material).slice(0, 10) : c === "ready" ? "Ready jwl" : "Diamond";
         running += p.totalInr;
         const cells = [fmtDate(p.invoiceDate || p.createdAt), (suppliers.find(s => s.id === p.supplierId)?.name ?? "").slice(0, 20), label, `${qty}${unit}`, qty > 0 ? plain(p.totalInr / qty) : "-", plain(p.totalInr), plain(running)];
         cells.forEach((cval, i) => doc.text(cval, cols[i][2] ? colR(i) : cols[i][1], y, cols[i][2] ? { align: "right" } : undefined));
@@ -307,7 +312,7 @@ export function ReportSections({ embedded = false, show, period, clientId, scope
       const suppliers = db.suppliers ?? [];
       const esc = (v: unknown) => { const s = String(v ?? ""); return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; };
       const headers = ["Date","Supplier","Category","Purpose","Purity/Shape","Quantity","Unit","Rate (Rs)","Amount (Rs)","Running Total (Rs)","Invoice #"];
-      const catLabel = { gold: "Metal (Gold)", diamond: "Diamond (Loose)", cert: "Certified Diamond", other: "Other material" };
+      const catLabel = { gold: "Metal (Gold)", diamond: "Diamond (Loose)", cert: "Certified Diamond", other: "Other material", ready: "Ready jewellery" };
       let running = 0;
       const rows = [...materialReport.rows]
         .sort((a, b) => +new Date(a.invoiceDate || a.createdAt) - +new Date(b.invoiceDate || b.createdAt))
@@ -315,7 +320,7 @@ export function ReportSections({ embedded = false, show, period, clientId, scope
           const c = purchaseCategory(p);
           const qty = purchaseQty(p);
           const unit = materialUnit(db.settings, p.material);
-          const detail = c === "gold" ? (p.gold?.purity || "") : c === "other" ? `${materialName(db.settings, p.material)} ${p.other?.grade ?? ""}`.trim() : (diamondSpec(p.diamond, (db.diamondPackets ?? []).find(x => x.purchaseId === p.id)) || (c === "cert" ? "Certified" : ""));
+          const detail = c === "gold" ? (p.gold?.purity || "") : c === "other" ? `${materialName(db.settings, p.material)} ${p.other?.grade ?? ""}`.trim() : c === "ready" ? readyPieceSpec(p.piece) : (diamondSpec(p.diamond, (db.diamondPackets ?? []).find(x => x.purchaseId === p.id)) || (c === "cert" ? "Certified" : ""));
           const rate = qty > 0 ? Math.round(p.totalInr / qty) : "";
           running += p.totalInr;
           return [
@@ -379,11 +384,16 @@ export function ReportSections({ embedded = false, show, period, clientId, scope
     return { rows, supTotal, facTotal, grand: supTotal + facTotal };
   }, [db.purchases, db.materialIssuances, db.suppliers, db.factories, payFrom, payTo, canSeeAll]);
 
+  // The client(s) chosen — in the hub's filter or this page's own. Sales and Profit
+  // follow it like every other figure here (they used to cover every client).
+  const clientSel = canSeeAll && selOn(clientFilter) ? clientFilter : "";
+  const ofClient = (o: Order) => !clientSel || selHas(clientSel, o.clientId);
+
   /* ── Sales / client billing — orders placed in the period ── */
   const salesReport = useMemo(() => {
     if (!canSeeAll) return null;
     const inRange = makeInRange(salesFrom, salesTo);
-    const orders = myOrders.filter(o => o.status !== "Rejected" && inRange(o.createdAt));
+    const orders = myOrders.filter(o => o.status !== "Rejected" && inRange(o.createdAt) && ofClient(o));
     const billed = orders.reduce((s, o) => s + orderTotal(o), 0);
     const received = orders.reduce((s, o) => s + totalAdvance(o), 0);
     const outstanding = orders.reduce((s, o) => s + balanceDue(o), 0);
@@ -401,7 +411,7 @@ export function ReportSections({ embedded = false, show, period, clientId, scope
       byClient: [...map.values()].sort((a, b) => b.billed - a.billed),
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [dbVersion, scopeKey, clients, salesFrom, salesTo, canSeeAll]);
+  }, [dbVersion, scopeKey, clients, salesFrom, salesTo, canSeeAll, clientSel]);
 
   /* ── Profit & Loss — ADMIN ONLY.
      Revenue is recognised when the goods leave: an order belongs to the period
@@ -412,8 +422,10 @@ export function ReportSections({ embedded = false, show, period, clientId, scope
   const profit = useMemo(() => {
     if (!isAdmin) return null;
     const inRange = makeInRange(profitFrom, profitTo);
-    const gross = profitReport(db, myOrders.filter(o => recognisedSale(o) && inRange(saleDate(o))));
-    const opex = operatingExpenses(db, inRange);
+    const gross = profitReport(db, myOrders.filter(o => recognisedSale(o) && inRange(saleDate(o)) && ofClient(o)));
+    // Running costs are the whole business's — never charged against one client's sales.
+    const oneClient = !!clientSel;
+    const opex = operatingExpenses(db, oneClient ? () => false : inRange);
     // What turning the dollars into rupees gained or lost against the rate
     // each sale was booked at. Not anybody's margin on a piece, so it sits
     // between gross profit and the running costs.
@@ -421,7 +433,7 @@ export function ReportSections({ embedded = false, show, period, clientId, scope
     // Goods sold to our suppliers (lib/supplierSales.ts): their own sales, cost and
     // brokerage — the business's, so only on the whole business's (or one company's)
     // figures, never on one client's or one employee's.
-    const supAll = !clientId && (!scope || !!companyId)
+    const supAll = !clientId && !oneClient && (!scope || !!companyId)
       ? supplierSalesProfit(db, iso => inRange(iso)).rows.filter(r => !companyId || (r.sale.companyId || "main") === companyId)
       : [];
     // Cost and profit add up only the sales whose cost (and day's rate) is known — the rest
@@ -443,10 +455,10 @@ export function ReportSections({ embedded = false, show, period, clientId, scope
     const netMargin = netUsd !== null && gross.totals.sellingUsd > 0
       ? Math.round((netUsd / gross.totals.sellingUsd) * 1000) / 10
       : null;
-    return { ...gross, opex, fx, sup, netUsd, netMargin };
+    return { ...gross, opex, fx, sup, netUsd, netMargin, oneClient };
   // eslint-disable-next-line react-hooks/exhaustive-deps
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [dbVersion, scopeKey, profitFrom, profitTo, isAdmin]);
+  }, [dbVersion, scopeKey, profitFrom, profitTo, isAdmin, clientSel]);
   const profitPeriodLabel = periodLabel(profitFrom, profitTo);
   const monthLabel = (k: string) => {
     const [y, m] = k.split("-").map(Number);
@@ -561,23 +573,25 @@ export function ReportSections({ embedded = false, show, period, clientId, scope
 
   /* ── Per-material ledgers — separate Gold / Loose Diamond / Certified Diamond
      reports, each a full ledger (every purchase + running total) ── */
-  type MatCat = "gold" | "diamond" | "cert" | "other";
+  type MatCat = "gold" | "diamond" | "cert" | "other" | "ready";
   const CAT_META: Record<MatCat, { label: string; unit: string; detail: string }> = {
     gold:    { label: "Gold",             unit: "g",  detail: "Purity" },
     diamond: { label: "Loose Diamond",    unit: "ct", detail: "Shape" },
     cert:    { label: "Certified Diamond", unit: "ct", detail: "Shape/Cert" },
     // Each in its own unit, so the unit goes on every line instead.
     other:   { label: "Other Materials",  unit: "",   detail: "Material / Grade" },
+    ready:   { label: "Ready Jewellery",  unit: "pcs", detail: "Piece" },
   };
   const catDetail = (p: Purchase, cat: MatCat) =>
     cat === "gold" ? (p.gold?.purity || "")
     : cat === "other" ? `${materialName(db.settings, p.material)} ${p.other?.grade ?? ""}`.trim()
+    : cat === "ready" ? readyPieceSpec(p.piece)
     : (diamondSpec(p.diamond, (db.diamondPackets ?? []).find(x => x.purchaseId === p.id)) || (cat === "cert" ? "Certified" : ""));
   // Oldest-first for a running-balance ledger.
   const catRows = (cat: MatCat) => (materialReport?.rows ?? [])
     .filter(p => purchaseCategory(p) === cat)
     .sort((a, b) => +new Date(a.invoiceDate || a.createdAt) - +new Date(b.invoiceDate || b.createdAt));
-  const catBucket = (cat: MatCat) => cat === "gold" ? materialReport!.g : cat === "cert" ? materialReport!.dc : cat === "other" ? materialReport!.ot : materialReport!.dl;
+  const catBucket = (cat: MatCat) => cat === "gold" ? materialReport!.g : cat === "cert" ? materialReport!.dc : cat === "other" ? materialReport!.ot : cat === "ready" ? materialReport!.rd : materialReport!.dl;
 
   // Full stock-movement ledger (purchases IN + factory issues / order use / sales
   // OUT + returns) with running balance, for Gold & Loose Diamond — the "proper
@@ -613,6 +627,23 @@ export function ReportSections({ embedded = false, show, period, clientId, scope
             r.inQty || "", r.outQty || "", r.balance,
             r.rateInr ? Math.round(r.rateInr) : "", r.amountInr ? Math.round(r.amountInr) : "",
           ]),
+        );
+        return;
+      }
+      if (cat === "ready") {
+        // Finished pieces bought ready-made: the piece as billed, a line each.
+        let run = 0;
+        const sup = db.suppliers ?? [];
+        csvDownload(
+          `Starlink-Ready-Jewellery-Purchases-${matFrom || "all"}.csv`,
+          ["Date", "Invoice #", "Supplier", "Item", "Jewellery type", "Metal", "Karat", "Gross (g)", "Net (g)", "Diamond (ct)", "Diamond type", "SKU", "Pieces", "Rate/pc (Rs)", "Amount (INR)", "Paid (INR)", "Pending (INR)", "Running Total (INR)", "Notes"],
+          catRows("ready").map(p => {
+            run += p.totalInr;
+            const q = purchaseQty(p); const pc = p.piece;
+            return [fmtDate(p.invoiceDate || p.createdAt), p.invoiceNumber ?? "", sup.find(x => x.id === p.supplierId)?.name ?? "",
+              pc?.name ?? "", pc?.jewelleryType ?? "", pc?.metal ?? "", pc?.karat ?? "", pc?.grossWeight ?? "", pc?.netWeight ?? "", pc?.diamondWeight ?? "", pc?.diamondType ?? "", pc?.sku ?? "",
+              q, q > 0 ? Math.round(p.totalInr / q) : "", Math.round(p.totalInr), Math.round(purchasePaid(p)), Math.round(purchasePending(p)), Math.round(run), p.notes ?? ""];
+          }),
         );
         return;
       }
@@ -729,14 +760,14 @@ export function ReportSections({ embedded = false, show, period, clientId, scope
         const ref = p.invoiceNumber
           || (p.orderId ? (db.orders.find(o => o.id === p.orderId)?.orderNumber ?? "") : "")
           || "—";
-        const cert = cat === "other" ? (p.other?.grade || "—") : (p.diamond?.certificateNumber || pk?.certificateNumber || "—");
+        const cert = cat === "other" ? (p.other?.grade || "—") : cat === "ready" ? ([p.piece?.karat, p.piece?.metal].filter(Boolean).join(" ") || "—") : (p.diamond?.certificateNumber || pk?.certificateNumber || "—");
         return [
           fmtDate(p.invoiceDate || p.createdAt),
           (suppliers.find(s => s.id === p.supplierId)?.name ?? "").slice(0, 26),
           String(ref).slice(0, 16),
-          cat === "other" ? materialName(db.settings, p.material).slice(0, 18) : String(p.diamond?.shape || pk?.shape || "—"),
+          cat === "other" ? materialName(db.settings, p.material).slice(0, 18) : cat === "ready" ? String(p.piece?.name || p.piece?.jewelleryType || "—").slice(0, 18) : String(p.diamond?.shape || pk?.shape || "—"),
           String(cert).slice(0, 24),
-          `${qty}${cat === "other" ? ` ${materialUnit(db.settings, p.material)}` : m.unit}`,
+          `${qty}${cat === "other" ? ` ${materialUnit(db.settings, p.material)}` : cat === "ready" ? " pcs" : m.unit}`,
           qty > 0 ? rs(p.totalInr / qty) : "—",
           rs(p.totalInr),
         ];
@@ -757,8 +788,8 @@ export function ReportSections({ embedded = false, show, period, clientId, scope
           { header: "Date", x: 14 },
           { header: "Supplier", x: 42 },
           { header: "Inv / Order", x: 96 },
-          { header: cat === "other" ? "Material" : "Shape", x: 132 },
-          { header: cat === "other" ? "Grade" : "Certificate", x: 158 },
+          { header: cat === "other" ? "Material" : cat === "ready" ? "Piece" : "Shape", x: 132 },
+          { header: cat === "other" ? "Grade" : cat === "ready" ? "Metal" : "Certificate", x: 158 },
           { header: "Qty", x: 222 },
           { header: "Rate", x: 248 },
           { header: "Amount", x: 268 },
@@ -876,6 +907,7 @@ export function ReportSections({ embedded = false, show, period, clientId, scope
       !!(p.diamond?.pieces || p.other?.pieces) && { label: "Stones", value: String(p.diamond?.pieces || p.other?.pieces) },
       // The whole lot or stone: shape · size · colour · clarity · pcs, or its report.
       p.material === "diamond" && { label: "Diamond", value: diamondSpec(p.diamond, (db.diamondPackets ?? []).find(x => x.purchaseId === p.id)) || undefined },
+      p.material === "readyPiece" && { label: "Ready jewellery", value: readyPieceSpec(p.piece) || undefined },
       !!p.diamond?.certificateNumber && { label: "Certificate", value: [p.diamond.certificateLab, p.diamond.certificateNumber].filter(Boolean).join(" ") },
       !!p.discountPct && { label: p.discountPct > 0 ? "Discount" : "Charge added", value: `${Math.abs(p.discountPct)}%` },
       !!p.roundOffInr && { label: "Rounded off", value: fmtMoneyInr(p.roundOffInr) },
@@ -1093,12 +1125,13 @@ export function ReportSections({ embedded = false, show, period, clientId, scope
           </div>
 
           {/* Category cards */}
-          <div className={`grid gap-3 sm:grid-cols-2 ${materialReport.ot.count ? "lg:grid-cols-4" : "lg:grid-cols-3"}`}>
+          <div className={`grid gap-3 sm:grid-cols-2 ${materialReport.ot.count || materialReport.rd.count ? "lg:grid-cols-4" : "lg:grid-cols-3"}`}>
             {([
               { label: "Metal (Gold)", cat: "gold" as MatCat, unit: "g", icon: Coins, ring: "bg-amber-500/10 text-amber-600", b: materialReport.g },
               { label: "Diamond (Loose)", cat: "diamond" as MatCat, unit: "ct", icon: Gem, ring: "bg-blue-500/10 text-blue-600", b: materialReport.dl },
               { label: "Certified Diamond", cat: "cert" as MatCat, unit: "ct", icon: Award, ring: "bg-primary/10 text-primary", b: materialReport.dc },
               ...(materialReport.ot.count ? [{ label: "Other Materials", cat: "other" as MatCat, unit: "", icon: Boxes, ring: "bg-emerald-500/10 text-emerald-600", b: materialReport.ot }] : []),
+              ...(materialReport.rd.count ? [{ label: "Ready Jewellery", cat: "ready" as MatCat, unit: "pcs", icon: Crown, ring: "bg-violet-500/10 text-violet-600", b: materialReport.rd }] : []),
             ]).map(c => {
               const avg = c.b.qty > 0 && c.unit ? c.b.amount / c.b.qty : 0;
               return (
@@ -1140,7 +1173,7 @@ export function ReportSections({ embedded = false, show, period, clientId, scope
           <div className="rounded-2xl bg-gradient-to-br from-primary/8 to-brand-light/10 border border-primary/15 p-4 flex items-center justify-between gap-3 flex-wrap">
             <div>
               <p className="text-[10px] font-semibold uppercase tracking-wider text-primary/80">Grand Total Purchases</p>
-              <p className="text-[11px] text-muted-foreground">Metal + diamond + certified · {materialReport.rows.length} purchase{materialReport.rows.length !== 1 ? "s" : ""}</p>
+              <p className="text-[11px] text-muted-foreground">Metal + diamond + certified{materialReport.rd.count ? " + ready jewellery" : ""} · {materialReport.rows.length} purchase{materialReport.rows.length !== 1 ? "s" : ""}</p>
             </div>
             <p className="font-display text-3xl text-primary leading-none">{fmtMoneyInr(materialReport.grand)}</p>
           </div>
@@ -1186,10 +1219,10 @@ export function ReportSections({ embedded = false, show, period, clientId, scope
           {/* Detail table */}
           {materialReport.rows.length > 0 ? (() => {
             const supplierName = (p: Purchase) => (db.suppliers ?? []).find(s => s.id === p.supplierId)?.name ?? "";
-            const labelOf = (p: Purchase) => { const c = purchaseCategory(p); return c === "gold" ? "Gold" : c === "cert" ? "Cert. Dia" : c === "other" ? materialName(db.settings, p.material) : "Diamond"; };
-            const detailOf = (p: Purchase) => { const c = purchaseCategory(p); return c === "gold" ? (p.gold?.purity || "—") : c === "other" ? (p.other?.grade || "—") : (diamondSpec(p.diamond, (db.diamondPackets ?? []).find(x => x.purchaseId === p.id)) || (c === "cert" ? "Certified" : "—")); };
+            const labelOf = (p: Purchase) => { const c = purchaseCategory(p); return c === "gold" ? "Gold" : c === "cert" ? "Cert. Dia" : c === "other" ? materialName(db.settings, p.material) : c === "ready" ? "Ready jewellery" : "Diamond"; };
+            const detailOf = (p: Purchase) => { const c = purchaseCategory(p); return c === "gold" ? (p.gold?.purity || "—") : c === "other" ? (p.other?.grade || "—") : c === "ready" ? (readyPieceSpec(p.piece) || "—") : (diamondSpec(p.diamond, (db.diamondPackets ?? []).find(x => x.purchaseId === p.id)) || (c === "cert" ? "Certified" : "—")); };
             const dateOf = (p: Purchase) => p.invoiceDate || p.createdAt;
-            const TONE = { gold: "amber", cert: "blue", other: "green", diamond: "violet" } as const;
+            const TONE = { gold: "amber", cert: "blue", other: "green", diamond: "violet", ready: "neutral" } as const;
             return (
               <DataTable
                 id="reports-material-purchases"
@@ -1385,7 +1418,7 @@ export function ReportSections({ embedded = false, show, period, clientId, scope
                       profit.fx.heldUsd > 0 ? `${fmtMoney(profit.fx.heldUsd)} still held in foreign accounts — realised when converted` : "",
                       profit.fx.unknownUsd > 0 ? `${fmtMoney(profit.fx.unknownUsd)} with no conversion rate on record` : "",
                     ].filter(Boolean).join(" · ") })}
-                {line(`Operating expenses — ${profit.opex.count} entr${profit.opex.count !== 1 ? "ies" : "y"}`, usd(profit.opex.totalUsd, "− "),
+                {profit.oneClient ? line("Operating expenses", "—", { indent: true, sub: "Not on one client's figures — running costs are the whole business's" }) : line(`Operating expenses — ${profit.opex.count} entr${profit.opex.count !== 1 ? "ies" : "y"}`, usd(profit.opex.totalUsd, "− "),
                   { sub: [
                       profit.opex.byCategory.length ? profit.opex.byCategory.slice(0, 4).map(c => `${c.category} ${fmtMoney(c.usd)}`).join(" · ") : "salaries, rent, travel and other running costs",
                       // Paid in a currency with no rate on file: left out rather than guessed.

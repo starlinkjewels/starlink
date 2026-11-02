@@ -15,6 +15,7 @@ import {
   type Order, type ReadyStockEventKind, type ReadyStockItem,
 } from "@/lib/db";
 import { useDb } from "@/hooks/useDb";
+import { useLoaded } from "@/hooks/useLoaded";
 import { useAuth } from "@/lib/auth";
 import { useCan, useMayExport } from "@/hooks/useCan";
 import { ShareProductsSheet } from "@/components/ShareProductsSheet";
@@ -112,11 +113,21 @@ function PieceBody({ item }: { item: ReadyStockItem }) {
   const [sharing, setSharing] = useState(false);
   const [tab, setTab] = useState<"history" | "sales" | "lots">("history");
   const [shown, setShown] = useState(0);
+  // The bills, for "Bought from" — staff only (clients can't read purchases), asked for here.
+  const purchasesReady = useLoaded(canManage ? ["purchases"] : []);
 
   const office = officeOf(item);
   const cost = isAdmin ? stockCostOf(db, item) : undefined;
   const profit = cost != null ? item.price - cost : undefined;
   const nameOfUser = (id?: string) => (id ? db.users.find(u => u.id === id)?.name : undefined);
+  // Bought ready-made from a supplier (BuyMaterialForm): the bill it came on — staff only,
+  // never on the piece itself (every client can read Ready Stock). A lot split off at
+  // another office came on its parent's bill.
+  const boughtOn = canManage
+    ? (purchasesReady ? db.purchases ?? [] : []).find(p => p.material === "readyPiece" && !!p.piece?.readyStockId
+      && (p.piece.readyStockId === item.id || p.piece.readyStockId === item.splitFrom))
+    : undefined;
+  const boughtFrom = boughtOn ? db.suppliers.find(s => s.id === boughtOn.supplierId) : undefined;
 
   // Built from an order whose photos changed since: one tap takes the order's photos again.
   const buildOrder = builtFrom(db, item);
@@ -361,6 +372,12 @@ function PieceBody({ item }: { item: ReadyStockItem }) {
               <Fact label="SKU / Design #">{item.sku ? <span className="font-mono">{item.sku}</span> : <span className="text-muted-foreground/60 font-normal">—</span>}</Fact>
               <Fact label="Product ID"><span className="font-mono">{item.id.slice(-6).toUpperCase()}</span></Fact>
               {canManage && <Fact label="Added">{fmtDate(item.createdAt)}{nameOfUser(item.createdBy) ? <span className="font-normal text-muted-foreground"> · {nameOfUser(item.createdBy)}</span> : null}</Fact>}
+              {boughtOn && (
+                <Fact label="Bought from" className="col-span-2">
+                  {boughtFrom && can("suppliers") ? <Link to={`/suppliers/${boughtFrom.id}`} className="hover:text-primary hover:underline">{boughtFrom.name}</Link> : (boughtFrom?.name ?? "A supplier")}
+                  <span className="font-normal text-muted-foreground">{boughtOn.invoiceNumber ? ` · bill ${boughtOn.invoiceNumber}` : ""} · {fmtDate(boughtOn.createdAt)}</span>
+                </Fact>
+              )}
             </dl>
           </div>
 

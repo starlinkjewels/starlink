@@ -3,7 +3,7 @@ import { activeMaterials, materialDef } from "@/lib/materials";
 import { COPY_PARAM, copyBlocker, copyFields, copyHref, copyKind } from "@/lib/orderCopy";
 import { chargeDrafts } from "@/components/OtherCharges";
 import { useCan } from "@/hooks/useCan";
-import { buildLooseTimelineSteps } from "@/lib/db";
+import { buildLooseTimelineSteps, type ReadyStockItem } from "@/lib/db";
 import { looseStages } from "@/lib/stages";
 import { ProductionPlan, type OrderKind } from "@/components/order/ProductionPlan";
 import type { PlannedBuy } from "@/components/BuyMaterialForm";
@@ -377,6 +377,23 @@ function NewOrderForm() {
         i.id.slice(-6).toLowerCase().includes(stockQuery))
     : readyStockItems;
 
+  // More pieces for the same client, in one go (staff): each becomes its own order
+  // — its own tracking, return and profit — placed together, to be dispatched and
+  // invoiced together. The first piece is the form's own (above); these follow it.
+  type ExtraPiece = { itemId: string; qty: string; price: string };
+  const [extraPieces, setExtraPieces] = useState<ExtraPiece[]>([]);
+  const [extraSearch, setExtraSearch] = useState("");
+  const mayBulk = !isClient && !forReadyStock;
+  const extraTotal = extraPieces.reduce((t, x) => t + (Number(x.price) || 0) * (Math.round(Number(x.qty)) || 0), 0);
+  const addExtraPiece = (itemId: string) => {
+    const item = db.readyStock.find(i => i.id === itemId);
+    if (!item) return;
+    // Already on the order: one more of it rather than a second line.
+    if (itemId === f.readyStockItemId) { toast.info(`${item.name} is already the first piece — change its quantity.`); return; }
+    if (extraPieces.some(x => x.itemId === itemId)) { toast.info(`${item.name} is already on the list — change its quantity.`); return; }
+    setExtraPieces(prev => [...prev, { itemId, qty: "1", price: String(item.price) }]);
+  };
+
   const selectReadyStock = (itemId: string) => {
     if (!itemId) { setF(prev => ({ ...prev, readyStockItemId: "", materialSourcing: "later" })); return; }
     const item = db.readyStock.find(i => i.id === itemId);
@@ -404,12 +421,21 @@ function NewOrderForm() {
   // "Sell" on a piece's own page opens here with ?readyStock=<id>: that piece
   // starts chosen, once it is loaded and on sale for this order's company.
   const [params] = useSearchParams();
+  // Several ticked on Ready Stock (?readyStock=a,b,c): the first is the form's piece, the rest follow it.
   const preStock = useRef(params.get("readyStock"));
   useEffect(() => {
-    const id = preStock.current;
+    const ids = (preStock.current ?? "").split(",").filter(Boolean);
+    const id = ids[0];
     if (!id || kind !== "readyStock" || forReadyStock || f.readyStockItemId || !readyStockItems.some(i => i.id === id)) return;
     preStock.current = null;
     selectReadyStock(id);
+    if (mayBulk) {
+      const rest = ids.slice(1).filter((x, i, a) => x !== id && a.indexOf(x) === i)
+        .map(x => readyStockItems.find(i => i.id === x)).filter((i): i is ReadyStockItem => !!i);
+      if (rest.length) setExtraPieces(rest.map(i => ({ itemId: i.id, qty: "1", price: String(i.price) })));
+      const missing = ids.length - 1 - rest.length;
+      if (missing > 0) toast.info(`${missing} of the pieces ticked ${missing === 1 ? "isn't" : "aren't"} in stock for this company — left out.`);
+    }
   });
 
   // Duplicate (?copy=<order id>): the order's details filled in, once it is loaded —
@@ -561,6 +587,19 @@ function NewOrderForm() {
       if (!Number.isInteger(Number(f.quantity))) { toast.error("Quantity is a whole number of pieces."); return; }
       if (Number(f.quantity) > item.quantity) { toast.error(`Only ${item.quantity} of this piece ${item.quantity === 1 ? "is" : "are"} in stock.`); return; }
     }
+    // The other pieces sold with it: each still on the shelf of this company, a
+    // whole number it holds, a price — and each piece once.
+    const extras = isReadyStockSale && mayBulk ? extraPieces : [];
+    for (const x of extras) {
+      const it = db.readyStock.find(i => i.id === x.itemId);
+      const name = it?.name ?? "A piece";
+      if (!it || it.quantity <= 0 || !readyStockItems.some(i => i.id === x.itemId)) { toast.error(`${name} is no longer in stock for this company — take it off the list.`); return; }
+      if (x.itemId === f.readyStockItemId || extras.filter(y => y.itemId === x.itemId).length > 1) { toast.error(`${name} is on the list twice — change its quantity instead.`); return; }
+      const q = Number(x.qty);
+      if (!Number.isInteger(q) || q < 1) { toast.error(`${name}: the quantity is a whole number of pieces.`); return; }
+      if (q > it.quantity) { toast.error(`${name}: only ${it.quantity} in stock.`); return; }
+      if (x.price.trim() === "" || !(Number(x.price) >= 0)) { toast.error(`${name}: enter its price.`); return; }
+    }
     const designOn = mayPlan && kind === "piece" && !isDiamondOnly && !!designerPick.designerId;
     if (designOn && designerPick.rate.trim() && !(Number(designerPick.rate) >= 0)) { toast.error("CAD designer: enter a charge of 0 or more."); return; }
     // The advance's locker and amount were checked with the other missing fields (fixesNow).
@@ -586,6 +625,11 @@ function NewOrderForm() {
     // it from the in-memory list (max + 1) let two people creating an order at
     // the same moment mint the SAME number — a real duplicate in production.
     const reservedNumber = await reserveOrderNumber(loadDb().orders);
+    // One number for each other piece, claimed the same way.
+    const extraNumbers: string[] = [];
+    for (let i = 0; i < extras.length; i++) extraNumbers.push(await reserveOrderNumber(loadDb().orders));
+    const extraOrders: { id: string; orderNumber: string }[] = [];
+    const extraShort: string[] = [];
     // Minted before the write so the advance, its deposit and its receipt can
     // all be tied together afterwards.
     const advanceId = uid("adv_");
@@ -703,6 +747,60 @@ function NewOrderForm() {
         }
       }
 
+      // The other pieces: an order each, for the same client, company and person,
+      // ready to go — the piece's own details and price; the shipping, advance,
+      // gift card, certificate and charges stay on the first order.
+      extras.forEach((x, n) => {
+        const item = d.readyStock.find(i => i.id === x.itemId);
+        // Sold elsewhere since it was checked: left out, and said so after the save.
+        if (!item || item.quantity <= 0) { extraShort.push(`${item?.name ?? "A piece"} (sold out)`); return; }
+        const want = Math.round(Number(x.qty)) || 1;
+        const q = Math.min(item.quantity, want);
+        if (q < want) extraShort.push(`${item.name} (only ${q} of ${want})`);
+        const ex: Order = {
+          id: uid("o_"),
+          orderNumber: extraNumbers[n],
+          clientId,
+          ...coField(orderCompany),
+          assignedEmployeeId,
+          contactPerson: user!.name,
+          jewelleryType: item.jewelleryType,
+          metal: item.metal,
+          // The piece's own stones (none → none, never the first piece's type).
+          diamondType: (Number(item.diamondWeight) > 0 ? item.diamondType || "" : "") as Order["diamondType"],
+          quantity: q,
+          diamondWeight: item.diamondWeight || 0,
+          metalWeight: 0,
+          estimatedGrossWeight: item.grossWeight || undefined,
+          estimatedNetWeight: item.netWeight || undefined,
+          images: [],
+          designNumber: item.sku || undefined,
+          productColor: metalColour(item.metal),
+          productKarats: item.productKarats || undefined,
+          certificate: false,
+          certificateFee: 0,
+          materialSourcing: "readyStock",
+          readyStockItemId: item.id,
+          readyStockQty: q,
+          instructions: f.instructions,
+          expectedDelivery: order.expectedDelivery,
+          priority: order.priority,
+          status: "Ready",
+          amount: Math.round((Number(x.price) || 0) * q * 100) / 100,
+          shippingCharge: 0,
+          advances: [],
+          timeline: buildReadyStockSaleTimelineSteps().map((st, i) => ({
+            step: st, status: i === 0 ? "done" : "pending" as "done" | "pending", date: i === 0 ? order.createdAt : undefined,
+          })),
+          createdAt: order.createdAt,
+        };
+        d.orders.unshift(ex);
+        const had = item.quantity;
+        item.quantity = had - q;
+        logItem(item, { ...whoOf(user), at: ex.createdAt, kind: "sold", text: `Sold on ${ex.orderNumber} · ${had} → ${item.quantity}`, ref: { orderId: ex.id } });
+        extraOrders.push({ id: ex.id, orderNumber: ex.orderNumber });
+      });
+
       if (order.assignedFactoryId) {
         const assignedFactory = d.factories.find(fac => fac.id === order.assignedFactoryId);
         if (!order.manufacturingLog) order.manufacturingLog = [];
@@ -739,7 +837,7 @@ function NewOrderForm() {
         const cl = d.clients.find(c => c.id === clientId);
         notifyUsers(d, adminIds(d), {
           title: "New Order",
-          body: `${order.orderNumber} · ${forReadyStock ? "Ready Stock (in-house)" : cl?.companyName ?? "client"} · by ${user!.name}`,
+          body: `${[order.orderNumber, ...extraOrders.map(x => x.orderNumber)].join(", ")} · ${forReadyStock ? "Ready Stock (in-house)" : cl?.companyName ?? "client"} · by ${user!.name}`,
           type: "order",
         }, user!.id);
       }
@@ -752,8 +850,8 @@ function NewOrderForm() {
         const clientUser = d.users.find(u => u.clientId === clientId && u.role === "client");
         if (clientUser) d.notifications.unshift({
           id: uid("n_"), userId: clientUser.id,
-          title: "Order Created",
-          body: `${order.orderNumber} has been created for your account.`,
+          title: extraOrders.length ? "Orders Created" : "Order Created",
+          body: extraOrders.length ? `${[order.orderNumber, ...extraOrders.map(x => x.orderNumber)].join(", ")} have been created for your account.` : `${order.orderNumber} has been created for your account.`,
           type: "order", read: false, createdAt: new Date().toISOString(),
         });
 
@@ -833,6 +931,14 @@ function NewOrderForm() {
       if (failed.length) toast.error(`Order placed — but not recorded: ${failed.join("; ")}. Add it from the order's Manufacturing.`);
       else toast.success(`Order placed — ${[picks.length && `${picks.length} from stock`, plannedBuy && `bill from ${plannedBuy.supplierName}`].filter(Boolean).join(", ")} recorded`);
       nav(`/orders/${orderId}`);
+      return;
+    }
+    if (extraOrders.length) {
+      const placed = loadDb().orders.find(o => o.id === orderId);
+      const nums = [placed?.orderNumber, ...extraOrders.map(x => x.orderNumber)].filter(Boolean) as string[];
+      toast.success(`${nums.length} orders placed — ${nums.join(", ")}. Tick them to dispatch and invoice together.`, { duration: 8000 });
+      if (extraShort.length) toast.warning(`Sold elsewhere while this was being saved: ${extraShort.join(", ")} — not on these orders.`, { duration: 12000 });
+      nav(`/orders?fresh=1&q=${encodeURIComponent(nums.join(", "))}`);
       return;
     }
     toast.success("Order submitted successfully");
@@ -1079,6 +1185,67 @@ function NewOrderForm() {
                   <Textarea value={f.instructions} onChange={e => set("instructions", e.target.value)} rows={2} className="rounded-xl resize-none" placeholder="Delivery notes, engraving, etc." />
                 </Field>
               </div>
+            </div>
+          )}
+
+          {/* More pieces for the same client — each its own order, placed together. */}
+          {selectedStockItem && mayBulk && (
+            <div className="mt-4 pt-4 border-t border-border/60 space-y-2.5">
+              <div className="flex items-center justify-between gap-2">
+                <p className="text-sm font-semibold text-brand-dark">More pieces{extraPieces.length ? ` · ${extraPieces.length}` : ""}</p>
+                {extraPieces.length > 0 && <p className="text-xs text-muted-foreground tabular-nums">${extraTotal.toLocaleString("en-US", { maximumFractionDigits: 2 })}</p>}
+              </div>
+              {extraPieces.map((x, n) => {
+                const it = db.readyStock.find(i => i.id === x.itemId);
+                const upd = (p: Partial<ExtraPiece>) => setExtraPieces(prev => prev.map((y, k) => (k === n ? { ...y, ...p } : y)));
+                return (
+                  <div key={x.itemId} className="flex items-center gap-2.5 p-2.5 rounded-xl bg-secondary/50">
+                    {it?.images?.[0]
+                      ? <img src={it.images[0]} alt={it.name} className="h-10 w-10 rounded-lg object-cover shrink-0" />
+                      : <div className="h-10 w-10 rounded-lg bg-secondary grid place-items-center shrink-0"><Gem className="h-4 w-4 text-muted-foreground/40" /></div>}
+                    <div className="min-w-0 flex-1">
+                      <p className="text-sm font-medium truncate">{it?.name ?? "Not in stock any more"}</p>
+                      <p className="text-[11px] text-muted-foreground truncate">{it ? `${it.quantity} in stock${it.sku ? ` · #${it.sku}` : ""}${officeOf(it) ? ` · ${officeLabel(officeOf(it))}` : ""}` : ""}</p>
+                    </div>
+                    <Input type="number" min={1} max={it?.quantity} value={x.qty} onChange={e => upd({ qty: e.target.value })} aria-label={`Quantity of ${it?.name ?? "piece"}`} className="h-9 w-16 rounded-lg text-center tabular-nums" />
+                    <div className="relative w-24 shrink-0">
+                      <span className="absolute left-2 top-1/2 -translate-y-1/2 text-xs text-muted-foreground">$</span>
+                      <Input type="number" min={0} step="0.01" value={x.price} onChange={e => upd({ price: e.target.value })} aria-label={`Price of ${it?.name ?? "piece"}, each`} className="h-9 rounded-lg pl-5 tabular-nums" />
+                    </div>
+                    <button type="button" onClick={() => setExtraPieces(prev => prev.filter((_, k) => k !== n))} aria-label={`Remove ${it?.name ?? "piece"}`}
+                      className="h-9 w-9 grid place-items-center rounded-lg text-muted-foreground hover:bg-destructive/10 hover:text-destructive shrink-0">
+                      <X className="h-4 w-4" />
+                    </button>
+                  </div>
+                );
+              })}
+              <Select value="" onValueChange={v => { addExtraPiece(v); setExtraSearch(""); }}>
+                <SelectTrigger className="rounded-xl h-10 border-dashed text-primary" aria-label="Add another piece"><span className="inline-flex items-center gap-1.5"><Plus className="h-4 w-4" />Add another piece</span></SelectTrigger>
+                <SelectContent>
+                  <div className="sticky top-0 z-10 bg-popover p-2 border-b border-border/60">
+                    <div className="relative">
+                      <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
+                      <Input value={extraSearch} onChange={e => setExtraSearch(e.target.value)} onKeyDown={e => e.stopPropagation()} onPointerDown={e => e.stopPropagation()}
+                        placeholder="Search name, ID, SKU, type…" className="h-9 pl-8 rounded-lg text-sm" />
+                    </div>
+                  </div>
+                  {readyStockItems
+                    .filter(i => i.id !== f.readyStockItemId && !extraPieces.some(x => x.itemId === i.id))
+                    .filter(i => { const t = extraSearch.trim().toLowerCase(); return !t || [i.name, i.sku ?? "", i.jewelleryType, i.metal, officeLabel(officeOf(i)), i.id.slice(-6)].some(v => v.toLowerCase().includes(t)); })
+                    .map(item => (
+                      <SelectItem key={item.id} value={item.id}>
+                        <span className="font-mono text-[10px] text-muted-foreground mr-1.5">{item.id.slice(-6).toUpperCase()}</span>
+                        {item.name} — ${item.price.toLocaleString()} ({item.quantity} avail{item.sku ? ` · #${item.sku}` : ""}{officeOf(item) ? ` · ${officeLabel(officeOf(item))}` : ""})
+                      </SelectItem>
+                    ))}
+                </SelectContent>
+              </Select>
+              {extraPieces.length > 0 && (
+                <p className="text-[11px] text-muted-foreground">
+                  Each piece becomes its own order for the same client — ready to dispatch, then one invoice for them all.
+                  Shipping, advance, gift card and charges stay on the first order. All pieces: ${(Number(f.orderValue) + extraTotal).toLocaleString("en-US", { maximumFractionDigits: 2 })}.
+                </p>
+              )}
             </div>
           )}
         </SectionCard>

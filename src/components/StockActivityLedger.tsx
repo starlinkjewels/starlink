@@ -27,7 +27,7 @@ import type { MoreAction } from "@/components/MoreMenu";
 import { downloadCsv, downloadLedgerPdf } from "@/lib/ledgerExport";
 import { inDateRange, ledgerTable, rangeLabel } from "@/components/LedgerFilters";
 import { confirmBox } from "@/lib/confirm";
-import { materialName, materialUnit, purchaseQty, materialDefs, diamondSpec, purchaseUnitInr, type MaterialUnit } from "@/lib/materials";
+import { materialName, materialUnit, purchaseQty, materialDefs, diamondSpec, purchaseUnitInr, isReadyPiece, readyPieceSpec, type MaterialUnit } from "@/lib/materials";
 import { companyOf, companiesOf, hasCompanies } from "@/lib/companies";
 import { oneLine } from "@/components/MoneyEntryEditor";
 import { bagNoOf, bagNoOfPurchase } from "@/lib/diamondBags";
@@ -220,6 +220,7 @@ export function StockActivityLedger({ onTotals }: { onTotals?: (t: LedgerTotals)
       : `${materialName(db.settings, p.material)} ${p.other?.grade && p.other.grade !== "—" ? p.other.grade : ""}`.trim();
     const detail = p.material === "diamond"
       ? [bagNoOfPurchase(db, p), diamondSpec(p.diamond, p.diamond?.kind === "certified" ? packetOf(p.id) : undefined)].filter(Boolean).join(" · ") || undefined
+      : isReadyPiece(p) ? readyPieceSpec(p.piece) || undefined
       : p.material !== "gold" && p.other?.pieces ? `${p.other.pieces} pcs` : undefined;
     const rate = purchaseUnitInr(p);
     const qty = purchaseQty(p);
@@ -546,7 +547,9 @@ export function StockActivityLedger({ onTotals }: { onTotals?: (t: LedgerTotals)
               options: ["Purchase", "Opening stock", "Assigned to factory", "Diamond sold", "Sold to supplier"].map(k => ({ value: k, label: k })) },
             { label: "Material", value: material, onChange: setMaterial, multi: true,
               options: [{ value: "gold", label: "Gold" }, { value: "diamond", label: "Diamond" },
-                ...materialDefs(db.settings).map(m => ({ value: m.id, label: m.name }))] },
+                ...materialDefs(db.settings).map(m => ({ value: m.id, label: m.name })),
+                // Bought ready-made: the bills show here too, though the pieces went to Ready Stock.
+                ...((db.purchases ?? []).some(p => isReadyPiece(p)) ? [{ value: "readyPiece", label: "Ready jewellery" }] : [])] },
             { label: "Bill", value: billFilter, onChange: setBillFilter, allLabel: "Any bill",
               options: [{ value: "none", label: "No bill number" }] },
             ...(hasCompanies(db.settings) ? [{ label: "Company", value: company, onChange: setCompany, multi: true,

@@ -6,7 +6,7 @@ import { PageHeader } from "@/components/PageHeader";
 import { SectionTitle } from "@/components/SectionTitle";
 import { AddNewItem, useAddNew } from "@/components/create/QuickCreate";
 import { bagNoOfPurchase } from "@/lib/diamondBags";
-import { diamondSpec, isOtherMaterial, materialName, materialUnit, purchaseQty, purchaseText } from "@/lib/materials";
+import { diamondSpec, isOtherMaterial, isReadyPiece, materialName, materialUnit, purchaseQty, purchaseText, readyPieceSpec } from "@/lib/materials";
 import { useState } from "react";
 import { useParams, Link, useNavigate } from "react-router-dom";
 import { collectionLoaded, updateDb, uid, fmtDate, todayLocal, stampFor, KARAT_PURITY, hasOpeningBalance, openingDebitAmt, openingCreditAmt, type Purchase, type LedgerDir, type Supplier } from "@/lib/db";
@@ -24,6 +24,8 @@ import { listEntries, type MoneyEntry } from "@/lib/moneyEntries";
 import { MoneyEntryEditor, confirmDeleteEntry, entryRowActions } from "@/components/MoneyEntryEditor";
 import { SupplierEditDialog } from "@/components/SupplierEditDialog";
 import { SellToSupplierSheet } from "@/components/SellToSupplierSheet";
+import { SupplierGoldPanel, type GoldMode } from "@/components/SupplierGoldPanel";
+import { fmtG, goldAccountReady, hasGoldAccount, owedIn, supplierGoldOwed } from "@/lib/supplierGold";
 import { saleLineCost, saleUndoBlocker, saleUndoImpact, undoSupplierSale } from "@/lib/supplierSales";
 import { saleBrokerageWePay } from "@/lib/brokers";
 import { supplierDeleteGuard, deleteRefusal } from "@/lib/partyGuards";
@@ -43,7 +45,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import {
   Plus, CreditCard, Wallet, ShoppingBag, BookOpen,
   Download, Trash2, Pencil, ArrowDownCircle, ExternalLink, Lock,
-  Handshake, Tag,
+  Handshake, Tag, Coins, ArrowUpCircle, FileText,
 } from "lucide-react";
 import { toast } from "sonner";
 import { downloadCsv, downloadLedgerPdf, fmtInrPlain } from "@/lib/ledgerExport";
@@ -52,7 +54,7 @@ import { DataTable, CellMain, CellTag, CellAmount, CellDate, type DataColumn } f
 import { ExportDialog, inDateRange } from "@/components/ExportDialog";
 import { confirmBox } from "@/lib/confirm";
 import { fmtCcy } from "@/lib/currency";
-import { companyById, hasCompanies } from "@/lib/companies";
+import { companiesOf, companyById, hasCompanies } from "@/lib/companies";
 import { filled, lockerLabel, noteText, recorded, userName, type Detail } from "@/components/rowDetails";
 
 
@@ -195,6 +197,15 @@ function SupplierHistoryPageBody() {
   // ── Receive money FROM the supplier (refund / return credit) ──
   const [showReceiveForm, setShowReceiveForm] = useState(false);
   const [showSell, setShowSell] = useState(false);
+  // Gold taken from them on loan (lib/supplierGold.ts) — its forms open from the ⋯.
+  const [goldMode, setGoldMode] = useState<GoldMode>(null);
+  // Worked out from the stock lines and the bills (both loaded for this page, pageData.ts).
+  const goldReady = goldAccountReady();
+  const goldOwed = supplierGoldOwed(db, supplier).owed;
+  // A return or a bill comes off one company's gold owed: offered while any company owes some.
+  const goldOwedSomewhere = companiesOf(db.settings).some(c => owedIn(db, supplier, c.id) > 0.0005);
+  const NO_GOLD_OWED = !goldReady ? "Still loading" : "No gold is owed to them";
+  const goldShown = goldReady && hasGoldAccount(db, supplier);
   const [rcvAmount, setRcvAmount] = useState("");
   const [rcvLockerId, setRcvLockerId] = useState("");
   const [rcvNote, setRcvNote] = useState("");
@@ -359,6 +370,8 @@ function SupplierHistoryPageBody() {
    * and the supplier's own bill number for gold.
    */
   const purchaseDesc = (p: Purchase) => {
+    // A bill made from gold taken on loan: its fine grams, billed at a rate.
+    if (p.fromGoldLoan) return "Gold taken on loan, billed · 24K fine";
     if (p.material === "gold") {
       const g = p.gold;
       const bits = [
@@ -369,6 +382,8 @@ function SupplierHistoryPageBody() {
       ].filter(Boolean);
       return bits.join(" · ");
     }
+    // Ready-made jewellery: the piece as bought (it went onto Ready Stock, lib/materials.ts).
+    if (isReadyPiece(p)) return ["Ready jewellery", readyPieceSpec(p.piece)].filter(Boolean).join(" · ");
     if (isOtherMaterial(p.material)) {
       return [materialName(db.settings, p.material), p.other?.grade && p.other.grade !== "—" ? p.other.grade : undefined,
         p.other?.pieces ? `${p.other.pieces} pcs` : undefined].filter(Boolean).join(" · ");
@@ -502,6 +517,8 @@ function SupplierHistoryPageBody() {
         { label: "Closing Balance", value: fmtInrPlain(account.net) },
         { label: "Overpaid", value: fmtInrPlain(account.overpaid) },
         ...(account.sold > 0 ? [{ label: "Sold to them", value: fmtInrPlain(account.sold) }] : []),
+        // The gold account is apart from the money: its own download below.
+        ...(goldShown ? [{ label: "Gold owed (fine)", value: fmtG(goldOwed) }] : []),
       ],
       // Landscape: a jeweller’s ledger line is the weight, the supplier’s invoice
       // number, the order it was for, the rate and the amount. None of that fits a
@@ -537,6 +554,46 @@ function SupplierHistoryPageBody() {
         fmtInrPlain(account.totalPaid + account.received).replace("Rs. ", ""),
         fmtInrPlain(account.net).replace("Rs. ", "")],
       filename: `Supplier-${supplier.name.replace(/\s+/g, "_")}`,
+    });
+  };
+
+  // Their gold account on its own page — in grams, oldest first, as a statement is read.
+  const exportGoldPdf = (from: Date | null, to: Date | null) => {
+    const gold = supplierGoldOwed(db, supplier);
+    const n = (g: number) => (g ? (Math.round(g * 1000) / 1000).toLocaleString("en-IN", { maximumFractionDigits: 3 }) : "");
+    downloadLedgerPdf({
+      title: "Supplier Gold Account",
+      subjectLines: [
+        `Supplier: ${supplier.name}`,
+        "In grams. Owed in fine (24K) gold.",
+        `Report Generated: ${new Date().toLocaleDateString("en-IN", { month: "long", day: "numeric", year: "numeric" })}`,
+      ],
+      summary: [
+        { label: "Gold owed (fine)", value: fmtG(gold.owed) },
+        { label: "Taken on loan (fine)", value: fmtG(gold.taken) },
+        { label: "Returned (fine)", value: fmtG(gold.returned) },
+        ...(gold.billed > 0 ? [{ label: "Turned into bills (fine)", value: fmtG(gold.billed) }] : []),
+        ...(gold.opening > 0 ? [{ label: "Opening (fine)", value: fmtG(gold.opening) }] : []),
+      ],
+      landscape: true,
+      columns: [
+        { header: "Date", x: 14 },
+        { header: "Particulars", x: 40 },
+        { header: "In (g)", x: 168 },
+        { header: "Purity", x: 192 },
+        { header: "Out (g)", x: 220 },
+        { header: "Fine (g)", x: 246 },
+        { header: "Balance", x: 270 },
+      ],
+      align: ["left", "left", "right", "left", "right", "right", "right"],
+      rows: gold.rows.filter(r => r.kind === "opening" || inDateRange(r.at, from, to)).map(r => [
+        r.kind === "opening" ? "Opening" : fmtDate(r.at),
+        // The PDF's font has no rupee sign.
+        fit(r.particulars.replace(/₹/g, "Rs. "), 120),
+        n(r.inGrams), r.kind === "opening" ? "" : r.purity, n(r.outGrams),
+        `${r.fine > 0 ? "+" : "-"}${n(Math.abs(r.fine))}`, n(r.balance) || "0",
+      ]),
+      filename: `Supplier-${supplier.name.replace(/\s+/g, "_")}-Gold`,
     });
   };
 
@@ -580,6 +637,7 @@ function SupplierHistoryPageBody() {
     const cur = p.currency === "USD" ? "USD" : "INR";
     if (p.material === "gold") return p.gold?.ratePerGram ? `${fmtCcy(p.gold.ratePerGram, cur)}/g` : "";
     if (p.material === "diamond") return p.diamond?.ratePerCarat ? `${fmtCcy(p.diamond.ratePerCarat, cur)}/ct` : "";
+    if (isReadyPiece(p)) return p.piece?.ratePerPiece ? `${fmtCcy(p.piece.ratePerPiece, cur)}/pc` : "";
     return p.other?.ratePerUnit ? `${fmtCcy(p.other.ratePerUnit, cur)}/${materialUnit(db.settings, p.material)}` : "";
   };
   const purchaseDetails = (p: Purchase): Detail[] => {
@@ -661,6 +719,13 @@ function SupplierHistoryPageBody() {
           // Set once, when moving from an old system — so out of sight until then.
           { label: "Opening balance", icon: BookOpen, hint: "Not set — what was owed before the app", onSelect: openOpening, show: isAdmin && !openingSet },
           { label: "Sell to them", icon: Tag, hint: "Diamonds, gold, a piece — off what we owe", onSelect: () => setShowSell(true), show: isAdmin },
+          // Gold borrowed from them: into our stock, owed back in gold (or turned into a bill).
+          { label: "Gold on loan", icon: Coins, hint: "Take their gold into our stock", onSelect: () => setGoldMode("take"), show: isAdmin },
+          { label: "Return gold", icon: ArrowUpCircle, onSelect: () => setGoldMode("return"), show: isAdmin, disabled: !goldReady || !goldOwedSomewhere,
+            hint: goldReady && goldOwedSomewhere ? `Out of stock · ${Math.round(goldOwed * 1000) / 1000} g fine owed` : NO_GOLD_OWED },
+          { label: "Gold to a bill", icon: FileText, onSelect: () => setGoldMode("bill"), show: isAdmin, disabled: !goldReady || !goldOwedSomewhere,
+            hint: goldReady && goldOwedSomewhere ? "Pay for gold owed in money, at a rate" : NO_GOLD_OWED },
+          { label: "Opening gold", icon: BookOpen, hint: "Gold owed before the app", onSelect: () => setGoldMode("opening"), show: isAdmin && !((supplier.openingGoldFine ?? 0) > 0) },
           { label: "Receive money", icon: ArrowDownCircle, hint: "A refund from them", onSelect: () => setShowReceiveForm(true), show: user?.role === "admin" },
           { label: "Export statement", icon: Download, hint: "PDF or Excel", onSelect: () => setShowExport(true), show: mayExport },
           { label: "Edit details", icon: Pencil, onSelect: () => setEditingSupplier(supplier), disabled: !isAdmin,
@@ -705,6 +770,7 @@ function SupplierHistoryPageBody() {
       <ExportDialog open={showExport} onClose={() => setShowExport(false)} title={`${supplier.name} ledger`} options={[
         { label: "Account Statement — PDF", sublabel: "Purchases, payments & receipts", kind: "pdf", run: exportPdf },
         { label: "Account Statement — Excel", sublabel: "Purchases, payments & receipts", kind: "excel", run: exportCsv },
+        ...(goldShown ? [{ label: "Gold Account — PDF", sublabel: "Gold on loan, returned and billed, in grams", kind: "pdf" as const, run: exportGoldPdf }] : []),
       ]} />
 
       {/* Opening balance (migration) — admin only; once set it stays in view,
@@ -752,6 +818,9 @@ function SupplierHistoryPageBody() {
         rowActions={statementActions}
         onExport={() => setShowExport(true)}
       />
+
+      {/* Their gold account — gold taken on loan, given back or billed, in grams. Shown once there is any. */}
+      <SupplierGoldPanel supplier={supplier} isAdmin={isAdmin} mode={goldMode} onMode={setGoldMode} />
 
 
       {/* Purchase history */}

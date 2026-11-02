@@ -39,6 +39,8 @@ export function EditPurchaseDialog({ purchase, onClose, onSave, lockQuantity, lo
   const addNew = useAddNew();
   const isGold = purchase?.material === "gold";
   const isCertified = purchase?.material === "diamond" && purchase?.diamond?.kind === "certified";
+  // Ready jewellery: its pieces and rate are fixed (purchaseVoid.ts) — the bill no., note, supplier and broker are not.
+  const isReady = purchase?.material === "readyPiece";
   const unit = materialUnit(db.settings, purchase?.material);
 
   const [supplierId, setSupplierId] = useState("");
@@ -93,8 +95,9 @@ export function EditPurchaseDialog({ purchase, onClose, onSave, lockQuantity, lo
   // exactly as it does when the purchase is first recorded.
   const disc = Math.min(Math.max(Number(discount) || 0, -100), 100);
   const net = applyDiscountPct(q * r, disc);
-  const totalUsd = isUsd ? Math.round(net * 100) / 100 : undefined;
-  const totalInr = isUsd ? Math.round(net * fx) : Math.round(net);
+  // A ready piece's amount never changes here — kept exactly as billed (with any rounding on it).
+  const totalUsd = isReady ? purchase.totalUsd : isUsd ? Math.round(net * 100) / 100 : undefined;
+  const totalInr = isReady ? purchase.totalInr : isUsd ? Math.round(net * fx) : Math.round(net);
 
   const loose = purchase.material === "diamond" && !isCertified;
   const forOrder = purchase.purpose === "order" || !!purchase.orderId;
@@ -149,16 +152,16 @@ export function EditPurchaseDialog({ purchase, onClose, onSave, lockQuantity, lo
 
         <div className="grid grid-cols-2 lg:grid-cols-3 gap-3 mt-1">
           <div>
-            <Label className="text-xs">{isGold ? "Weight (g)" : purchase.material === "diamond" ? "Carat (ct)" : `${materialName(db.settings, purchase.material)} (${UNIT_LABEL[unit]})`}</Label>
+            <Label className="text-xs">{isGold ? "Weight (g)" : purchase.material === "diamond" ? "Carat (ct)" : isReady ? "Pieces" : `${materialName(db.settings, purchase.material)} (${UNIT_LABEL[unit]})`}</Label>
             <Input type="number" min={0} step="0.001" value={qty} onChange={e => setQty(e.target.value)} disabled={lockQuantity} className="rounded-xl h-10 mt-1 disabled:opacity-60" />
           </div>
           <div>
             <Label className="text-xs">Rate / {unit} ({purchase.currency})</Label>
-            <Input type="number" min={0} step="0.01" value={rate} onChange={e => setRate(e.target.value)} className="rounded-xl h-10 mt-1" />
+            <Input type="number" min={0} step="0.01" value={rate} onChange={e => setRate(e.target.value)} disabled={isReady} className="rounded-xl h-10 mt-1 disabled:opacity-60" />
           </div>
           <div>
             <Label className="text-xs">Discount %</Label>
-            <Input type="number" min={-100} max={100} step="0.01" value={discount} onChange={e => setDiscount(e.target.value)} className="rounded-xl h-10 mt-1" placeholder="0 — minus adds" />
+            <Input type="number" min={-100} max={100} step="0.01" value={discount} onChange={e => setDiscount(e.target.value)} disabled={isReady} className="rounded-xl h-10 mt-1 disabled:opacity-60" placeholder="0 — minus adds" />
           </div>
         </div>
         {lockQuantity && lockNote && (
@@ -230,7 +233,10 @@ export function EditPurchaseDialog({ purchase, onClose, onSave, lockQuantity, lo
           </div>
         </div>
 
-        <BillBrokerFields value={brokerage} onChange={setBrokerage} billTotalInr={totalInr} />
+        {/* Ready jewellery: the broker is part of the piece's cost — fixed with the bill. */}
+        {isReady
+          ? (purchase.brokerId ? <p className="text-xs text-muted-foreground">The broker is part of what the piece cost — to change it, void the purchase and enter it again.</p> : null)
+          : <BillBrokerFields value={brokerage} onChange={setBrokerage} billTotalInr={totalInr} />}
 
         <div className="rounded-xl bg-secondary/60 border border-border/60 px-4 py-3 text-sm flex items-center justify-between">
           <span className="text-muted-foreground">New total</span>

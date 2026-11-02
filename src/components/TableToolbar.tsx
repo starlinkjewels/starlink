@@ -23,7 +23,17 @@ import { selJoin, selList, selOn, selText } from "@/lib/filterSel";
  *  lib/filterSel.ts (selHas), and stays one string. */
 export type TableFilter =
   | { kind: "date"; label?: string; from: string; to: string; onChange: (from: string, to: string) => void }
-  | { kind: "select"; label: string; value: string; onChange: (v: string) => void; options: { value: string; label: string }[]; allLabel?: string; multi?: boolean };
+  | { kind: "select"; label: string; value: string; onChange: (v: string) => void; options: { value: string; label: string; count?: number }[]; allLabel?: string; multi?: boolean }
+  /** From – to, e.g. a price: either end may be left open ("" = no limit). */
+  | { kind: "range"; label: string; min: string; max: string; onChange: (min: string, max: string) => void; prefix?: string };
+
+/** "$100 – $500", "From $100", "Up to $500". */
+export function rangeText(f: { min: string; max: string; prefix?: string }): string {
+  const p = f.prefix ?? "";
+  const n = (v: string) => `${p}${Number(v).toLocaleString("en-US")}`;
+  if (f.min && f.max) return `${n(f.min)} – ${n(f.max)}`;
+  return f.min ? `From ${n(f.min)}` : f.max ? `Up to ${n(f.max)}` : "Any";
+}
 
 /** One way to download what the table shows. */
 export interface TableExport { label: string; icon?: LucideIcon; hint?: string; onSelect: () => void }
@@ -60,7 +70,7 @@ export function dateRangeText(from: string, to: string): string {
   return from ? `From ${short(from)}` : `Up to ${short(to)}`;
 }
 
-const isOn = (f: TableFilter) => (f.kind === "date" ? !!(f.from || f.to) : f.multi ? selOn(f.value) : !!f.value);
+const isOn = (f: TableFilter) => (f.kind === "date" ? !!(f.from || f.to) : f.kind === "range" ? !!(f.min || f.max) : f.multi ? selOn(f.value) : !!f.value);
 
 /** How many filters are narrowing the rows. */
 export const activeFilterCount = (filters: TableFilter[]) => filters.filter(isOn).length;
@@ -120,6 +130,27 @@ function FilterFields({ filters }: { filters: TableFilter[] }) {
             </section>
           );
         }
+        if (f.kind === "range") {
+          const box = "w-full h-10 rounded-xl border px-2.5 text-sm text-brand-dark bg-white focus:outline-none focus:ring-2 focus:ring-primary/30";
+          const on = !!(f.min || f.max);
+          return (
+            <section key={`r${i}`} className="space-y-2.5">
+              <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">{f.label}</p>
+              <div className="grid grid-cols-2 gap-2">
+                <label className="text-[11px] text-muted-foreground space-y-1">
+                  <span>From{f.prefix ? ` (${f.prefix.trim()})` : ""}</span>
+                  <input type="number" min={0} inputMode="decimal" value={f.min} placeholder="Any" aria-label={`${f.label} from`}
+                    onChange={e => f.onChange(e.target.value, f.max)} className={`${box} ${on ? "border-primary/50" : "border-border"}`} />
+                </label>
+                <label className="text-[11px] text-muted-foreground space-y-1">
+                  <span>To{f.prefix ? ` (${f.prefix.trim()})` : ""}</span>
+                  <input type="number" min={0} inputMode="decimal" value={f.max} placeholder="Any" aria-label={`${f.label} to`}
+                    onChange={e => f.onChange(f.min, e.target.value)} className={`${box} ${on ? "border-primary/50" : "border-border"}`} />
+                </label>
+              </div>
+            </section>
+          );
+        }
         const all = f.allLabel ?? "All";
         if (f.multi) {
           return (
@@ -163,13 +194,14 @@ function MultiPick({ f, all }: { f: Extract<TableFilter, { kind: "select" }>; al
   const shown = needle ? f.options.filter(o => o.label.toLowerCase().includes(needle)) : f.options;
   // A choice no longer in the list (a client since removed) stays visible, so it can be unticked.
   const stale = chosen.filter(v => !f.options.some(o => o.value === v));
-  const row = (v: string, label: string, ticked: boolean, onClick: () => void) => (
+  const row = (v: string, label: string, ticked: boolean, onClick: () => void, count?: number) => (
     <button key={v} type="button" role="menuitemcheckbox" aria-checked={ticked} onClick={onClick}
       className={`w-full flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-left text-sm hover:bg-secondary/70 ${ticked ? "text-primary font-medium" : "text-brand-dark"}`}>
       <span className={`h-4 w-4 shrink-0 grid place-items-center rounded border ${ticked ? "bg-primary border-primary text-primary-foreground" : "border-border bg-white"}`}>
         {ticked && <Check className="h-3 w-3" />}
       </span>
       <span className="min-w-0 flex-1 truncate">{label}</span>
+      {count != null && count > 0 && <span className="text-xs text-muted-foreground tabular-nums">{count}</span>}
     </button>
   );
   return (
@@ -191,7 +223,7 @@ function MultiPick({ f, all }: { f: Extract<TableFilter, { kind: "select" }>; al
         <div role="menu" className="min-h-0 overflow-y-auto">
           {!needle && row("__all", all, !on, () => f.onChange(""))}
           {stale.map(v => row(v, v, true, () => toggle(v)))}
-          {shown.map(o => row(o.value, o.label, chosen.includes(o.value), () => toggle(o.value)))}
+          {shown.map(o => row(o.value, o.label, chosen.includes(o.value), () => toggle(o.value), o.count))}
           {needle && !shown.length && <p className="px-2.5 py-2 text-xs text-muted-foreground">Nothing matches.</p>}
         </div>
       </PopoverContent>
@@ -265,6 +297,8 @@ export function FilterChips({ filters, onClear }: { filters: TableFilter[]; onCl
       {on.map((f, i) => {
         const [name, value, clear] = f.kind === "date"
           ? [f.label ?? "Date", dateRangeText(f.from, f.to), () => f.onChange("", "")]
+          : f.kind === "range"
+          ? [f.label, rangeText(f), () => f.onChange("", "")]
           : [f.label, f.multi ? selText(f.value, v => f.options.find(o => o.value === v)?.label) : f.options.find(o => o.value === f.value)?.label ?? f.value, () => f.onChange("")];
         return (
           <span key={i} className="inline-flex items-center gap-1 h-7 pl-2.5 pr-1 rounded-lg bg-primary/[0.07] text-xs text-brand-dark ring-1 ring-primary/15">
