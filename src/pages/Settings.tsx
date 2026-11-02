@@ -1,6 +1,8 @@
 import { CurrencyRatesSettings } from "@/components/CurrencyRatesSettings";
 import { InfoTip, SectionTitle } from "@/components/SectionTitle";
-import { PageHeader, TabBar } from "@/components/PageHeader";
+import { PageHeader } from "@/components/PageHeader";
+import { SettingsSideNav, SettingsPhoneList, UnsavedBar, type SettingsSection } from "@/components/settings/SettingsNav";
+import { useNavigate } from "react-router-dom";
 import { materialUnit } from "@/lib/materials";
 import { TableStyleSettings } from "@/components/TableStyleSettings";
 import { AppearanceSettings } from "@/components/AppearanceSettings";
@@ -16,7 +18,7 @@ import { TimelineSettings } from "@/components/TimelineSettings";
 import { OrderLayoutSettings } from "@/components/OrderLayoutSettings";
 import { VideoFixSettings } from "@/components/VideoFixSettings";
 import { PhotoPreviewSettings } from "@/components/PhotoPreviewSettings";
-import { ListOrdered, LayoutList, Film, Images } from "lucide-react";
+import { ListOrdered, LayoutList, Film, Images, ChevronLeft } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useUrlState } from "@/hooks/useUrlState";
 import { SettingsSearch } from "@/components/settings-search/SettingsSearch";
@@ -124,7 +126,19 @@ export function SettingsPage() {
   const [fxEdit, setFxEdit] = useState<{ from: string; rate: string } | null>(null);
   // The open section is kept in the address (?tab=pricing), so a reload, Back
   // from another page, or a link sent to someone opens the same section.
-  const [active, setActive] = useUrlState("tab", "company");
+  const [active, setActiveUrl] = useUrlState("tab", "");
+  // A phone or tablet: Settings opens on its list; a section opens over it, and
+  // Back (the arrow, or the phone's own) returns to the list.
+  const compact = useCompact();
+  const nav = useNavigate();
+  const openedFromList = useRef(false);
+  const setActive = (id: string) => {
+    if (compact && id && !active) { openedFromList.current = true; nav({ search: `?tab=${encodeURIComponent(id)}` }); return; }
+    setActiveUrl(id);
+  };
+  const backToList = () => {
+    if (openedFromList.current) { openedFromList.current = false; nav(-1); } else setActiveUrl("");
+  };
   // What is typed in the search over the section list.
   const [findQ, setFindQ] = useState("");
 
@@ -172,12 +186,31 @@ export function SettingsPage() {
     toast.success(msg);
   };
   const save = () => persistSettings("Settings saved");
+  // What on this page is changed and not saved yet: a setting that differs from
+  // what the page opened with AND from what is saved now (categories and a
+  // restore save at once — those are not "unsaved").
+  const dirtyKeys = (() => {
+    const now = db.settings as unknown as Record<string, unknown>;
+    const was = baseline.current as unknown as Record<string, unknown>;
+    const live = loadDb().settings as unknown as Record<string, unknown>;
+    const out: string[] = [];
+    for (const k of new Set([...Object.keys(now), ...Object.keys(was)])) {
+      const v = JSON.stringify(now[k]);
+      if (v !== JSON.stringify(was[k]) && v !== JSON.stringify(live[k])) out.push(k);
+    }
+    return out;
+  })();
+  const [savingAll, setSavingAll] = useState(false);
+  const saveAll = () => { setSavingAll(true); try { persistSettings("Settings saved"); } finally { setSavingAll(false); } };
+  const discardAll = () => setDb(prev => {
+    const next = { ...(prev.settings as unknown as Record<string, unknown>) };
+    const was = baseline.current as unknown as Record<string, unknown>;
+    for (const k of dirtyKeys) { if (was[k] === undefined) delete next[k]; else next[k] = was[k]; }
+    return { ...prev, settings: next as unknown as typeof prev.settings };
+  });
   // New dated exchange rate being typed in (admin, Pricing).
   const [fxFrom, setFxFrom] = useState(todayLocal());
   const [fxRate, setFxRate] = useState("");
-  const saveRates = () => persistSettings("Pricing rates updated");
-  const saveInvoice = () => persistSettings("Invoice settings saved");
-  const saveBand = () => persistSettings("Label & barcode settings saved");
 
   // Expense categories — instant add/remove (like toggling a locker/factory
   // active, not a staged "Save" form). Removing one is non-destructive: any
@@ -773,98 +806,93 @@ export function SettingsPage() {
     </div>
   );
 
-  const sections = [
-    { id: "company", label: "Company", icon: Building2, show: true },
-    { id: "invoice", label: "Invoice & Bill", icon: FileText, show: true },
-    { id: "pricing", label: "Pricing Rates", icon: DollarSign, show: canEditRates },
-    { id: "labels", label: "Labels & Barcode", icon: Tag, show: canEditRates },
-    { id: "expenses", label: "Categories", icon: SlidersHorizontal, show: isAdmin },
-    { id: "lists", label: "Dropdown lists", icon: ListChecks, show: isAdmin },
-    { id: "timeline", label: "Production Timeline", icon: ListOrdered, show: isAdmin },
-    { id: "orderpage", label: "Order page", icon: LayoutList, show: isAdmin },
-    { id: "videos", label: "Videos", icon: Film, show: isAdmin },
-    { id: "previews", label: "Photo previews", icon: Images, show: isAdmin },
-    { id: "companies", label: "Companies", icon: Building2, show: isAdmin },
-    { id: "materials", label: "Materials", icon: Layers, show: isAdmin },
-    { id: "brand", label: "Brand Studio", icon: Sparkles, show: isAdmin },
-    { id: "appearance", label: "Appearance", icon: Palette, show: isAdmin },
-    { id: "tables", label: "Table Style", icon: Table2, show: isAdmin },
-    { id: "logins", label: "Secure Logins", icon: ShieldCheck, show: isAdmin && pendingLogins.length > 0 },
-    { id: "data", label: "Data & Backup", icon: Database, show: true },
-  ].filter((s) => s.show);
-  const activeId = sections.some((s) => s.id === active) ? active : sections[0]?.id;
+  // Every section under its heading, with a line about it (lib: components/settings/SettingsNav).
+  const sections: SettingsSection[] = ([
+    { id: "company", label: "Company", icon: Building2, show: true, group: "Business", hint: "Your business name" },
+    { id: "companies", label: "Companies", icon: Building2, show: isAdmin, group: "Business", hint: "Each company's stock, bills and numbering" },
+    { id: "brand", label: "Brand Studio", icon: Sparkles, show: isAdmin, group: "Business", hint: "Logo, name and colour across the app" },
+    { id: "invoice", label: "Invoice & Bill", icon: FileText, show: true, group: "Sales & billing", hint: "Address, bank details and stamp on every bill" },
+    { id: "pricing", label: "Pricing Rates", icon: DollarSign, show: canEditRates, group: "Sales & billing", hint: "Rates, exchange rates, shipping" },
+    { id: "labels", label: "Labels & Barcode", icon: Tag, show: canEditRates, group: "Sales & billing", hint: "Jewellery tags and printed labels" },
+    { id: "timeline", label: "Production Timeline", icon: ListOrdered, show: isAdmin, group: "Production", hint: "The stages of each kind of order" },
+    { id: "orderpage", label: "Order page", icon: LayoutList, show: isAdmin, group: "Production", hint: "The order page's sections, in your order" },
+    { id: "materials", label: "Materials", icon: Layers, show: isAdmin, group: "Production", hint: "Metals, stones and findings you use" },
+    { id: "expenses", label: "Categories", icon: SlidersHorizontal, show: isAdmin, group: "Lists & categories", hint: "Expense and account categories" },
+    { id: "lists", label: "Dropdown lists", icon: ListChecks, show: isAdmin, group: "Lists & categories", hint: "The choices in every dropdown" },
+    { id: "videos", label: "Videos", icon: Film, show: isAdmin, group: "Photos & videos", hint: "Make every video play on every device" },
+    { id: "previews", label: "Photo previews", icon: Images, show: isAdmin, group: "Photos & videos", hint: "Small copies so shared links open fast" },
+    { id: "appearance", label: "Appearance", icon: Palette, show: isAdmin, group: "Look & feel", hint: "Theme, density and the app's look" },
+    { id: "tables", label: "Table Style", icon: Table2, show: isAdmin, group: "Look & feel", hint: "How every table looks" },
+    { id: "logins", label: "Secure Logins", icon: ShieldCheck, show: isAdmin && pendingLogins.length > 0, group: "Security & data", hint: "Logins still to move to secure sign-in" },
+    { id: "data", label: "Data & Backup", icon: Database, show: true, group: "Security & data", hint: "Backup, restore and checks" },
+  ] as (SettingsSection & { show: boolean })[]).filter((x) => x.show);
+  const activeId = sections.some((x) => x.id === active) ? active : compact ? undefined : sections[0]?.id;
+  const activeSection = sections.find(x => x.id === activeId);
 
   return (
     <div className="space-y-5">
-      <PageHeader title="Settings" />
-
-      <div className="grid lg:grid-cols-[230px_1fr] gap-5 items-start">
-        {/* Section nav — the shared tab bar on a phone or tablet, a rail on a
-            laptop — with the search above it. While something is typed, what
-            it finds takes the list's place, on either. */}
-        <div className="min-w-0 lg:sticky lg:top-4 space-y-2">
-        <SettingsSearch value={findQ} onChange={setFindQ} sections={sections} onPick={setActive} />
-        {!findQ.trim() && (<>
-        <TabBar className="lg:hidden min-w-0" label="Settings" value={activeId ?? ""} onChange={setActive}
-          tabs={sections.map(s => ({ key: s.id, label: s.label, icon: s.icon }))} />
-        <nav className="max-lg:hidden flex flex-col gap-1">
-          {sections.map((s) => {
-            const Icon = s.icon;
-            const on = activeId === s.id;
-            return (
-              <button
-                key={s.id}
-                onClick={() => setActive(s.id)}
-                className={`group flex items-center gap-2.5 rounded-xl px-3.5 py-2.5 text-sm font-medium whitespace-nowrap shrink-0 transition-colors ${
-                  on ? "bg-primary text-white shadow-sm" : "text-muted-foreground hover:bg-secondary/70 hover:text-foreground"
-                }`}
-              >
-                <Icon className={`h-4 w-4 shrink-0 ${on ? "text-white" : "text-primary/70 group-hover:text-primary"}`} />
-                <span>{s.label}</span>
-              </button>
-            );
-          })}
-        </nav>
-        </>)}
+      {/* A phone with a section open: its name and the way back, instead of the page title. */}
+      {compact && activeSection ? (
+        <div className="flex items-center gap-2 -mt-1">
+          <button type="button" onClick={backToList} aria-label="Back to Settings"
+            className="h-9 w-9 -ml-2 grid place-items-center rounded-xl text-primary hover:bg-primary/10"><ChevronLeft className="h-5 w-5" /></button>
+          <div className="min-w-0">
+            <p className="text-[11px] text-muted-foreground leading-none">Settings · {activeSection.group}</p>
+            <h1 className="font-display text-xl text-brand-dark truncate leading-tight mt-0.5">{activeSection.label}</h1>
+          </div>
         </div>
+      ) : (
+        <PageHeader title="Settings" />
+      )}
+
+      <div className="grid lg:grid-cols-[248px_minmax(0,1fr)] gap-6 items-start">
+        {/* The sections — a side list under their headings on a laptop, a grouped
+            list on a phone (until one is opened) — with the search above. While
+            something is typed, what it finds takes the list's place. */}
+        {(!compact || !activeSection) && (
+        <div className="min-w-0 lg:sticky lg:top-4 space-y-3">
+          <SettingsSearch value={findQ} onChange={setFindQ} sections={sections} onPick={setActive} />
+          {!findQ.trim() && (compact
+            ? <SettingsPhoneList sections={sections} onPick={setActive} />
+            : <SettingsSideNav sections={sections} active={activeId} onPick={setActive} />)}
+        </div>
+        )}
 
         {/* Active section content */}
-        <div className="min-w-0 space-y-4">
+        {activeSection && (
+        <div className="min-w-0 space-y-4 max-w-4xl settings-body">
+          {!compact && <p className="text-xs text-muted-foreground -mb-1">Settings <span className="mx-1 text-muted-foreground/50">/</span> {activeSection.group} <span className="mx-1 text-muted-foreground/50">/</span> <span className="text-foreground font-medium">{activeSection.label}</span></p>}
+
 
       {/* Company */}
       {activeId === "company" && (
       <div className="card-luxe p-6 space-y-4">
-        <SectionTitle title="Company" />
-        <div>
-          <Label className="text-xs">Company Name</Label>
+        <SectionTitle icon={Building2} title="Company" sub="How your business is named across the app" />
+        <div className="grid md:grid-cols-[minmax(0,1fr)_minmax(0,1.4fr)] gap-x-6 gap-y-2 items-start border-t border-border/60 pt-4">
+          <div>
+            <Label htmlFor="set-company-name" className="text-sm font-medium text-brand-dark">Company name</Label>
+            <p className="text-xs text-muted-foreground mt-0.5">On screens and emails; bills use Brand Studio and Invoice &amp; Bill</p>
+          </div>
           <Input
+            id="set-company-name"
             value={db.settings.companyName}
             onChange={(e) =>
               setDb({ ...db, settings: { ...db.settings, companyName: e.target.value } })
             }
-            className="rounded-xl mt-1"
+            className="rounded-xl"
           />
         </div>
         {/* There was a "Push notifications" switch here. Nothing in the app or
             the server ever read settings.notifications, so turning it off
             stopped nothing — push is each person's own choice on their device.
             The switch is gone; the saved value is left as it is. */}
-        <AsyncButton onClick={save} className="btn-hero rounded-xl h-10 px-5 flex w-fit ml-auto">
-          Save Settings
-        </AsyncButton>
       </div>
       )}
 
       {/* ── Invoice Branding ── */}
       {activeId === "invoice" && (
       <div className="card-luxe p-6 space-y-5">
-        <div className="flex items-center gap-2">
-          <FileText className="h-4 w-4 text-primary" />
-          <div>
-            <h3 className="font-semibold">Invoice / Bill Settings</h3>
-            <p className="text-xs text-muted-foreground mt-0.5">On every printed bill</p>
-          </div>
-        </div>
+        <SectionTitle icon={FileText} title="Invoice & Bill" sub="Address, contacts, bank details and stamp — on every printed bill" />
 
         {/* Address fields */}
         <div className="grid grid-cols-1 gap-3">
@@ -958,7 +986,7 @@ export function SettingsPage() {
           <p className="text-xs font-medium text-muted-foreground mb-3 uppercase tracking-wide">
             Bill Images
           </p>
-          <div className="flex items-start justify-around gap-4 flex-wrap">
+          <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-5 gap-4 justify-items-center">
             <ImgSlot
               label="Bank Details 1 (e.g. USA Wire)"
               icon={Landmark}
@@ -997,18 +1025,14 @@ export function SettingsPage() {
           </div>
         </div>
 
-        <AsyncButton onClick={saveInvoice} className="btn-hero rounded-xl h-10 px-5 flex w-fit ml-auto">
-          Save Invoice Settings
-        </AsyncButton>
       </div>
       )}
 
       {/* Pricing Rates — admin & employee only */}
       {activeId === "pricing" && (
         <div className="card-luxe p-6 space-y-5">
-          <div>
-            <h3 className="font-semibold flex items-center gap-1.5">Order Value Pricing Rates<InfoTip text="Estimates a new order's value. Staff can change it per order." /></h3>
-          </div>
+          <SectionTitle icon={DollarSign} title="Pricing rates" sub="Rates that price a new order — staff can change it per order" />
+
 
           <div className="grid grid-cols-2 gap-4">
             {/* Diamond rate */}
@@ -1343,21 +1367,13 @@ export function SettingsPage() {
             </span>
           </div>
 
-          <AsyncButton onClick={saveRates} className="btn-hero rounded-xl h-10 px-5 flex w-fit ml-auto">
-            Save Pricing Rates
-          </AsyncButton>
         </div>
       )}
 
       {/* Labels & Barcode — admin & employee only */}
       {activeId === "labels" && (
         <div className="card-luxe p-6 space-y-5">
-          <div className="flex items-center gap-2">
-            <Tag className="h-4 w-4 text-primary" />
-            <div>
-              <h3 className="font-semibold">Labels &amp; Barcode</h3>
-            </div>
-          </div>
+          <SectionTitle icon={Tag} title="Labels & Barcode" sub="What jewellery tags and printed labels show" />
 
           {/* Barcode band (jewellery tag) toggles */}
           <div className="grid sm:grid-cols-2 gap-3">
@@ -1478,9 +1494,6 @@ export function SettingsPage() {
             );
           })()}
 
-          <AsyncButton onClick={saveBand} className="btn-hero rounded-xl h-10 px-5 flex w-fit ml-auto">
-            Save Label &amp; Barcode Settings
-          </AsyncButton>
         </div>
       )}
 
@@ -1506,12 +1519,7 @@ export function SettingsPage() {
       {/* Expense Categories — admin only */}
       {activeId === "expenses" && (
         <div className="card-luxe p-6 space-y-4">
-          <div className="flex items-center gap-2">
-            <Tag className="h-4 w-4 text-primary" />
-            <div>
-              <h3 className="font-semibold">Expense Categories</h3>
-            </div>
-          </div>
+          <SectionTitle icon={Tag} title="Expense categories" sub="Chosen on every expense" />
           <div className="flex flex-wrap gap-2">
             {expenseCategories.map(c => catChip("expense", c, removeCategory))}
           </div>
@@ -1529,14 +1537,7 @@ export function SettingsPage() {
       {/* Account Categories — admin only */}
       {activeId === "expenses" && (
         <div className="card-luxe p-6 space-y-4">
-          <div className="flex items-center gap-2">
-            <Landmark className="h-4 w-4 text-primary" />
-            <div>
-              <h3 className="font-semibold">Account Categories</h3>
-              <p className="text-xs text-muted-foreground mt-0.5">Required on every account entry
-              </p>
-            </div>
-          </div>
+          <SectionTitle icon={Landmark} title="Account categories" sub="Required on every account entry" />
           <div className="flex flex-wrap gap-2">
             {lockerCategories.map(c => catChip("account", c, removeLockerCategory))}
           </div>
@@ -1561,10 +1562,7 @@ export function SettingsPage() {
       {/* Sync logins — admin only, shown only when there is something to migrate */}
       {activeId === "logins" && (
         <div className="card-luxe p-6 space-y-3">
-          <div className="flex items-center gap-2">
-            <ShieldCheck className="h-4 w-4 text-primary" />
-            <h3 className="font-semibold">Secure Logins</h3>
-          </div>
+          <SectionTitle icon={ShieldCheck} title="Secure logins" sub="Accounts still to move to secure sign-in" />
           <p className="text-xs text-muted-foreground">
             {pendingLogins.length} employee/client account
             {pendingLogins.length !== 1 ? "s were" : " was"} created before Firebase Authentication.
@@ -1584,7 +1582,7 @@ export function SettingsPage() {
       {activeId === "data" && isAdmin && <DataSizePanel />}
       {activeId === "data" && (
       <div className="card-luxe p-6 space-y-3">
-        <h3 className="font-semibold">Data</h3>
+        <SectionTitle icon={Database} title="Data & Backup" sub="A copy of everything, and putting one back" />
         <div className="grid grid-cols-2 gap-2">
           <Button variant="outline" onClick={exp} className="rounded-xl">
             Backup
@@ -2119,7 +2117,24 @@ export function SettingsPage() {
       )}
 
         </div>
+        )}
       </div>
+
+      {/* One bar for what is changed here and not saved yet (the sections' own Save buttons are gone). */}
+      <UnsavedBar count={dirtyKeys.length} saving={savingAll} onSave={saveAll} onDiscard={discardAll} />
     </div>
   );
+}
+
+/** A phone or tablet (under the laptop's 1024px): Settings is a list, a section opens over it. */
+function useCompact(): boolean {
+  const q = "(max-width: 1023px)";
+  const [on, setOn] = useState(() => typeof window !== "undefined" && window.matchMedia(q).matches);
+  useEffect(() => {
+    const m = window.matchMedia(q);
+    const f = () => setOn(m.matches);
+    m.addEventListener("change", f);
+    return () => m.removeEventListener("change", f);
+  }, []);
+  return on;
 }
