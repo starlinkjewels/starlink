@@ -44,7 +44,8 @@ function attached(db: DB, o: Order): string[] {
   if (o.returns?.length) out.push("a return");
   if (o.melted) out.push("it was melted");
   if (o.readyStockItemId || o.materialSourcing === "readyStock") out.push("it sold a Ready Stock piece — cancel it instead, so the piece goes back on the shelf");
-  if (o.readyStockCreatedId) out.push("its piece is in Ready Stock");
+  if (o.stockSale) out.push("it sold its own piece from Ready Stock — use Undo sale first");
+  else if (o.readyStockCreatedId) out.push("its piece is in Ready Stock");
   return out;
 }
 
@@ -59,6 +60,7 @@ function deleteStopper(db: DB, o: Order): string | undefined {
   if (orderIsDispatched(o) || o.returns?.length) return "It was dispatched — use “Return pieces” instead (credit note, piece back into Ready Stock)";
   const inv = findInvoiceForOrder(db.invoices ?? [], o.id);
   if (inv) return `It is on invoice ${inv.number} — delete or credit the invoice first`;
+  if (o.stockSale) return "Sold from Ready Stock on this order — use “Undo sale” to put the piece back on the shelf first";
   if (o.readyStockCreatedId) return "Its piece is in Ready Stock — set that piece's quantity to 0 first";
   if (o.giftCardId || o.giftCardRedeemed) return "A gift card was used on it — take the gift card off the order first";
   if (o.cashbackIssued) return "Cashback was already given for it";
@@ -178,6 +180,8 @@ export async function restoreOrderFlow(orderId: string, user: Pick<User, "role">
   if (user.role !== "admin") { toast.error("Only the admin can restore an order"); return false; }
   const o = loadDb().orders.find(x => x.id === orderId);
   if (!o?.deletedAt) { toast.error("That order is not deleted"); return false; }
+  // Moved onto its build order (lib/stockSale.ts): that order is the sale now.
+  if (o.mergedInto) { const to = loadDb().orders.find(x => x.id === o.mergedInto); toast.error(`It was moved onto ${to?.orderNumber ?? "its build order"} — that order is the sale now`); return false; }
   if (!(await confirmBox(`Restore order ${o.orderNumber}?\n\nIt comes back as a cancelled order. To carry on with it, re-open it on its page.`))) return false;
   updateDbAs({ summary: `Restored deleted order ${o.orderNumber}` }, d => {
     const live = d.orders.find(x => x.id === orderId);

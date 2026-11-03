@@ -1,3 +1,4 @@
+import { isShelfSale } from "./stockSale";
 import {
   stampFor, uid, isDiamondOnlyOrder, isProductionStep, statusFromTimeline,
   orderTotal, balanceDue, cashbackPercentFor, issueGiftCard, fmtMoney, worksOnOrder,
@@ -165,7 +166,7 @@ export function applyDispatch(
   if (idx + 1 < o.timeline.length && o.timeline[idx + 1].status === "pending") {
     o.timeline[idx + 1].status = "in_progress";
   }
-  o.status = statusFromTimeline(o.timeline, o.forReadyStock, o.materialSourcing === "readyStock");
+  o.status = statusFromTimeline(o.timeline, o.forReadyStock, isShelfSale(o));
 
   const clientUser = d.users.find(u => u.clientId === o.clientId);
   if (clientUser) {
@@ -268,7 +269,7 @@ export function applyDelivery(
     department: by.department,
     remarks: "Completed",
   };
-  o.status = statusFromTimeline(o.timeline, o.forReadyStock, o.materialSourcing === "readyStock");
+  o.status = statusFromTimeline(o.timeline, o.forReadyStock, isShelfSale(o));
 
   // Cashback: on delivery of a real (client) order, a % gift card towards the
   // next one — gift-card clients only, and once per order. The card is dated

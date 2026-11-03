@@ -140,6 +140,10 @@ export interface OrderLike {
   otherCharges?: { amountUsd?: number }[]; giftCardRedeemed?: number; returns?: { creditUsd?: number }[];
   advances?: { amount?: number; createdAt?: string }[];
   assignedFactoryId?: string; assignedEmployeeId?: string; materialSourcing?: string; forReadyStock?: boolean;
+  /** A build of ours sold on its own order (lib/stockSale.ts); mergedFrom: a separate sale moved onto it. */
+  stockSale?: { soldAt?: string; mergedFrom?: string };
+  /** A separate sale order closed because it was moved onto its build. */
+  mergedInto?: string;
   materialIssuanceIds?: string[]; companyId?: string; createdAt?: string; deletedAt?: string;
   courierName?: string; trackingNumber?: string; dispatchedAt?: string; deliveredAt?: string;
   stoneSpec?: { stone?: string; shape?: string; mm?: string; size?: string; color?: string; clarity?: string };
@@ -210,7 +214,7 @@ export function stageSince(o: OrderLike): string | undefined {
 }
 export const isLooseOrder = (o: OrderLike) => o.metal === "None (Diamond only)";
 export const orderKind = (o: OrderLike): "piece" | "loose" | "readyStock" =>
-  o.materialSourcing === "readyStock" && !o.forReadyStock ? "readyStock" : isLooseOrder(o) ? "loose" : "piece";
+  (o.materialSourcing === "readyStock" || !!o.stockSale) && !o.forReadyStock ? "readyStock" : isLooseOrder(o) ? "loose" : "piece";
 
 const DAY = 864e5;
 export const daysBetween = (a: string, b: string) => (+new Date(b) - +new Date(a)) / DAY;
@@ -237,6 +241,15 @@ export function orderEvents(before: OrderLike | null, after: OrderLike | null): 
     add("order.placed", "placed");
     // A sale straight from stock can arrive already past some stages.
     for (const t of after.timeline || []) if (real(t) && t.step !== "Order Submitted") add("order.stageDone", `done:${t.step}:${when(t)}`, t.step);
+    return out;
+  }
+  // A repair, not news: a sale moved onto its build (Settings-free, Orders → Review), and the
+  // separate order it closed — no "thank you", "on its way" or "cancelled" mail for either.
+  if (after.mergedInto || (after.stockSale?.mergedFrom && !before.stockSale?.mergedFrom)) return [];
+  // One of our builds sold to a client on its own order: for the client it is an order just placed —
+  // only that, as a new order is (its advance and its first stages are not news of their own).
+  if (before.forReadyStock && !after.forReadyStock && after.stockSale && !before.stockSale) {
+    add("order.placed", `placed:sold:${after.stockSale.soldAt ?? ""}`);
     return out;
   }
   const wasDone = new Set((before.timeline || []).filter(t => t.status === "done").map(t => t.step));

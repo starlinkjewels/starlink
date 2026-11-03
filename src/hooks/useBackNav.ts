@@ -161,7 +161,10 @@ const store = {
 const VISITS = "sl-visits";
 let lastLocKey: string | null = null;
 let visit = "";
-const idxNow = () => ((typeof window !== "undefined" ? window.history.state : null) as { idx?: number } | null)?.idx ?? 0;
+/** A history position as an index we can use — anything odd (not a whole number, below 0, absurdly large) counts as 0,
+ *  never as a list length the browser refuses ("Invalid array length"). */
+export const safeIdx = (x: unknown): number => (typeof x === "number" && Number.isInteger(x) && x >= 0 && x < 100_000 ? x : 0);
+const idxNow = () => safeIdx(((typeof window !== "undefined" ? window.history.state : null) as { idx?: number } | null)?.idx);
 const mainEl = () => (typeof document !== "undefined" ? document.querySelector<HTMLElement>("main.app-main") : null);
 
 // A part of a page that scrolls on its own — the Orders board's row of stages
@@ -206,7 +209,8 @@ export function syncVisit(locKey: string, navType: string): string {
   if (visit) for (const el of keepers()) saveKeeper(visit, el);
   lastLocKey = locKey;
   const idx = idxNow();
-  const v = store.get<string[]>(VISITS) ?? [];
+  const got = store.get<string[]>(VISITS);
+  const v = Array.isArray(got) ? got : [];
   if (navType === "PUSH" || !v[idx]) {
     v[idx] = Math.random().toString(36).slice(2, 10);
     v.length = idx + 1; // the steps ahead are gone
@@ -357,8 +361,10 @@ export function useScrollMemory(): void {
 
 const TRAIL = "sl-trail";
 /** Note the page at this history position (AppLayout, on every move). */
-export function noteTrail(idx: number, path: string): void {
-  const t = store.get<string[]>(TRAIL) ?? [];
+export function noteTrail(at: number, path: string): void {
+  const idx = safeIdx(at);
+  const got = store.get<string[]>(TRAIL);
+  const t = Array.isArray(got) ? got : [];
   t[idx] = path;
   t.length = idx + 1;
   store.set(TRAIL, t);

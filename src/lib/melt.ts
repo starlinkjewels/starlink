@@ -99,6 +99,7 @@ export function meltPlan(db: DB, o: Order): MeltPlan {
   if (o.melted) plan.blocked = "This piece has already been melted.";
   else if (isDiamondOnlyOrder(o)) plan.blocked = "A diamond-only order has no piece to melt.";
   else if (o.materialSourcing === "readyStock") plan.blocked = "This was sold from Ready Stock — nothing was made for it.";
+  else if (o.stockSale) plan.blocked = "This piece was sold from Ready Stock. Undo the sale (or take it back as a return) first.";
   else if (o.readyStockCreatedId) plan.blocked = "This piece is already in Ready Stock. Take it out of Ready Stock first.";
   else if (o.returns?.length) plan.blocked = "Pieces of this order came back from the client — they belong in Ready Stock, not melted from the order.";
   else if (!fin && !(o.actualNetWeight || o.actualGrossWeight)) plan.blocked = "Record the factory's actual details (Final Approval) first — the melt gives back what the piece really holds.";

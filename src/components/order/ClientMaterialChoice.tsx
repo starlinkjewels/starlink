@@ -92,7 +92,7 @@ export function applyCmDraft(d: DB, orderId: string, v: CmDraft, on: CmOn, who: 
     }
   } catch (err) {
     if (c0) c0.materialLedger = keep.ledger;
-    d.materialIssuances.length = keep.n;
+    if (Number.isInteger(keep.n) && keep.n >= 0 && keep.n <= d.materialIssuances.length) d.materialIssuances.length = keep.n;
     o.materialIssuanceIds = keep.ids;
     throw err;
   }

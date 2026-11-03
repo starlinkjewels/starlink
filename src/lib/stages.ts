@@ -1,3 +1,4 @@
+import { isShelfSale } from "./stockSale";
 import { approveOrderTimeline } from "./pure/pipelines";
 import {
   TIMELINE_STEPS, isDiamondOnlyOrder, isProductionStep, loadDb, statusFromTimeline, uid, worksOnOrder,
@@ -254,7 +255,7 @@ export function applyComplete(
     o.timeline[i] = { ...o.timeline[i], status: "done", date: at, employeeId: by.id, department: by.department, remarks: "Completed" };
   }
   if (last + 1 < o.timeline.length && o.timeline[last + 1].status === "pending") o.timeline[last + 1].status = "in_progress";
-  o.status = statusFromTimeline(o.timeline, o.forReadyStock, o.materialSourcing === "readyStock");
+  o.status = statusFromTimeline(o.timeline, o.forReadyStock, isShelfSale(o));
   const clientUser = d.users.find(u => u.clientId === o.clientId);
   if (clientUser) d.notifications.unshift({
     id: uid("n_"), userId: clientUser.id, title: "Timeline updated",
@@ -271,5 +272,5 @@ export function applyRevert(d: DB, orderId: string, from: number): void {
     o.timeline[i] = { ...o.timeline[i], status: "pending", date: undefined, employeeId: undefined, department: undefined, remarks: undefined };
   }
   o.timeline[from].status = "in_progress";
-  o.status = statusFromTimeline(o.timeline, o.forReadyStock, o.materialSourcing === "readyStock");
+  o.status = statusFromTimeline(o.timeline, o.forReadyStock, isShelfSale(o));
 }

@@ -41,6 +41,7 @@ import { uploadDataUrl } from "@/lib/storage";
 import { imageForUpload } from "@/lib/images";
 import { EngravingField, emptyEngraving, ENGRAVING_MAX } from "@/components/order/EngravingField";
 import { logItem, whoOf } from "@/lib/readyStockHistory";
+import { buildToSell, saleLooks, sellOnBuild } from "@/lib/stockSale";
 import { subscribeStockLevels, type StockLevels } from "@/lib/stock";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -624,10 +625,18 @@ function NewOrderForm() {
     // Claim the order number in the database BEFORE writing the order. Deriving
     // it from the in-memory list (max + 1) let two people creating an order at
     // the same moment mint the SAME number — a real duplicate in production.
-    const reservedNumber = await reserveOrderNumber(loadDb().orders);
-    // One number for each other piece, claimed the same way.
+    // A piece we built ourselves, sold whole: sold on its own build order — same
+    // number, photos and CAD (lib/stockSale.ts) — so no new number is claimed for it.
+    const mainBuildId = isReadyStockSale ? buildToSell(loadDb(), f.readyStockItemId, Math.round(Number(f.quantity)) || 1)?.id : undefined;
+    const extraBuildIds = extras.map(x => buildToSell(loadDb(), x.itemId, Math.round(Number(x.qty)) || 1)?.id);
+    const reservedNumber = mainBuildId ? "" : await reserveOrderNumber(loadDb().orders);
+    // One number for each other piece that needs an order of its own, claimed the same way.
     const extraNumbers: string[] = [];
-    for (let i = 0; i < extras.length; i++) extraNumbers.push(await reserveOrderNumber(loadDb().orders));
+    for (let i = 0; i < extras.length; i++) extraNumbers.push(extraBuildIds[i] ? "" : await reserveOrderNumber(loadDb().orders));
+    // The order the sale ends up on — the new one, or the build it was sold on.
+    let placedId = orderId;
+    // Something changed while this was being saved (a piece sold elsewhere): nothing written.
+    let raced = false;
     const extraOrders: { id: string; orderNumber: string }[] = [];
     const extraShort: string[] = [];
     // Minted before the write so the advance, its deposit and its receipt can
@@ -649,7 +658,9 @@ function NewOrderForm() {
         : isEmployee ? user!.id
         : (f.assignedTo || undefined);
 
-      const order: Order = {
+      // A new sale order shows what it sells (photos, CAD, design) unless pictures were added here.
+      const looks = isReadyStockSale && !mainBuildId ? saleLooks(d, f.readyStockItemId) : null;
+      let order: Order = {
         id: orderId,
         orderNumber: num,
         clientId,
@@ -671,9 +682,11 @@ function NewOrderForm() {
         metalWeight: 0,
         estimatedGrossWeight: Number(f.estimatedGrossWeight) || undefined,
         estimatedNetWeight: Number(f.estimatedNetWeight) || undefined,
-        images: imageUrls,
-        designNumber: f.designNumber || undefined,
-        productSize: f.productSize || undefined,
+        images: imageUrls.length ? imageUrls : looks?.images ?? [],
+        ...(looks ? { cadImage: looks.cadImage, productPhotos: looks.productPhotos, productVideo: looks.productVideo, cad3dmUrl: looks.cad3dmUrl,
+          rhodium: f.rhodium || looks.rhodium, stamping: looks.stamping } : {}),
+        designNumber: f.designNumber || looks?.designNumber || undefined,
+        productSize: f.productSize || looks?.productSize || undefined,
         productColor: f.productColor || undefined,
         productKarats: f.productKarats || undefined,
         deliveryTime: f.deliveryTime || undefined,
@@ -721,7 +734,20 @@ function NewOrderForm() {
         createdAt: new Date().toISOString(),
       };
 
-      d.orders.unshift(order);
+      if (mainBuildId) {
+        // Sold on its own build: the build becomes this order (its number, photos, CAD, costs).
+        const item = d.readyStock.find(x => x.id === f.readyStockItemId);
+        const qty = Math.max(1, Math.round(Number(f.quantity) || 1));
+        const b = item && buildToSell(d, item.id, qty);
+        if (!item || !b || b.id !== mainBuildId || extras.some((x, n) => extraBuildIds[n] && buildToSell(d, x.itemId, Math.round(Number(x.qty)) || 1)?.id !== extraBuildIds[n])) { raced = true; return; }
+        const sold = sellOnBuild(d, b.id, order, item, qty, { ...whoOf(user), at: order.createdAt });
+        if (!sold) { raced = true; return; }
+        order = sold;
+        placedId = sold.id;
+      } else {
+        if (extras.some((x, n) => extraBuildIds[n] && buildToSell(d, x.itemId, Math.round(Number(x.qty)) || 1)?.id !== extraBuildIds[n])) { raced = true; return; }
+        d.orders.unshift(order);
+      }
       // Invoices are no longer auto-created per order — they're generated at
       // dispatch time by selecting orders on the Invoices page.
       // In-house Ready-Stock builds have no client, so skip the marketing notice.
@@ -757,6 +783,7 @@ function NewOrderForm() {
         const want = Math.round(Number(x.qty)) || 1;
         const q = Math.min(item.quantity, want);
         if (q < want) extraShort.push(`${item.name} (only ${q} of ${want})`);
+        const exLooks = extraBuildIds[n] ? null : saleLooks(d, item.id);
         const ex: Order = {
           id: uid("o_"),
           orderNumber: extraNumbers[n],
@@ -773,8 +800,10 @@ function NewOrderForm() {
           metalWeight: 0,
           estimatedGrossWeight: item.grossWeight || undefined,
           estimatedNetWeight: item.netWeight || undefined,
-          images: [],
-          designNumber: item.sku || undefined,
+          images: exLooks?.images ?? [],
+          ...(exLooks ? { cadImage: exLooks.cadImage, productPhotos: exLooks.productPhotos, productVideo: exLooks.productVideo, cad3dmUrl: exLooks.cad3dmUrl,
+            productSize: exLooks.productSize, rhodium: exLooks.rhodium, stamping: exLooks.stamping } : {}),
+          designNumber: exLooks?.designNumber || item.sku || undefined,
           productColor: metalColour(item.metal),
           productKarats: item.productKarats || undefined,
           certificate: false,
@@ -794,6 +823,13 @@ function NewOrderForm() {
           })),
           createdAt: order.createdAt,
         };
+        const exBuild = extraBuildIds[n];
+        if (exBuild && q === want) {
+          // Built by us, sold whole: on its own build order.
+          const sold = sellOnBuild(d, exBuild, ex, item, q, { ...whoOf(user), at: ex.createdAt });
+          if (sold) { extraOrders.push({ id: sold.id, orderNumber: sold.orderNumber }); return; }
+        }
+        if (!ex.orderNumber) { extraShort.push(`${item.name} (changed meanwhile — sell it again)`); return; }
         d.orders.unshift(ex);
         const had = item.quantity;
         item.quantity = had - q;
@@ -801,7 +837,8 @@ function NewOrderForm() {
         extraOrders.push({ id: ex.id, orderNumber: ex.orderNumber });
       });
 
-      if (order.assignedFactoryId) {
+      // (A build sold on itself was given to its factory long ago — nothing new to log.)
+      if (order.assignedFactoryId && !mainBuildId) {
         const assignedFactory = d.factories.find(fac => fac.id === order.assignedFactoryId);
         if (!order.manufacturingLog) order.manufacturingLog = [];
         order.manufacturingLog.push({
@@ -861,11 +898,16 @@ function NewOrderForm() {
         // the money for. "Apply Credit" on their account does it deliberately.
       }
     });
+    if (raced) {
+      setSaving(false);
+      toast.error("A piece on this sale changed while it was being saved (sold or moved elsewhere) — nothing was saved. Check the pieces and submit again.");
+      return;
+    }
 
     // The design, given as the order was placed: the designer is told and emailed.
     if (designOn) {
       try {
-        const r = assignAndTell(orderId, designerPick, { id: user!.id, name: user!.name });
+        const r = assignAndTell(placedId, designerPick, { id: user!.id, name: user!.name });
         if (typeof r === "string") toast.error(`Order placed — but the design wasn't given: ${r}. Give it from the order.`);
       } catch {
         toast.error("Order placed — but the design wasn't given. Give it from the order.");
@@ -894,7 +936,7 @@ function NewOrderForm() {
 
     // The client's own material: received now (or theirs with us), and sent to the factory with the order.
     if (cmRecord) {
-      const placed = loadDb().orders.find(o => o.id === orderId);
+      const placed = loadDb().orders.find(o => o.id === placedId);
       if (placed) {
         let failed = false, unsent = false;
         try {
@@ -908,14 +950,14 @@ function NewOrderForm() {
         }
         if (!(mayPlan && (picks.length || plannedBuy))) {
           if (!failed) toast.success(unsent ? "Order placed — their material is with us; not sent, no factory chosen" : "Order placed — the client's material is on it");
-          nav(`/orders/${orderId}`); return;
+          nav(`/orders/${placedId}`); return;
         }
       }
     }
 
     // The production plan, recorded against the order as saved: stock first, then the bill.
     if (mayPlan && (picks.length || plannedBuy)) {
-      const placed = loadDb().orders.find(o => o.id === orderId);
+      const placed = loadDb().orders.find(o => o.id === placedId);
       const failed: string[] = [];
       if (placed) {
         const co = workCompanyOf(loadDb(), placed);
@@ -930,11 +972,11 @@ function NewOrderForm() {
       }
       if (failed.length) toast.error(`Order placed — but not recorded: ${failed.join("; ")}. Add it from the order's Manufacturing.`);
       else toast.success(`Order placed — ${[picks.length && `${picks.length} from stock`, plannedBuy && `bill from ${plannedBuy.supplierName}`].filter(Boolean).join(", ")} recorded`);
-      nav(`/orders/${orderId}`);
+      nav(`/orders/${placedId}`);
       return;
     }
     if (extraOrders.length) {
-      const placed = loadDb().orders.find(o => o.id === orderId);
+      const placed = loadDb().orders.find(o => o.id === placedId);
       const nums = [placed?.orderNumber, ...extraOrders.map(x => x.orderNumber)].filter(Boolean) as string[];
       toast.success(`${nums.length} orders placed — ${nums.join(", ")}. Tick them to dispatch and invoice together.`, { duration: 8000 });
       if (extraShort.length) toast.warning(`Sold elsewhere while this was being saved: ${extraShort.join(", ")} — not on these orders.`, { duration: 12000 });

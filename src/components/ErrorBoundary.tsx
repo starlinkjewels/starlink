@@ -34,11 +34,24 @@ async function reload() {
   window.location.reload();
 }
 
+/** "/orders/abc · OrderDetail-x1y2.js:14 · in OrderPage" — short enough for a screenshot. */
+function whereText(error: Error, componentStack?: string): string {
+  const frame = (error?.stack ?? "").split(/\r?\n/).map(l => l.trim()).find(l => /^at /.test(l) && /\.(js|tsx?)/.test(l)) ?? "";
+  const file = frame.match(/([\w.-]+\.(?:js|tsx?)(?::\d+)?)/)?.[1] ?? "";
+  const comp = (componentStack ?? "").split(/\r?\n/).map(l => l.trim()).find(l => /^at [A-Z]/.test(l))?.replace(/^at /, "").split(" ")[0] ?? "";
+  return [typeof window !== "undefined" ? window.location.pathname : "", file, comp && `in ${comp}`].filter(Boolean).join(" · ");
+}
+/** Everything about it, for "Copy details". */
+function details(error: Error, componentStack?: string): string {
+  return [String(error?.message ?? error), `Page: ${typeof window !== "undefined" ? window.location.href : ""}`, `When: ${new Date().toISOString()}`,
+    "", "Stack:", error?.stack ?? "", "", "Screen:", componentStack ?? ""].join(String.fromCharCode(10)).slice(0, 8000);
+}
+
 export class ErrorBoundary extends Component<
   { children: ReactNode; resetKey?: string; fullScreen?: boolean },
-  { error: Error | null; reloading: boolean }
+  { error: Error | null; reloading: boolean; where?: string }
 > {
-  state = { error: null as Error | null, reloading: false };
+  state = { error: null as Error | null, reloading: false, where: undefined as string | undefined };
 
   static getDerivedStateFromError(error: Error) {
     return { error };
@@ -49,11 +62,12 @@ export class ErrorBoundary extends Component<
     // before anything changed — draw the screen again once the server has answered.
     if (error?.name === "StaleDataError") { void whenFresh().then(() => this.setState({ error: null, reloading: false })); return; }
     console.error("[app] a screen failed to draw:", error, info.componentStack);
+    this.setState({ where: info.componentStack ?? undefined });
     if (CHUNK_ERROR.test(String(error?.message ?? error)) && reloadOnceForNewBuild()) this.setState({ reloading: true });
   }
 
   componentDidUpdate(prev: { resetKey?: string }) {
-    if (this.state.error && prev.resetKey !== this.props.resetKey) this.setState({ error: null, reloading: false });
+    if (this.state.error && prev.resetKey !== this.props.resetKey) this.setState({ error: null, reloading: false, where: undefined });
   }
 
   render() {
@@ -81,6 +95,12 @@ export class ErrorBoundary extends Component<
             <p className="mt-5 text-[11px] text-muted-foreground/80 break-words font-mono">
               {String(error?.message ?? error).slice(0, 300)}
             </p>
+            {/* Where it broke — the page, and the file it broke in — so a screenshot says exactly what to fix. */}
+            <p className="mt-1 text-[10px] text-muted-foreground/70 break-words font-mono">{whereText(error, this.state.where)}</p>
+            <button type="button" className="mt-2 text-[11px] font-medium text-primary hover:underline"
+              onClick={() => { void navigator.clipboard?.writeText(details(error, this.state.where)).catch(() => undefined); }}>
+              Copy details
+            </button>
           </>
         )}
       </div>

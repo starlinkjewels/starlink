@@ -6,6 +6,7 @@ import { DataTable, CellTag, CellAmount, CellDate, type DataColumn } from "@/com
 import { metalLabel } from "@/lib/metals";
 import { companiesOf, companyIdOfClient, companyOfOrder, hasCompanies } from "@/lib/companies";
 import { PageHeader } from "@/components/PageHeader";
+import { ShelfSaleMerge } from "@/components/ShelfSaleMerge";
 import { ExportMenu, FilterChips, FiltersButton, useNarrow, type TableExport, type TableFilter } from "@/components/TableToolbar";
 import { OrderBoard } from "@/components/OrderBoard";
 import { ProductionInfo } from "@/components/ProductionInfo";
@@ -437,7 +438,7 @@ export function OrdersPage() {
       billed && { label: "Paid", value: fmtMoney(totalAdvance(o)) },
       billed && { label: "Balance due", value: due > 0 ? <span className="font-semibold text-destructive">{fmtMoney(due)}</span> : <span className="font-semibold text-success">Cleared</span> },
       !!fromStock && { label: "From Ready Stock", value: refLink(`/ready-stock/${fromStock.id}`, fromStock.name) },
-      !!built && { label: "In Ready Stock", value: refLink(`/ready-stock/${built.id}`, built.name) },
+      !!built && { label: o.stockSale ? "Sold from Ready Stock" : "In Ready Stock", value: refLink(`/ready-stock/${built.id}`, built.name) },
       isStaff && { label: "Factory bill no.", value: refNo(o.factoryBillNo) },
       isStaff && { label: "Earlier order no.", value: o.previousOrderNumber },
       !!weightProblem && { label: "Check weights", value: <span className="text-destructive">{weightProblem}</span> },
@@ -595,6 +596,8 @@ export function OrdersPage() {
           </Select>
         }
       />
+      {/* Our own built pieces once sold on separate orders — moved onto their builds (admin). */}
+      {isStaff && <ShelfSaleMerge user={user!} />}
 
       {/* ── Production to chase: pieces past the limit, and pieces being made
           without their diamonds. Each opens the list of them. ── */}

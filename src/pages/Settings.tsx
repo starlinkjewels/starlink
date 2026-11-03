@@ -498,11 +498,12 @@ export function SettingsPage() {
   const invoiceGaps = useMemo(() => {
     const nums = mainInvoices
       .map(i => parseInt(i.number, 10))
-      .filter(n => Number.isFinite(n))
+      // A number typed far out of the run (a date, a phone number) is not a gap to fill.
+      .filter(n => Number.isFinite(n) && n > 0 && n < 1_000_000)
       .sort((a, b) => a - b);
     const gaps: number[] = [];
-    for (let want = 1, k2 = 0; k2 < nums.length; k2++, want++) {
-      while (want < nums[k2]) { gaps.push(want); want++; }
+    for (let want = 1, k2 = 0; k2 < nums.length && gaps.length < 5000; k2++, want++) {
+      while (want < nums[k2] && gaps.length < 5000) { gaps.push(want); want++; }
     }
     return gaps;
   }, [liveDb.invoices]);
