@@ -7,6 +7,7 @@ import { metalLabel } from "@/lib/metals";
 import { companiesOf, companyIdOfClient, companyOfOrder, hasCompanies } from "@/lib/companies";
 import { PageHeader } from "@/components/PageHeader";
 import { ShelfSaleMerge } from "@/components/ShelfSaleMerge";
+import { ShopifyTag } from "@/components/ShopifyTag";
 import { ExportMenu, FilterChips, FiltersButton, useNarrow, type TableExport, type TableFilter } from "@/components/TableToolbar";
 import { OrderBoard } from "@/components/OrderBoard";
 import { ProductionInfo } from "@/components/ProductionInfo";
@@ -207,7 +208,9 @@ export function OrdersPage() {
       (o.contactPerson ?? "").toLowerCase().includes(t) ||
       (o.trackingNumber ?? "").toLowerCase().includes(t) ||
       (o.factoryBillNo ?? "").toLowerCase().includes(t) ||
-      (o.previousOrderNumber ?? "").toLowerCase().includes(t)
+      (o.previousOrderNumber ?? "").toLowerCase().includes(t) ||
+      // Brought in from Shopify: found by its Shopify number ("#1001") or the store's name.
+      (!!o.shopify && (`${o.shopify.orderName} shopify ${o.shopify.storeName}`).toLowerCase().includes(t))
     ));
     // A copy: for the admin with no filter, `list` is the store's own array,
     // and sorting it in place reordered every other page's lists too.
@@ -318,8 +321,9 @@ export function OrdersPage() {
               <p className="text-[11px] text-muted-foreground leading-snug truncate max-w-[13rem]">
                 {pieceLine(o)}{isDiamondOnlyOrder(o) ? "" : ` · ${o.quantity} pc${o.quantity !== 1 ? "s" : ""}`}{o.designNumber ? ` · #${o.designNumber}` : ""}
               </p>
-              {(o.melted || jobFinished(o) || !!o.returns?.length) && (
+              {(o.melted || jobFinished(o) || !!o.returns?.length || !!o.shopify) && (
                 <div className="flex flex-wrap gap-1 mt-0.5">
+                  <ShopifyTag o={o} />
                   {o.melted ? <CellTag tone="red">Melted</CellTag> : jobFinished(o) && <CellTag tone="red">Job finish</CellTag>}
                   {!!o.returns?.length && <CellTag tone="amber">{returnTag(o)}</CellTag>}
                 </div>
@@ -716,8 +720,9 @@ export function OrdersPage() {
                   {user!.role !== "client" && (o.forReadyStock
                     ? <p className="text-xs font-medium text-primary truncate mt-1">Ready Stock</p>
                     : client && <p className="text-xs font-semibold text-foreground/70 truncate mt-1">{client.companyName}</p>)}
-                  {(o.melted || jobFinished(o) || !!o.returns?.length) && (
+                  {(o.melted || jobFinished(o) || !!o.returns?.length || !!o.shopify) && (
                     <div className="flex flex-wrap gap-1 mt-1.5">
+                      <ShopifyTag o={o} store />
                       {(o.melted || jobFinished(o)) && <CellTag tone="red">{o.melted ? "Melted" : "Job finish"}</CellTag>}
                       {!!o.returns?.length && <CellTag tone="amber">{returnTag(o)}</CellTag>}
                     </div>

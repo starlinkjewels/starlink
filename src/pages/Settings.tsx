@@ -1,3 +1,4 @@
+import { ShopifySettings } from "@/components/settings/ShopifySettings";
 import { CurrencyRatesSettings } from "@/components/CurrencyRatesSettings";
 import { InfoTip, SectionTitle } from "@/components/SectionTitle";
 import { PageHeader } from "@/components/PageHeader";
@@ -9,7 +10,7 @@ import { AppearanceSettings } from "@/components/AppearanceSettings";
 import { BrandStudio } from "@/components/BrandStudio";
 import { ServerTotalsCheck } from "@/components/ServerTotalsCheck";
 import { DataSizePanel } from "@/components/DataSizePanel";
-import { Table2, Palette, Sparkles } from "lucide-react";
+import { Table2, Palette, Sparkles, ShoppingBag } from "lucide-react";
 import { MAIN_COMPANY_ID, companyIdOfInvoice } from "@/lib/companies";
 import { CompaniesSettings } from "@/components/CompaniesSettings";
 import { MaterialsSettings } from "@/components/MaterialsSettings";
@@ -821,6 +822,7 @@ export function SettingsPage() {
     { id: "timeline", label: "Production Timeline", icon: ListOrdered, show: isAdmin, group: "Production", hint: "The stages of each kind of order" },
     { id: "orderpage", label: "Order page", icon: LayoutList, show: isAdmin, group: "Production", hint: "The order page's sections, in your order" },
     { id: "materials", label: "Materials", icon: Layers, show: isAdmin, group: "Production", hint: "Metals, stones and findings you use" },
+    { id: "shopify", label: "Shopify", icon: ShoppingBag, show: isAdmin, group: "Integrations", hint: "Your stores' orders on the board, shipping back" },
     { id: "expenses", label: "Categories", icon: SlidersHorizontal, show: isAdmin, group: "Lists & categories", hint: "Expense and account categories" },
     { id: "lists", label: "Dropdown lists", icon: ListChecks, show: isAdmin, group: "Lists & categories", hint: "The choices in every dropdown" },
     { id: "videos", label: "Videos", icon: Film, show: isAdmin, group: "Photos & videos", hint: "Make every video play on every device" },
@@ -1586,6 +1588,7 @@ export function SettingsPage() {
       {/* Production timeline — admin only */}
       {activeId === "timeline" && <TimelineSettings />}
       {activeId === "orderpage" && <OrderLayoutSettings />}
+      {activeId === "shopify" && <ShopifySettings />}
       {activeId === "videos" && <VideoFixSettings />}
       {activeId === "previews" && <PhotoPreviewSettings />}
 
