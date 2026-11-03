@@ -8,7 +8,7 @@ import { useEffect, useState } from "react";
 import {
   addDoc, collection, deleteField, doc, getDocs, limit as qLimit, onSnapshot, orderBy, query, setDoc, updateDoc, where,
 } from "firebase/firestore";
-import { db as fsdb, EMULATORS } from "./firebase";
+import { db as fsdb } from "./firebase";
 import { uid } from "./db";
 import {
   API_CALLS, API_EVENTS, API_KEYS, API_QUOTA, API_STATS, DEFAULT_PER_DAY, DEFAULT_PER_MINUTE, hashSecret, MAX_PER_DAY,
@@ -20,7 +20,8 @@ const now = () => new Date().toISOString();
 
 /** Where clients call the API: this app's own address + /api/v1 (Vercel / Firebase Hosting send it on). */
 export function apiBaseUrl(): string {
-  if (EMULATORS) return "http://127.0.0.1:5001/demo-starlink/us-central1/stockApi/v1";
+  // Local test mode (lib/firebase.ts — never in a built app).
+  if (import.meta.env?.DEV && import.meta.env?.VITE_EMULATORS === "1") return "http://127.0.0.1:5001/demo-starlink/us-central1/stockApi/v1";
   return `${window.location.origin}/api/v1`;
 }
 
