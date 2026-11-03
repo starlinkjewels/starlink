@@ -126,6 +126,8 @@ const GOLD_PURITIES = ["9K", "14K", "18K", "22K", "24K"];
 /** One fact about the piece, as a tile; nothing at all when there is no value. */
 /** A section of the order card: edge to edge, a hairline above it. */
 const ORDER_SECTION = "-mx-4 sm:-mx-6 px-4 sm:px-6 py-4 sm:py-5 border-t border-border/60";
+/** Under a material's rate: where the figure comes from (lib/orderMaterials.ts MaterialLine.rate). */
+const RATE_BASIS = { bill: "bill rate", average: "bag avg cost", typed: "price entered", "fine gold": "fine gold avg" } as const;
 
 /** One detail of the order: a quiet label over its value — no box around it. */
 function OrderSpec({ label, value, wide }: { label: string; value?: string | number | null; wide?: boolean }) {
@@ -4081,10 +4083,25 @@ The piece then takes ours — add them from stock or buy them, as for any order.
               { key: "qty", header: "Qty", align: "right", sortValue: r => r.qty, cell: r => <span className="tabular-nums whitespace-nowrap font-medium">{r.qty}</span> },
               { key: "from", header: "From", sortValue: r => r.source, csv: r => [r.source, r.sourceSub].filter(Boolean).join(" · "),
                 cell: r => <div className="max-w-[260px]"><CellMain title={<span className="text-sm font-normal text-foreground">{r.source}</span>} sub={r.sourceSub} /></div> },
-              { key: "cost", header: "Cost", align: "right", kind: "number", sortValue: r => r.costInr ?? 0,
+              // What it was priced at: the bill's rate, the price typed when it went out, or the
+              // bag's weighted-average cost — the same figures the order's Cost & Profit uses.
+              { key: "rate", header: "Rate", align: "right", kind: "number", sortValue: r => r.rate?.inr ?? null,
+                csv: r => (r.rate ? `${Math.round(r.rate.inr)}/${r.rate.unit}` : ""),
+                cell: r => r.rate ? (
+                  <div className="text-right whitespace-nowrap">
+                    <span className="tabular-nums text-sm">{fmtMoneyInr(Math.round(r.rate.inr))}<span className="text-muted-foreground">/{r.rate.unit}</span></span>
+                    <p className="text-[11px] text-muted-foreground">{RATE_BASIS[r.rate.basis]}</p>
+                  </div>
+                ) : <span className="text-muted-foreground/50">—</span> },
+              // On a phone card: the line's own figure, beside its name (Pcs, Qty, From and Rate under it).
+              { key: "cost", header: "Cost", align: "right", kind: "number", card: "figure", sortValue: r => r.costInr ?? 0,
+                csv: r => (r.costInr != null ? String(Math.round(r.costInr * 100) / 100) : r.costNote ?? ""),
                 cell: r => (
                   <div className="text-right whitespace-nowrap">
-                    {r.costInr != null ? <CellAmount>{fmtMoneyInr(r.costInr)}</CellAmount> : <span className="text-muted-foreground">—</span>}
+                    {r.costInr != null ? <CellAmount>{fmtMoneyInr(r.costInr)}</CellAmount>
+                      : r.costNote ? <span className={`text-xs font-medium ${/not priced/i.test(r.costNote) ? "text-amber-700" : "text-muted-foreground"}`} title={/not priced/i.test(r.costNote) ? "This bag has never been bought with a price — add the bill's price to value it" : undefined}>{r.costNote}</span>
+                      : <span className="text-muted-foreground">—</span>}
+                    {r.costInr != null && r.costNote && <p className="text-[11px] font-medium text-amber-700">{r.costNote}</p>}
                     {r.dueInr > 0 && <p className="text-[11px] font-medium text-destructive">{fmtMoneyInr(r.dueInr)} to supplier</p>}
                     {r.labourDueInr > 0 && <p className="text-[11px] font-medium text-destructive">{fmtMoneyInr(r.labourDueInr)} labour due</p>}
                   </div>
@@ -4111,6 +4128,20 @@ The piece then takes ours — add them from stock or buy them, as for any order.
                         cur.n += r.amount.n; by.set(k, cur);
                       }
                       return by.size ? [...by.values()].map(x => `${fmtQty(Math.round(x.n * 1000) / 1000, x.unit)}${x.of ? ` ${x.of}` : ""}`).join(" · ") : "—";
+                    },
+                    // The stones' average rate: what they cost in all over their carats (only priced stones).
+                    rate: rs => {
+                      let inr = 0, ct = 0;
+                      for (const r of rs) if (!r.gold && r.amount?.unit === "ct" && !r.amount.of && r.costInr != null && r.amount.n > 0) { inr += r.costInr; ct += r.amount.n; }
+                      return ct > 0 ? `${fmtMoneyInr(Math.round(inr / ct))}/ct avg` : "";
+                    },
+                    // Everything on the table that has a price, and how many lines still don't.
+                    cost: rs => {
+                      const priced = rs.filter(r => r.costInr != null);
+                      const open = rs.filter(r => r.costInr == null && /not priced/i.test(r.costNote ?? "")).length;
+                      if (!priced.length) return open ? `${open} not priced` : "—";
+                      const sum = Math.round(priced.reduce((t, r) => t + (r.costInr ?? 0), 0) * 100) / 100;
+                      return `${fmtMoneyInr(sum)}${open ? ` · ${open} not priced` : ""}`;
                     },
                   }} />
               </div>

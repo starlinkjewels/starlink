@@ -386,7 +386,7 @@ export async function exportOrderXlsx(db: DB, order: Order, opts: { faDone: bool
 function cameFrom(db: DB, o: Order): string {
   const faDone = o.timeline?.some(t => t.step === "Final Approval" && t.status === "done") ?? false;
   const by = new Map<string, Map<string, number>>();
-  for (const l of orderMaterialLines(db, o, faDone)) {
+  for (const l of orderMaterialLines(db, o, faDone, { costs: false })) {
     if (!l.amount || !(l.amount.n > 0)) continue;
     const src = sourceOf(l), k = `${l.amount.of ? `${l.amount.of} ` : ""}${l.amount.unit}`;
     const m = by.get(src) ?? new Map<string, number>();

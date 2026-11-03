@@ -62,7 +62,7 @@ export function buildSheet(db: DB, order: Order, opts: { faDone: boolean; withCo
   const materials = orderMaterialLines(db, order, opts.faDone).map(l => ({
     material: l.title, detail: l.detail ?? "", pcs: l.pcs != null ? String(l.pcs) : "", qty: l.qty,
     from: [l.source, l.sourceSub].filter(Boolean).join(" · "), status: l.status,
-    cost: opts.withCost && l.costInr != null ? fmtMoneyInr(l.costInr) : "",
+    cost: opts.withCost ? (l.costInr != null ? fmtMoneyInr(l.costInr) : l.costNote ?? "") : "",
     due: opts.withCost ? [l.dueInr > 0 ? `${fmtMoneyInr(l.dueInr)} to supplier` : "", l.labourDueInr > 0 ? `${fmtMoneyInr(l.labourDueInr)} labour` : ""].filter(Boolean).join(" · ") : "",
     duePdf: opts.withCost ? [l.dueInr > 0 ? `${fmtMoneyInr(l.dueInr)} supplier` : "", l.labourDueInr > 0 ? `${fmtMoneyInr(l.labourDueInr)} labour` : ""].filter(Boolean).join(" · ") : "",
   }));
