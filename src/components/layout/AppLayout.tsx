@@ -7,7 +7,7 @@ import { studioSidebarGroups, StudioTabBar, StudioBackButton, parentPath } from 
 import { applyAppearance, appearanceOf, rememberAppearance, type AppearanceUi } from "@/lib/appearance";
 import { QuickCreateProvider } from "@/components/create/QuickCreate";
 import { Outlet, NavLink, useNavigate, useLocation, useNavigationType } from "react-router-dom";
-import { LayoutDashboard, Webhook, Package, Users, Briefcase, MessageSquare, Bell, FileText, BarChart3, Settings, Search, LogOut, Plus, User, ChevronDown, UserCircle, ListTodo, MoreHorizontal, X, ChevronRight, Search as SearchIcon, Wallet, BookOpen, FolderOpen, Sparkles, Landmark, Truck, Boxes, Factory, Gem, CreditCard, ShoppingCart, Camera, Gift, ScanLine, History, Workflow, AlarmClock, PenTool, FolderLock } from "lucide-react";
+import { LayoutDashboard, Webhook, Package, Users, Briefcase, MessageSquare, Bell, FileText, BarChart3, Settings, Search, LogOut, Plus, User, ChevronDown, UserCircle, ListTodo, MoreHorizontal, X, ChevronRight, Search as SearchIcon, Wallet, BookOpen, FolderOpen, Sparkles, Landmark, Truck, Boxes, Factory, Gem, CreditCard, ShoppingCart, Camera, Gift, ScanLine, History, Workflow, Megaphone, AlarmClock, PenTool, FolderLock } from "lucide-react";
 import { useAuth } from "@/lib/auth";
 import { motion, AnimatePresence } from "framer-motion";
 import { loadDb, collectionsLoaded, ensureCollections, summariesSettled } from "@/lib/db";
@@ -56,6 +56,7 @@ const NAV: NavItem[] = [
   { to: "/reminders", label: "Reminders", icon: AlarmClock, roles: ["admin", "employee"] },
   { to: "/reports", label: "Reports", icon: BarChart3 },
   { to: "/autopilot", label: "Autopilot", icon: Workflow, roles: ["admin"] },
+  { to: "/campaigns", label: "Campaigns", icon: Megaphone, roles: ["admin"] },
   { to: "/documents", label: "Documents", icon: FolderLock, roles: ["admin", "employee"] },
   { to: "/stock-api", label: "API", icon: Webhook, roles: ["admin"] },
   { to: "/settings", label: "Settings", icon: Settings, roles: ["admin"] },
@@ -104,6 +105,7 @@ const NAV_GROUPS: { title: string; items: NavItem[] }[] = [
     { to: "/employees", label: "Employees", icon: Briefcase, roles: ["admin"] },
     { to: "/activity", label: "Activity", icon: History, roles: ["admin"] },
     { to: "/autopilot", label: "Autopilot", icon: Workflow, roles: ["admin"] },
+    { to: "/campaigns", label: "Campaigns", icon: Megaphone, roles: ["admin"] },
     { to: "/documents", label: "Documents", icon: FolderLock, roles: ["admin", "employee"] },
   { to: "/stock-api", label: "API", icon: Webhook, roles: ["admin"] },
     { to: "/settings", label: "Settings", icon: Settings, roles: ["admin"] },
@@ -143,6 +145,7 @@ const MORE_NAV: NavItem[] = [
   { to: "/payments", label: "Payments", icon: CreditCard, roles: ["admin","employee"] },
   { to: "/reports", label: "Reports", icon: BarChart3 },
   { to: "/autopilot", label: "Autopilot", icon: Workflow, roles: ["admin"] },
+  { to: "/campaigns", label: "Campaigns", icon: Megaphone, roles: ["admin"] },
   { to: "/documents", label: "Documents", icon: FolderLock, roles: ["admin", "employee"] },
   { to: "/stock-api", label: "API", icon: Webhook, roles: ["admin"] },
   { to: "/settings", label: "Settings", icon: Settings, roles: ["admin"] },

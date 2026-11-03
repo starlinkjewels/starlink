@@ -25,6 +25,10 @@
     {
       "source": "functions-etsy",
       "codebase": "etsy"
+    },
+    {
+      "source": "functions-campaigns",
+      "codebase": "campaigns"
     }
   ],
   "hosting": [
