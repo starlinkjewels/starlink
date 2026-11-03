@@ -13,6 +13,10 @@
     {
       "source": "functions",
       "codebase": "default"
+    },
+    {
+      "source": "functions-api",
+      "codebase": "api"
     }
   ]
 }

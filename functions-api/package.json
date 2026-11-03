@@ -1,0 +1,23 @@
+{
+  "name": "functions-api",
+  "description": "Starlink Jewels - Ready Stock API for clients' websites (its own codebase: 'api')",
+  "scripts": {
+    "build": "tsc",
+    "test": "npm run build && node scripts/test-logic.cjs"
+  },
+  "engines": {
+    "node": "22"
+  },
+  "main": "lib/index.js",
+  "dependencies": {
+    "firebase-admin": "^13.10.0",
+    "firebase-functions": "^6.6.0",
+    "geoip-lite": "^2.0.3"
+  },
+  "devDependencies": {
+    "@types/express": "^4.17.21",
+    "@types/node": "^22.10.0",
+    "typescript": "^5.6.3"
+  },
+  "private": true
+}
