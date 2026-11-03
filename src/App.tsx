@@ -59,6 +59,7 @@ const AutopilotPage = lazy(() => import("./pages/Autopilot").then(m => ({ defaul
 const AutopilotEditorPage = lazy(() => import("./pages/AutopilotEditor").then(m => ({ default: m.AutopilotEditorPage })));
 const RemindersPage = lazy(() => import("./pages/Reminders").then(m => ({ default: m.RemindersPage })));
 const DocumentsPage = lazy(() => import("./pages/Documents").then(m => ({ default: m.DocumentsPage })));
+const StockApiPage = lazy(() => import("./pages/StockApi").then(m => ({ default: m.StockApiPage })));
 
 function Protected({ children, roles }: { children: React.ReactNode; roles?: Role[] }) {
   const { user } = useAuth();
@@ -231,6 +232,7 @@ export function App() {
           <Route path="payments" element={<Protected roles={["admin","employee"]}><PaymentsPage /></Protected>} />
           <Route path="buy-assign" element={<Protected roles={["admin","employee"]}><BuyAssignPage /></Protected>} />
           <Route path="documents" element={<DocumentsGuard><DocumentsPage /></DocumentsGuard>} />
+          <Route path="stock-api" element={<Protected roles={["admin"]}><StockApiPage /></Protected>} />
           <Route path="profile" element={<ProfilePage />} />
         </Route>
         <Route path="*" element={<Navigate to="/" replace />} />

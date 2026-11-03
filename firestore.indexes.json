@@ -197,7 +197,82 @@
           "order": "ASCENDING"
         }
       ]
+    },
+    {
+      "collectionGroup": "apiCalls",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "keyId",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "at",
+          "order": "DESCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "apiStats",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "keyId",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "hour",
+          "order": "ASCENDING"
+        }
+      ]
     }
   ],
-  "fieldOverrides": []
+  "fieldOverrides": [
+    {
+      "collectionGroup": "apiCalls",
+      "fieldPath": "expireAt",
+      "ttl": true,
+      "indexes": []
+    },
+    {
+      "collectionGroup": "apiStats",
+      "fieldPath": "status",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "apiStats",
+      "fieldPath": "paths",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "apiStats",
+      "fieldPath": "countries",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "apiStats",
+      "fieldPath": "cities",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "apiStats",
+      "fieldPath": "origins",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "apiStats",
+      "fieldPath": "devices",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "apiStats",
+      "fieldPath": "kinds",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "apiStats",
+      "fieldPath": "ips",
+      "indexes": []
+    }
+  ]
 }
