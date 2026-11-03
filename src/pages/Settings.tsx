@@ -1,4 +1,5 @@
 import { ShopifySettings } from "@/components/settings/ShopifySettings";
+import { EtsySettings } from "@/components/settings/EtsySettings";
 import { CurrencyRatesSettings } from "@/components/CurrencyRatesSettings";
 import { InfoTip, SectionTitle } from "@/components/SectionTitle";
 import { PageHeader } from "@/components/PageHeader";
@@ -10,7 +11,7 @@ import { AppearanceSettings } from "@/components/AppearanceSettings";
 import { BrandStudio } from "@/components/BrandStudio";
 import { ServerTotalsCheck } from "@/components/ServerTotalsCheck";
 import { DataSizePanel } from "@/components/DataSizePanel";
-import { Table2, Palette, Sparkles, ShoppingBag } from "lucide-react";
+import { Table2, Palette, Sparkles, ShoppingBag, Store } from "lucide-react";
 import { MAIN_COMPANY_ID, companyIdOfInvoice } from "@/lib/companies";
 import { CompaniesSettings } from "@/components/CompaniesSettings";
 import { MaterialsSettings } from "@/components/MaterialsSettings";
@@ -821,6 +822,7 @@ export function SettingsPage() {
     { id: "orderpage", label: "Order page", icon: LayoutList, show: isAdmin, group: "Production", hint: "The order page's sections, in your order" },
     { id: "materials", label: "Materials", icon: Layers, show: isAdmin, group: "Production", hint: "Metals, stones and findings you use" },
     { id: "shopify", label: "Shopify", icon: ShoppingBag, show: isAdmin, group: "Integrations", hint: "Your stores' orders on the board, shipping back" },
+    { id: "etsy", label: "Etsy", icon: Store, show: isAdmin, group: "Integrations", hint: "Your Etsy shops' orders on the board, tracking back" },
     { id: "expenses", label: "Categories", icon: SlidersHorizontal, show: isAdmin, group: "Lists & categories", hint: "Expense and account categories" },
     { id: "lists", label: "Dropdown lists", icon: ListChecks, show: isAdmin, group: "Lists & categories", hint: "The choices in every dropdown" },
     { id: "videos", label: "Videos", icon: Film, show: isAdmin, group: "Photos & videos", hint: "Make every video play on every device" },
@@ -854,11 +856,15 @@ export function SettingsPage() {
             list on a phone (until one is opened) — with the search above. While
             something is typed, what it finds takes the list's place. */}
         {(!compact || !activeSection) && (
-        <div className="min-w-0 lg:sticky lg:top-4 space-y-3">
+        // On a laptop the list stays in place and scrolls on its own (it is taller than the
+        // screen): scrolling it never moves the section beside it, nor the other way round.
+        <div className="min-w-0 space-y-3 lg:sticky lg:top-4 lg:flex lg:flex-col lg:max-h-[calc(100dvh-10rem)]">
           <SettingsSearch value={findQ} onChange={setFindQ} sections={sections} onPick={setActive} />
           {!findQ.trim() && (compact
             ? <SettingsPhoneList sections={sections} onPick={setActive} />
-            : <SettingsSideNav sections={sections} active={activeId} onPick={setActive} />)}
+            : <div data-keep-scroll="settings-nav" className="lg:min-h-0 lg:overflow-y-auto lg:overscroll-contain lg:pr-1 lg:pb-2 settings-nav-scroll">
+                <SettingsSideNav sections={sections} active={activeId} onPick={setActive} />
+              </div>)}
         </div>
         )}
 
@@ -1542,6 +1548,7 @@ export function SettingsPage() {
       {activeId === "timeline" && <TimelineSettings />}
       {activeId === "orderpage" && <OrderLayoutSettings />}
       {activeId === "shopify" && <ShopifySettings />}
+      {activeId === "etsy" && <EtsySettings />}
       {activeId === "videos" && <VideoFixSettings />}
       {activeId === "previews" && <PhotoPreviewSettings />}
 

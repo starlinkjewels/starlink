@@ -107,7 +107,7 @@ type Preview = { order: { name: string; financialStatus?: string; currency: stri
   lines: { title: string; variant?: string | null; sku?: string | null; options: { name: string; value: string }[]; image?: string | null;
     mapped: { jewelleryType: string; metal: string; productKarats?: string; productSize?: string; diamondType: string; designNumber?: string; quantity: number; amount: number; instructions: string; review: string[] } }[] };
 
-function RulePairs<K extends "type" | "metal">({ label, k, rows, options, onChange }: { label: string; k: K; rows: ({ word: string } & Record<K, string>)[]; options: string[]; onChange: (r: ({ word: string } & Record<K, string>)[]) => void }) {
+export function RulePairs<K extends "type" | "metal">({ label, k, rows, options, onChange }: { label: string; k: K; rows: ({ word: string } & Record<K, string>)[]; options: string[]; onChange: (r: ({ word: string } & Record<K, string>)[]) => void }) {
   return (
     <div>
       <Label>{label}</Label>
@@ -129,6 +129,39 @@ function RulePairs<K extends "type" | "metal">({ label, k, rows, options, onChan
   );
 }
 
+/** How a shop's listings become our orders — the same for Shopify stores and Etsy shops. */
+export function MappingFields({ rules, setRules, source }: { rules: Required<StoreRules>; setRules: (r: Required<StoreRules>) => void; source: "Shopify" | "Etsy" }) {
+  const db = useDb();
+  const types = listOf("jewelleryTypes", db.settings), metals = listOf("metals", db.settings);
+  return (
+    <>
+      <section className="space-y-3">
+        <SectionTitle title="Price on our order" sub={`${source}'s price is the customer's; ours is the client's`} />
+        <div className="grid gap-3 sm:grid-cols-2">
+          <Select value={rules.priceMode} onValueChange={v => setRules({ ...rules, priceMode: v as "approval" | "percent" })}>
+            <SelectTrigger className="rounded-xl"><SelectValue /></SelectTrigger>
+            <SelectContent><SelectItem value="approval">Set at approval (recommended)</SelectItem><SelectItem value="percent">A share of the {source} price</SelectItem></SelectContent>
+          </Select>
+          {rules.priceMode === "percent" && <div className="flex items-center gap-2"><Input type="number" className="rounded-xl" value={String(rules.pricePct ?? "")} onChange={e => setRules({ ...rules, pricePct: Number(e.target.value) })} /><span className="text-sm text-muted-foreground shrink-0">% of the price (USD shops)</span></div>}
+        </div>
+      </section>
+
+      <section className="space-y-4">
+        <SectionTitle title="What its products say" sub="The option names this store uses, and the words that tell the type and metal" />
+        <div className="grid gap-3 sm:grid-cols-2">
+          {([["metalOptions", "Metal option names"], ["karatOptions", "Karat option names"], ["sizeOptions", "Size option names"], ["stoneOptions", "Stone option names"]] as const).map(([k, l]) => (
+            <div key={k}><Label>{l}</Label><Input className="mt-1 rounded-xl" value={list(rules[k])} onChange={e => setRules({ ...rules, [k]: unlist(e.target.value) })} /></div>
+          ))}
+        </div>
+        <div className="grid gap-5 lg:grid-cols-2">
+          <RulePairs label="Words → jewellery type" k="type" rows={rules.typeRules} options={types} onChange={r => setRules({ ...rules, typeRules: r })} />
+          <RulePairs label="Words → metal" k="metal" rows={rules.metalRules} options={metals} onChange={r => setRules({ ...rules, metalRules: r })} />
+        </div>
+      </section>
+    </>
+  );
+}
+
 function StoreSheet({ store, onClose }: { store: ShopifyStore | null; onClose: () => void }) {
   const db = useDb();
   const { user } = useAuth();
@@ -147,7 +180,6 @@ function StoreSheet({ store, onClose }: { store: ShopifyStore | null; onClose: (
     setPreview(null); setTab("mapping"); setKeys({ appClientId: "", appSecret: "" });
   }, [store?.id]); // eslint-disable-line react-hooks/exhaustive-deps
   if (!store) return null;
-  const types = listOf("jewelleryTypes", db.settings), metals = listOf("metals", db.settings);
   const clients = [...db.clients].sort((a, b) => (a.companyName || "").localeCompare(b.companyName || ""));
   const staff = db.users.filter(u => (u.role === "admin" || u.role === "employee") && u.status !== "inactive");
   const multiCo = hasCompanies(db.settings);
@@ -201,29 +233,7 @@ function StoreSheet({ store, onClose }: { store: ShopifyStore | null; onClose: (
               <Switch checked={rules.importTest} onCheckedChange={v => setRules({ ...rules, importTest: v })} /></label>
           </section>
 
-          <section className="space-y-3">
-            <SectionTitle title="Price on our order" sub="Shopify's price is the customer's; ours is the client's" />
-            <div className="grid gap-3 sm:grid-cols-2">
-              <Select value={rules.priceMode} onValueChange={v => setRules({ ...rules, priceMode: v as "approval" | "percent" })}>
-                <SelectTrigger className="rounded-xl"><SelectValue /></SelectTrigger>
-                <SelectContent><SelectItem value="approval">Set at approval (recommended)</SelectItem><SelectItem value="percent">A share of the Shopify price</SelectItem></SelectContent>
-              </Select>
-              {rules.priceMode === "percent" && <div className="flex items-center gap-2"><Input type="number" className="rounded-xl" value={String(rules.pricePct ?? "")} onChange={e => setRules({ ...rules, pricePct: Number(e.target.value) })} /><span className="text-sm text-muted-foreground shrink-0">% of the price (USD stores)</span></div>}
-            </div>
-          </section>
-
-          <section className="space-y-4">
-            <SectionTitle title="What its products say" sub="The option names this store uses, and the words that tell the type and metal" />
-            <div className="grid gap-3 sm:grid-cols-2">
-              {([["metalOptions", "Metal option names"], ["karatOptions", "Karat option names"], ["sizeOptions", "Size option names"], ["stoneOptions", "Stone option names"]] as const).map(([k, l]) => (
-                <div key={k}><Label>{l}</Label><Input className="mt-1 rounded-xl" value={list(rules[k])} onChange={e => setRules({ ...rules, [k]: unlist(e.target.value) })} /></div>
-              ))}
-            </div>
-            <div className="grid gap-5 lg:grid-cols-2">
-              <RulePairs label="Words → jewellery type" k="type" rows={rules.typeRules} options={types} onChange={r => setRules({ ...rules, typeRules: r })} />
-              <RulePairs label="Words → metal" k="metal" rows={rules.metalRules} options={metals} onChange={r => setRules({ ...rules, metalRules: r })} />
-            </div>
-          </section>
+          <MappingFields rules={rules} setRules={setRules} source="Shopify" />
 
           <section className="space-y-3">
             <SectionTitle title="Back to Shopify" />

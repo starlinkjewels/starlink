@@ -88,12 +88,15 @@ service cloud.firestore {
     // An order brought in from Shopify carries `shopify` (which store, order and line) —
     // set by the server, never by a client's or an employee's device: it decides what is
     // fulfilled on Shopify. (An admin's device may write it back as it was — a restore.)
+    // The same for `etsy` (an order brought in from an Etsy shop: what is shipped on Etsy).
     match /orders/{id} {
       allow read:   if isStaff() || (isClientRole() && resource.data.clientId == myClientId());
       allow create: if (isStaff() || (isClientRole() && request.resource.data.clientId == myClientId()))
-        && (!('shopify' in request.resource.data) || isAdmin());
+        && (!('shopify' in request.resource.data) || isAdmin())
+        && (!('etsy' in request.resource.data) || isAdmin());
       allow update: if (isStaff() || (isClientRole() && resource.data.clientId == myClientId()))
-        && (request.resource.data.get('shopify', null) == resource.data.get('shopify', null) || isAdmin());
+        && (request.resource.data.get('shopify', null) == resource.data.get('shopify', null) || isAdmin())
+        && (request.resource.data.get('etsy', null) == resource.data.get('etsy', null) || isAdmin());
       allow delete: if isStaff() || (isClientRole() && resource.data.clientId == myClientId());
     }
 
@@ -327,6 +330,13 @@ service cloud.firestore {
     match /shopifyStores/{id} { allow read: if isAdmin(); allow write: if false; }
     match /shopifyOrders/{id} { allow read: if isAdmin(); allow write: if false; }
     match /shopifyJobs/{id}   { allow read: if isAdmin(); allow write: if false; }
+    // Etsy shops (functions-etsy): the same — connected through Etsy's own approval
+    // (the shop owner signs in on Etsy), changed only through the server. The app's
+    // secret and the shop's tokens (etsyVault), the one-time approval links
+    // (etsyPending) and the raw messages (etsyInbox) are the server's alone.
+    match /etsyStores/{id} { allow read: if isAdmin(); allow write: if false; }
+    match /etsyOrders/{id} { allow read: if isAdmin(); allow write: if false; }
+    match /etsyJobs/{id}   { allow read: if isAdmin(); allow write: if false; }
     match /apiKeys/{id}   { allow read, write: if isAdmin(); }
     match /apiQuota/{id}  { allow read: if isAdmin(); allow write: if false; }
     match /apiStats/{id}  { allow read: if isAdmin(); allow write: if false; }
