@@ -27,6 +27,8 @@
       "rewrites": [
         { "source": "/s/**", "function": { "functionId": "shareMeta", "region": "asia-south1" } },
         { "source": "/share-img", "function": { "functionId": "shareImage", "region": "asia-south1" } },
+        { "source": "/api/v1", "function": { "functionId": "stockApi", "region": "asia-south1" } },
+        { "source": "/api/v1/**", "function": { "functionId": "stockApi", "region": "asia-south1" } },
         { "source": "**", "destination": "/index.html" }
       ],
       "headers": [
