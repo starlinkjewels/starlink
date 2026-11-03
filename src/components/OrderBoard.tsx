@@ -1,3 +1,4 @@
+import { ShopifyTag } from "@/components/ShopifyTag";
 import { pieceLine } from "@/lib/orderText";
 import { MoreMenu, type MoreAction } from "@/components/MoreMenu";
 import { useMemo, useState } from "react";
@@ -282,6 +283,7 @@ export function OrderBoard({ orders, actions, tracks }: { orders: Order[]; actio
                         return t?.running ? <div className="mt-2"><ProductionInfo t={t} compact /></div> : null;
                       })()}
                       <div className="flex items-center gap-1.5 mt-2 flex-wrap">
+                        <ShopifyTag o={o} />
                         {o.priority !== "Normal" && (
                           <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded-full ${o.priority === "Urgent" ? "bg-destructive/10 text-destructive" : "bg-amber-500/15 text-amber-700"}`}>{o.priority}</span>
                         )}

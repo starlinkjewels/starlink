@@ -225,6 +225,34 @@
           "order": "ASCENDING"
         }
       ]
+    },
+    {
+      "collectionGroup": "shopifyJobs",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "status",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "nextAt",
+          "order": "ASCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "orders",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "shopify.storeId",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "dispatchedAt",
+          "order": "ASCENDING"
+        }
+      ]
     }
   ],
   "fieldOverrides": [
@@ -272,6 +300,12 @@
     {
       "collectionGroup": "apiStats",
       "fieldPath": "ips",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "shopifyInbox",
+      "fieldPath": "expireAt",
+      "ttl": true,
       "indexes": []
     }
   ]

@@ -17,6 +17,10 @@
     {
       "source": "functions-api",
       "codebase": "api"
+    },
+    {
+      "source": "functions-shopify",
+      "codebase": "shopify"
     }
   ]
 }

@@ -1,3 +1,4 @@
+import { ShopifyOrderCard } from "@/components/order/ShopifyOrderCard";
 import { isShelfSale } from "@/lib/stockSale";
 import { ProductionInfo } from "@/components/ProductionInfo";
 import { requestPlayable } from "@/lib/webVideo";
@@ -2377,6 +2378,8 @@ It goes back to being our own build, and ${item ? item.name : "its piece"} goes 
         const closed = order.status === "Rejected";
         return (
           <div className="p-4 sm:p-6">
+            {/* Brought in from a Shopify store: what Shopify says, where it ships, what to check. */}
+            {order.shopify && isStaffUser && <ShopifyOrderCard order={order} admin={user!.role === "admin"} />}
             {/* Sold from Ready Stock on a separate order before builds were sold on themselves — moved onto its build. */}
             {order.mergedInto && (() => {
               const to = db.orders.find(o => o.id === order.mergedInto);

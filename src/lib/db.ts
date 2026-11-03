@@ -505,6 +505,29 @@ export interface ManufacturingLogEntry {
   remarks?: string;
 }
 
+/** A Shopify order line this order was brought in from (Order.shopify). */
+export interface OrderShopify {
+  storeId: string;
+  shop: string;
+  storeName: string;
+  orderId: string;      // Shopify's order number in its admin (legacy id)
+  orderGid: string;
+  orderName: string;    // "#1001"
+  lineId: string;
+  lineGid: string;
+  title: string;
+  variant?: string;
+  sku?: string;
+  unitPrice?: number;
+  currency: string;
+  /** Details the server had to guess or couldn't find — to check before approving. */
+  review?: string[];
+  importedAt: string;
+  /** Where it ships and who bought it, as Shopify had it when it came in (later changes: shopifyOrders, admins). */
+  shipTo?: { name?: string; company?: string; address1?: string; address2?: string; city?: string; province?: string; zip?: string; country?: string; phone?: string };
+  customer?: string;
+}
+
 /** What selling an in-house build on its own order changed (Order.stockSale) — kept so it can be undone exactly. */
 export interface StockSaleRecord {
   itemId: string;
@@ -675,6 +698,10 @@ export interface Order {
   /** A sale made as a separate order before builds were sold on themselves —
    *  moved onto its build order (lib/stockSale.ts), and this one closed. */
   mergedInto?: string;
+  /** Brought in from a connected Shopify store (functions-shopify): which store,
+   *  order and line it is. Set once by the server; what Shopify says later is on
+   *  shopifyOrders (lib/shopify.ts), never written onto the order. */
+  shopify?: OrderShopify;
   assignedFactoryId?: string; // pure informational tag — "this factory will make
     // this order." Moves no material and never affects manufacturingReadiness;
     // only an actual MaterialIssuance for this order does that.

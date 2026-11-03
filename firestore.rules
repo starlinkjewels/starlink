@@ -85,10 +85,16 @@ service cloud.firestore {
     }
 
     // Orders — staff see all; a client only their own (create/read/update).
+    // An order brought in from Shopify carries `shopify` (which store, order and line) —
+    // set by the server, never by a client's or an employee's device: it decides what is
+    // fulfilled on Shopify. (An admin's device may write it back as it was — a restore.)
     match /orders/{id} {
       allow read:   if isStaff() || (isClientRole() && resource.data.clientId == myClientId());
-      allow create: if isStaff() || (isClientRole() && request.resource.data.clientId == myClientId());
-      allow update, delete: if isStaff() || (isClientRole() && resource.data.clientId == myClientId());
+      allow create: if (isStaff() || (isClientRole() && request.resource.data.clientId == myClientId()))
+        && (!('shopify' in request.resource.data) || isAdmin());
+      allow update: if (isStaff() || (isClientRole() && resource.data.clientId == myClientId()))
+        && (request.resource.data.get('shopify', null) == resource.data.get('shopify', null) || isAdmin());
+      allow delete: if isStaff() || (isClientRole() && resource.data.clientId == myClientId());
     }
 
     // Invoices — staff manage; a client may read only their own.
@@ -313,6 +319,14 @@ service cloud.firestore {
     // Ready Stock API (functions-api): the keys clients' websites read our pieces
     // with — made, changed and paused by an admin; only a hash of each key is kept.
     // The rest is written by the API itself and read by admins (the API page).
+    // Shopify stores (functions-shopify): connected and changed only through the server
+    // (Settings → Shopify), which checks each store's keys. The keys themselves
+    // (shopifyVault) and the raw messages (shopifyInbox) are the server's alone.
+    // Store settings (its price share, its rules) and what Shopify says about the customer: admins.
+    // Staff see an order's store and where it ships on the order itself (Order.shopify).
+    match /shopifyStores/{id} { allow read: if isAdmin(); allow write: if false; }
+    match /shopifyOrders/{id} { allow read: if isAdmin(); allow write: if false; }
+    match /shopifyJobs/{id}   { allow read: if isAdmin(); allow write: if false; }
     match /apiKeys/{id}   { allow read, write: if isAdmin(); }
     match /apiQuota/{id}  { allow read: if isAdmin(); allow write: if false; }
     match /apiStats/{id}  { allow read: if isAdmin(); allow write: if false; }

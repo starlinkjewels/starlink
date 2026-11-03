@@ -14,7 +14,7 @@ export interface SettingsSection {
 }
 
 /** The headings, in order; a section's `group` is one of these. */
-export const SETTINGS_GROUPS = ["Business", "Sales & billing", "Production", "Lists & categories", "Photos & videos", "Look & feel", "Security & data"] as const;
+export const SETTINGS_GROUPS = ["Business", "Sales & billing", "Production", "Integrations", "Lists & categories", "Photos & videos", "Look & feel", "Security & data"] as const;
 
 const grouped = (sections: SettingsSection[]) =>
   SETTINGS_GROUPS.map(g => ({ group: g, items: sections.filter(s => s.group === g) })).filter(x => x.items.length);
