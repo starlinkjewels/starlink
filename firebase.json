@@ -21,6 +21,10 @@
     {
       "source": "functions-shopify",
       "codebase": "shopify"
+    },
+    {
+      "source": "functions-etsy",
+      "codebase": "etsy"
     }
   ],
   "hosting": [

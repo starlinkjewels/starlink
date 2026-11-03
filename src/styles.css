@@ -1032,3 +1032,6 @@ input[type="number"] { -moz-appearance: textfield; appearance: textfield; }
 @media (max-width: 639px) {
   .card-luxe.p-6, .card-luxe.p-5 { padding: 1rem; }
 }
+
+/* Settings: the section list scrolls on its own beside the section (pages/Settings.tsx). */
+.settings-nav-scroll { scrollbar-width: thin; scrollbar-gutter: stable; }

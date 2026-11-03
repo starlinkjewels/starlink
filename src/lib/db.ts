@@ -528,6 +528,27 @@ export interface OrderShopify {
   customer?: string;
 }
 
+/** An Etsy order item (a transaction on a receipt) this order was brought in from (Order.etsy). */
+export interface OrderEtsy {
+  storeId: string;
+  shopId: string;
+  storeName: string;
+  receiptId: string;     // Etsy's order number
+  receiptName: string;   // "#3456789012"
+  transactionId: string;
+  title: string;
+  variant?: string;
+  sku?: string;
+  unitPrice?: number;
+  currency: string;
+  /** Details the server had to guess or couldn't find — to check before approving. */
+  review?: string[];
+  importedAt: string;
+  /** Where it ships and who bought it, as Etsy had it when it came in (later changes: etsyOrders, admins). */
+  shipTo?: { name?: string; address1?: string; address2?: string; city?: string; province?: string; zip?: string; country?: string };
+  customer?: string;
+}
+
 /** What selling an in-house build on its own order changed (Order.stockSale) — kept so it can be undone exactly. */
 export interface StockSaleRecord {
   itemId: string;
@@ -702,6 +723,9 @@ export interface Order {
    *  order and line it is. Set once by the server; what Shopify says later is on
    *  shopifyOrders (lib/shopify.ts), never written onto the order. */
   shopify?: OrderShopify;
+  /** Brought in from a connected Etsy shop (functions-etsy) — set once by the
+   *  server, like `shopify`; what Etsy says later is on etsyOrders (lib/etsy.ts). */
+  etsy?: OrderEtsy;
   assignedFactoryId?: string; // pure informational tag — "this factory will make
     // this order." Moves no material and never affects manufacturingReadiness;
     // only an actual MaterialIssuance for this order does that.
