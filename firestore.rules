@@ -337,6 +337,25 @@ service cloud.firestore {
     match /etsyStores/{id} { allow read: if isAdmin(); allow write: if false; }
     match /etsyOrders/{id} { allow read: if isAdmin(); allow write: if false; }
     match /etsyJobs/{id}   { allow read: if isAdmin(); allow write: if false; }
+    // Email campaigns (functions-campaigns): an admin's device writes a DRAFT only.
+    // That it was tested (testedHash), started, its frozen email, its figures and the
+    // people it goes to are the server's alone — a device can't skip the test, nor
+    // change an email that is going out. The unsubscribed list is read-only here
+    // (the server adds to it); campaignState (the day's count, the link key) is the server's.
+    match /campaigns/{id} {
+      allow read: if isAdmin();
+      allow create: if isAdmin() && request.resource.data.status == 'draft'
+        && !('testedHash' in request.resource.data) && !('frozen' in request.resource.data) && !('counts' in request.resource.data);
+      allow update: if isAdmin() && resource.data.status == 'draft' && request.resource.data.status == 'draft'
+        && request.resource.data.get('testedHash', null) == resource.data.get('testedHash', null)
+        && request.resource.data.get('frozen', null) == resource.data.get('frozen', null)
+        && request.resource.data.get('counts', null) == resource.data.get('counts', null);
+      allow delete: if false;
+      match /recipients/{r} { allow read: if isAdmin(); allow write: if false; }
+    }
+    match /campaignVersions/{id} { allow read, create, delete: if isAdmin(); allow update: if false; }
+    match /campaignSuppress/{id} { allow read: if isAdmin(); allow write: if false; }
+    match /campaignSettings/{id} { allow read, write: if isAdmin(); }
     match /apiKeys/{id}   { allow read, write: if isAdmin(); }
     match /apiQuota/{id}  { allow read: if isAdmin(); allow write: if false; }
     match /apiStats/{id}  { allow read: if isAdmin(); allow write: if false; }

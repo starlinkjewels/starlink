@@ -98,6 +98,9 @@ const PAGE: Record<string, readonly LazyCol[]> = {
   "/documents": [],
   // Its keys and counts are read straight from their own collections (lib/apiKeys.ts).
   "/stock-api": [],
+  // Campaigns read their own collections (lib/campaigns.ts), the clients, the team and Ready Stock.
+  "/campaigns": [],
+  "/campaigns/:id": [],
 };
 
 /** The page an address opens: "/orders/SLJ-0042" → "/orders/:id". */

@@ -57,6 +57,8 @@ const PaymentsPage = lazy(() => import("./pages/Payments").then(m => ({ default:
 const BuyAssignPage = lazy(() => import("./pages/BuyAssign").then(m => ({ default: m.BuyAssignPage })));
 const AutopilotPage = lazy(() => import("./pages/Autopilot").then(m => ({ default: m.AutopilotPage })));
 const AutopilotEditorPage = lazy(() => import("./pages/AutopilotEditor").then(m => ({ default: m.AutopilotEditorPage })));
+const CampaignsPage = lazy(() => import("./pages/Campaigns"));
+const CampaignEditorPage = lazy(() => import("./pages/CampaignEditor"));
 const RemindersPage = lazy(() => import("./pages/Reminders").then(m => ({ default: m.RemindersPage })));
 const DocumentsPage = lazy(() => import("./pages/Documents").then(m => ({ default: m.DocumentsPage })));
 const StockApiPage = lazy(() => import("./pages/StockApi").then(m => ({ default: m.StockApiPage })));
@@ -209,6 +211,8 @@ export function App() {
           <Route path="settings" element={<Protected roles={["admin"]}><SettingsPage /></Protected>} />
           <Route path="autopilot" element={<Protected roles={["admin"]}><AutopilotPage /></Protected>} />
           <Route path="autopilot/:id" element={<Protected roles={["admin"]}><AutopilotEditorPage /></Protected>} />
+          <Route path="campaigns" element={<Protected roles={["admin"]}><CampaignsPage /></Protected>} />
+          <Route path="campaigns/:id" element={<Protected roles={["admin"]}><CampaignEditorPage /></Protected>} />
           <Route path="reminders" element={<Protected roles={["admin","employee"]}><RemindersPage /></Protected>} />
           <Route path="expenses" element={<Protected roles={["admin","employee"]}><ExpensesPage /></Protected>} />
           <Route path="income" element={<IncomePage />} />

@@ -21,7 +21,7 @@ export const STUDIO_SIDEBAR: { title: string; paths: string[] }[] = [
   { title: "Sales", paths: ["/clients", "/invoices", "/ready-stock", "/gift-cards", "/giftcard", "/product-photos"] },
   { title: "Production", paths: ["/suppliers", "/factories", "/designers", "/stock", "/buy-assign"] },
   { title: "Money", paths: ["/payments", "/income", "/locker", "/expenses", "/reports"] },
-  { title: "Workspace", paths: ["/messages", "/notifications", "/reminders", "/ai", "/employees", "/activity", "/autopilot", "/documents", "/stock-api", "/settings"] },
+  { title: "Workspace", paths: ["/messages", "/notifications", "/reminders", "/ai", "/employees", "/activity", "/autopilot", "/campaigns", "/documents", "/stock-api", "/settings"] },
 ];
 
 /** The phone's Parties and Money sheets, with one line on what each is for. */
@@ -43,7 +43,7 @@ const MORE: { title: string; paths: string[] }[] = [
   { title: "Sales", paths: ["/catalog", "/invoices", "/ready-stock", "/gift-cards", "/giftcard", "/product-photos"] },
   { title: "Production", paths: ["/stock", "/buy-assign"] },
   { title: "Money", paths: ["/income", "/reports"] },
-  { title: "Workspace", paths: ["/messages", "/notifications", "/reminders", "/ai", "/employees", "/activity", "/autopilot", "/documents", "/stock-api", "/settings"] },
+  { title: "Workspace", paths: ["/messages", "/notifications", "/reminders", "/ai", "/employees", "/activity", "/autopilot", "/campaigns", "/documents", "/stock-api", "/settings"] },
   { title: "You", paths: ["/profile", "/search"] },
 ];
 
