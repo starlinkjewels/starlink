@@ -31,6 +31,9 @@ export function cancelBlocker(db: DB, o: Order): string | undefined {
   if (!collectionsFresh(CANCEL_REF_COLS)) return CHECKING;
   const inv = findInvoiceForOrder(db.invoices ?? [], o.id);
   if (inv) return `On invoice ${inv.number} — delete or credit the invoice first`;
+  // A build sold on itself: its sale is undone (piece back on the shelf), never cancelled —
+  // a cancel would put its gold back in stock as well as the piece.
+  if (o.stockSale) return "Sold from Ready Stock on this order — use “Undo sale” to put the piece back on the shelf";
   // An in-house build already in Ready Stock: cancelling would put its gold
   // back in stock while the finished piece sits on the shelf — counted twice.
   if (o.readyStockCreatedId) {
@@ -85,6 +88,7 @@ export function orderSpecLocks(db: DB, o: Order): SpecLocks {
   if (o.returns?.length) piece = `Pieces came back on credit note ${[...new Set(o.returns.map(r => r.creditNoteNo))].join(", ")} — the piece stays as it was sold`;
   else if (orderIsDispatched(o)) piece = "Dispatched — the piece stays as it was sent; record a return to change what was sold";
   else if (o.materialSourcing === "readyStock") piece = "Sold from Ready Stock — the piece's details come from it";
+  else if (o.stockSale) piece = "Made by us and sold from Ready Stock — the piece stays as it was made";
   else if (o.readyStockCreatedId) piece = "Already in Ready Stock — change the piece there";
   else if (o.forReadyStock && o.status === "Ready") piece = "Finished — the piece is waiting to go into Ready Stock";
   // Type, karats, quantity and diamond type follow the order as it is changed —

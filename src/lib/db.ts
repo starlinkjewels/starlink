@@ -505,6 +505,20 @@ export interface ManufacturingLogEntry {
   remarks?: string;
 }
 
+/** What selling an in-house build on its own order changed (Order.stockSale) — kept so it can be undone exactly. */
+export interface StockSaleRecord {
+  itemId: string;
+  qty: number;
+  soldAt: string;
+  by: string;
+  /** The build as it was: its fields before the sale wrote over them. */
+  before: Partial<Pick<Order, "clientId" | "forReadyStock" | "assignedEmployeeId" | "contactPerson" | "amount" | "shippingCharge" | "advances"
+    | "giftCardId" | "giftCardRedeemed" | "otherCharges" | "certificate" | "certificateFee" | "certificateFeeInr" | "certificateRate" | "instructions"
+    | "expectedDelivery" | "priority" | "deliveryTime" | "timeline" | "status" | "images" | "createdAt">>;
+  /** The separate sale order it took over, when it was merged (Settings → Data). */
+  mergedFrom?: string;
+}
+
 export interface Order {
   id: string;
   orderNumber: string;
@@ -655,6 +669,12 @@ export interface Order {
   readyStockItemId?: string; // set iff materialSourcing === "readyStock"
   readyStockQty?: number; // a Ready Stock sale: pieces it took off the shelf (older orders: 1)
   readyStockBackAt?: string; // a cancelled Ready Stock sale: when its pieces went back on the shelf
+  /** An in-house build SOLD from Ready Stock on this same order (lib/stockSale.ts):
+   *  the piece, how many, when, and what the order was before — what Undo sale puts back. */
+  stockSale?: StockSaleRecord;
+  /** A sale made as a separate order before builds were sold on themselves —
+   *  moved onto its build order (lib/stockSale.ts), and this one closed. */
+  mergedInto?: string;
   assignedFactoryId?: string; // pure informational tag — "this factory will make
     // this order." Moves no material and never affects manufacturingReadiness;
     // only an actual MaterialIssuance for this order does that.

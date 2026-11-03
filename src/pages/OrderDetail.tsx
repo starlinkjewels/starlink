@@ -1,3 +1,4 @@
+import { isShelfSale } from "@/lib/stockSale";
 import { ProductionInfo } from "@/components/ProductionInfo";
 import { requestPlayable } from "@/lib/webVideo";
 import { orderSectionRank } from "@/lib/orderLayout";
@@ -41,6 +42,8 @@ import { meltPlan } from "@/lib/melt";
 import { needsAccess } from "@/lib/actionHints";
 import { readyStockOffices, officeLabel, officeOf } from "@/lib/offices";
 import { logItem, whoOf } from "@/lib/readyStockHistory";
+import { SALE_REPAIR_COLS, undoSaleBlocker, undoStockSale } from "@/lib/stockSale";
+import { recordsReady, STILL_LOADING } from "@/lib/actionHints";
 import { finishRecordOf, isReworkIssue } from "@/lib/rework";
 import { orderMaterialLines, type MaterialLine } from "@/lib/orderMaterials";
 import { exportOrderPdf } from "@/lib/orderExport";
@@ -1036,7 +1039,7 @@ function OrderDetailPageBody() {
       }
       o.timeline[idx] = { ...o.timeline[idx], status: "done", date: at, employeeId: user!.id, department: user!.department, remarks: "Completed" };
       if (idx + 1 < o.timeline.length && o.timeline[idx + 1].status === "pending") o.timeline[idx + 1].status = "in_progress";
-      o.status = statusFromTimeline(o.timeline, o.forReadyStock, o.materialSourcing === "readyStock");
+      o.status = statusFromTimeline(o.timeline, o.forReadyStock, isShelfSale(o));
       // Cashback: on delivery of a real (client) order, grant a % gift card for
       // the next order — only for gift-card-enabled clients, and only once.
       if (o.status === "Delivered" && !o.forReadyStock && !o.cashbackIssued) {
@@ -1434,7 +1437,7 @@ function OrderDetailPageBody() {
         o.timeline[i] = { ...o.timeline[i], status: "pending", date: undefined, employeeId: undefined, department: undefined, remarks: undefined };
       }
       o.timeline[idx].status = "in_progress";
-      o.status = statusFromTimeline(o.timeline, o.forReadyStock, o.materialSourcing === "readyStock");
+      o.status = statusFromTimeline(o.timeline, o.forReadyStock, isShelfSale(o));
     });
     toast.success("Stage reverted");
   };
@@ -1492,9 +1495,10 @@ function OrderDetailPageBody() {
     updateDb(d => {
       const o = d.orders.find(x => x.id === order.id)!;
       if (o.status !== "Rejected") return; // re-opened already (another tab, a second click)
+      if (o.mergedInto) return; // moved onto its build order — that order is the sale
       o.timeline.forEach((t, i) => { if (i > 0) { t.status = "pending"; t.date = undefined; } });
       o.timeline[0].status = "done";
-      o.status = statusFromTimeline(o.timeline, o.forReadyStock, o.materialSourcing === "readyStock");
+      o.status = statusFromTimeline(o.timeline, o.forReadyStock, isShelfSale(o));
       // Re-opening a Ready-Stock sale re-reserves the piece from inventory (it was
       // returned on cancel/reject).
       if (o.materialSourcing === "readyStock" && o.readyStockItemId) {
@@ -2237,6 +2241,22 @@ function OrderDetailPageBody() {
   const isStaffUser = user!.role !== "client";
   const editWhy = orderEditAccess(db, user, can, order) ?? orderSpecLocks(db, order).all;
   const cancelWhy = cancelAccess(user) ?? cancelBlocker(db, order);
+  const undoSaleWhy = order.stockSale ? (cancelAccess(user) ?? undoSaleBlocker(db, order)) : undefined;
+  const undoSale = async () => {
+    // Checked on records fresh from the server — an invoice not yet arrived must not let it through.
+    if (!(await recordsReady(SALE_REPAIR_COLS))) { toast.error(STILL_LOADING); return; }
+    const why = undoSaleBlocker(loadDb(), loadDb().orders.find(o => o.id === order.id) ?? order);
+    if (why) { toast.error(why); return; }
+    const item = db.readyStock.find(i => i.id === order.stockSale?.itemId);
+    if (!(await confirmBox(`Undo the sale on ${order.orderNumber}?
+
+It goes back to being our own build, and ${item ? item.name : "its piece"} goes back on the Ready Stock shelf. Money paid on it becomes the client's credit. The order keeps its number, photos and CAD.`, { danger: true, confirmText: "Undo sale" }))) return;
+    let ok = false;
+    try { updateDbAs({ summary: `${order.orderNumber}: sale undone — back in Ready Stock` }, d => { ok = undoStockSale(d, order.id, whoOf(user)); }); }
+    catch (e) { toast.error(e instanceof Error && e.name === "StaleDataError" ? "Still getting the latest — try again in a moment" : "Not undone — try again"); return; }
+    if (ok) toast.success(`${order.orderNumber} is back in Ready Stock`);
+    else toast.error("Not undone — it changed meanwhile. Reload the page and try again.");
+  };
   const changeClientWhy = editWhy ?? clientChangeBlocker(db, order);
   const deleteWhy = orderDeleteBlocker(db, user, order);
   const returnWhy = !mayReturn ? needsAccess("invoices", "edit") : returnBlocker(order);
@@ -2275,14 +2295,17 @@ function OrderDetailPageBody() {
       show: isStaffUser },
     { label: "Melt", icon: Flame, danger: true, hint: meltReason ?? "Gold back to a factory or stock, stones back to stock", disabled: !!meltReason, onSelect: () => setMeltOpen(true),
       show: isStaffUser },
+    // A piece we built, sold on its own order: undone, not cancelled — the build goes back on the shelf as it was.
+    { label: "Undo sale", icon: Undo2, danger: true, hint: undoSaleWhy ?? "Back to Ready Stock as it was — money paid becomes the client's credit",
+      disabled: !!undoSaleWhy, onSelect: undoSale, show: isStaffUser && !!order.stockSale },
     { label: "Cancel order", icon: XCircle, danger: true, hint: cancelWhy ?? "Close it as rejected — it can be re-opened", onSelect: cancelOrder, disabled: cancelling || !!cancelWhy,
-      show: isStaffUser },
+      show: isStaffUser && !order.stockSale },
     { label: "Delete", icon: Trash2, danger: true, hint: deleteWhy ?? deleteHint(db, order), disabled: !!deleteWhy,
       onSelect: async () => { if (await deleteOrderFlow(order.id, user!)) nav("/orders"); }, show: isStaffUser },
   ];
   // A deleted order is only looked at — or brought back by the admin.
   const shownActions: MoreAction[] = order.deletedAt
-    ? [{ label: "Restore", icon: Undo2, hint: "Back as a cancelled order — re-open it to carry on", onSelect: () => { void restoreOrderFlow(order.id, user!); }, show: user!.role === "admin" }]
+    ? [{ label: "Restore", icon: Undo2, hint: "Back as a cancelled order — re-open it to carry on", onSelect: () => { void restoreOrderFlow(order.id, user!); }, show: user!.role === "admin" && !order.mergedInto }]
     : orderActions;
 
   // A payment row: corrected or deleted as the receipt it came in on.
@@ -2354,7 +2377,20 @@ function OrderDetailPageBody() {
         const closed = order.status === "Rejected";
         return (
           <div className="p-4 sm:p-6">
-            {order.deletedAt && (
+            {/* Sold from Ready Stock on a separate order before builds were sold on themselves — moved onto its build. */}
+            {order.mergedInto && (() => {
+              const to = db.orders.find(o => o.id === order.mergedInto);
+              return (
+                <div className="mb-4 flex flex-wrap items-center gap-3 rounded-xl border border-primary/30 bg-primary/5 px-4 py-3 text-sm">
+                  <PackageCheck className="h-4 w-4 text-primary shrink-0" />
+                  <p className="flex-1 min-w-0 text-foreground/90">
+                    This sale was moved onto the piece's own order{to ? ` ${to.orderNumber}` : ""} — its client, price, payments and invoice are there now.
+                  </p>
+                  {to && <Button size="sm" variant="outline" className="rounded-lg" onClick={() => nav(`/orders/${to.id}`)}>Open {to.orderNumber}</Button>}
+                </div>
+              );
+            })()}
+            {order.deletedAt && !order.mergedInto && (
               <div className="mb-4 flex flex-wrap items-center gap-3 rounded-xl border border-destructive/30 bg-destructive/5 px-4 py-3 text-sm">
                 <Trash2 className="h-4 w-4 text-destructive shrink-0" />
                 <p className="flex-1 min-w-0 text-foreground/90">
@@ -2740,7 +2776,7 @@ function OrderDetailPageBody() {
             </div>
           );
         })()}
-        {canEditStage() && order.status === "Rejected" && !order.melted && (
+        {canEditStage() && order.status === "Rejected" && !order.melted && !order.mergedInto && (
           <div className="mt-5 flex items-center gap-3 flex-wrap">
             <span className="text-sm text-destructive font-medium">This order was rejected.</span>
             <AsyncButton variant="outline" onClick={reopenOrder} className="rounded-xl gap-2">
@@ -3634,8 +3670,9 @@ function OrderDetailPageBody() {
                       <PackageCheck className="h-3 w-3" /> In Ready Stock — open the piece
                     </button>
                   )}
-                  {/* Once its pieces are on the shelf, a build's steps stay done — the piece is changed in Ready Stock. */}
-                  {canEditStage() && isDone && !order.readyStockCreatedId && (
+                  {/* Once its pieces are on the shelf, a build's steps stay done — the piece is changed in Ready Stock.
+                      Sold on itself: its sale's own steps (dispatch, delivery) can still be put right. */}
+                  {canEditStage() && isDone && (!order.readyStockCreatedId || (!!order.stockSale && (t.step === "Dispatch" || t.step === "Delivered"))) && (
                     <button
                       onClick={() => revertStep(idx)}
                       className="mt-2 inline-flex items-center gap-1 h-7 px-2 rounded-lg text-[11px] font-medium text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors">

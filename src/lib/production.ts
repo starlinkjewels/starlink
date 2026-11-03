@@ -58,7 +58,8 @@ export function productionTrack(
   settings?: Pick<Settings, "productionDelayDays"> | null,
 ): ProductionTrack | null {
   if (o.deletedAt || o.status === "Rejected" || o.melted || isDiamondOnlyOrder(o) || o.materialSourcing === "readyStock") return null;
-  const tl = o.timeline ?? [];
+  // A build sold on itself (lib/stockSale.ts): how long it took to make is its build's stages, not the sale's.
+  const tl = o.stockSale?.before.timeline ?? o.timeline ?? [];
   const ip = tl.findIndex(t => t.step === "In Production");
   // Production begins when the stage before In Production is finished; a
   // timeline without that stage begins it where the status turns In Production.

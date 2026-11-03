@@ -12,7 +12,7 @@ const list = (xs: string[]) => (xs.length <= 2 ? xs.join(", ") : `${xs.slice(0, 
 
 /** Why this lot can't be deleted; undefined when nothing points at it. */
 export function readyStockDeleteBlocker(db: Pick<DB, "orders">, item: ReadyStockItem): string | undefined {
-  const sold = db.orders.filter(o => o.readyStockItemId === item.id);
+  const sold = db.orders.filter(o => o.readyStockItemId === item.id || o.stockSale?.itemId === item.id);
   if (sold.length) return `Sold on order ${list(sold.map(o => o.orderNumber))} — set quantity to 0 instead`;
   const notes: string[] = [];
   for (const o of db.orders) for (const r of o.returns ?? []) if (r.readyStockId === item.id) notes.push(r.creditNoteNo);
