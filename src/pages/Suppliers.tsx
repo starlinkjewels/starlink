@@ -25,8 +25,18 @@ import { usePagination } from "@/hooks/usePagination";
 import { PaginationBar } from "@/components/PaginationBar";
 import { confirmBox } from "@/lib/confirm";
 import { useUrlState } from "@/hooks/useUrlState";
+import { useSupplierGoldOwed } from "@/hooks/useSupplierGold";
+import { fmtG } from "@/lib/supplierGold";
 
 const PAGE_SIZE = 9;
+
+/** Fine grams owed back to a supplier in gold — none to show for one without a gold account. */
+function GoldOwedCell({ g }: { g: number | undefined }) {
+  if (g === undefined) return <span className="text-muted-foreground/50">—</span>;
+  if (Math.abs(g) <= 0.0005) return <span className="text-xs font-semibold text-success whitespace-nowrap">✓ Returned</span>;
+  return <div><span className={`tabular-nums whitespace-nowrap font-semibold ${g > 0 ? "text-destructive" : "text-blue-600"}`}>{fmtG(g)}</span>
+    <p className="text-[10px] text-muted-foreground whitespace-nowrap">fine · to give back</p></div>;
+}
 
 /** A click inside a card that does its own thing (its menu, its link), so it
  *  must not also open the supplier. The menu is portalled, but React still
@@ -60,6 +70,10 @@ export function SuppliersPage() {
   // is light in pageData.ts and does not download the supplier books for them).
   const accounts = new Map(db.suppliers.map(s => [s.id, supplierFigures(db, s)]));
   const netOf = (s: Supplier) => accounts.get(s.id)?.net ?? 0;
+  // Gold taken from them on loan, in fine grams — only for a supplier who has a
+  // gold account; the column and the card's figure are there only then.
+  const goldOwed = useSupplierGoldOwed(db.suppliers);
+  const goldOf = (s: Supplier) => goldOwed?.get(s.id);
 
   // Whoever there is most money to settle with comes first — either way round,
   // since an overpaid supplier needs chasing as much as an unpaid one. Settled
@@ -160,6 +174,9 @@ export function SuppliersPage() {
         if (net < 0) return <div><span className="tabular-nums whitespace-nowrap font-semibold text-blue-600">+{fmtMoneyInr(-net)}</span><p className="text-[10px] text-muted-foreground whitespace-nowrap">owes you</p></div>;
         return <span className="text-xs font-semibold text-success whitespace-nowrap">✓ Settled</span>;
       } },
+    ...(goldOwed?.size ? [{ key: "gold", header: "Gold owed", align: "right" as const, kind: "number" as const,
+      sortValue: (s: Supplier) => goldOf(s), csv: (s: Supplier) => goldOf(s) ?? "",
+      cell: (s: Supplier) => <GoldOwedCell g={goldOf(s)} /> }] : []),
   ];
 
   // What an opened row adds: the contact details the Contact column leaves out,
@@ -234,6 +251,7 @@ export function SuppliersPage() {
                 const owed = rows.reduce((t, s) => t + Math.max(0, -netOf(s)), 0);
                 return <><span className="text-destructive">{fmtMoneyInr(owe)}</span>{owed > 0 && <span className="text-blue-600"> · +{fmtMoneyInr(owed)}</span>}</>;
               },
+              gold: rows => `${fmtG(rows.reduce((t, s) => t + (goldOf(s) ?? 0), 0))} fine`,
             }}
             rowActions={actionsFor}
             emptyText="No suppliers found."
@@ -257,6 +275,7 @@ export function SuppliersPage() {
       <div className="grid gap-3 md:grid-cols-2 lg:grid-auto-cards">
         {paged.map(s => {
           const account = accounts.get(s.id)!;
+          const gold = goldOf(s);
           return (
             // The whole card opens the supplier; what can be done to them is in
             // its one ⋯ — the same menu as a list row, each item greyed with
@@ -287,7 +306,7 @@ export function SuppliersPage() {
                   unpaid bills: a supplier holding an advance has no unpaid
                   bill, so the card said "Cleared" while their ledger said they
                   owed us money. */}
-              <div className="mt-4 pt-3 grid grid-cols-2 gap-1.5 border-t border-border/50 text-center">
+              <div className={`mt-4 pt-3 grid ${gold === undefined ? "grid-cols-2" : "grid-cols-3"} gap-1.5 border-t border-border/50 text-center`}>
                 <div>
                   <p className="text-[10px] text-muted-foreground mb-0.5">Purchased</p>
                   <p className={`text-xs font-semibold tabular-nums ${account.totalPurchased ? "text-brand-dark" : "text-muted-foreground"}`}>{fmtMoneyInr(account.totalPurchased)}</p>
@@ -300,6 +319,14 @@ export function SuppliersPage() {
                       : "✓ Cleared"}
                   </p>
                 </div>
+                {gold !== undefined && (
+                  <div>
+                    <p className="text-[10px] text-muted-foreground mb-0.5">Gold owed</p>
+                    <p className={`text-xs font-semibold tabular-nums ${gold > 0.0005 ? "text-destructive" : gold < -0.0005 ? "text-blue-600" : "text-success"}`}>
+                      {Math.abs(gold) > 0.0005 ? `${fmtG(gold)} fine` : "✓ Returned"}
+                    </p>
+                  </div>
+                )}
               </div>
 
               <div className="mt-auto pt-3 flex items-center gap-2">

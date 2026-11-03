@@ -782,6 +782,9 @@ function SupplierHistoryPageBody() {
         { label: "Purchased", value: fmtMoneyInr(account.totalPurchased), icon: ShoppingBag, sub: `${purchases.length} purchase${purchases.length === 1 ? "" : "s"}` },
         ...(account.received > 0 ? [{ label: "Refunds received", value: fmtMoneyInr(account.received), icon: ArrowDownCircle }] : []),
         ...(account.sold > 0 ? [{ label: "Sold to them", value: fmtMoneyInr(account.sold), icon: Tag }] : []),
+        // Gold taken from them on loan — only when they have a gold account (its lines are below).
+        ...(goldShown ? [{ label: "Gold owed", value: Math.abs(goldOwed) > 0.0005 ? `${fmtG(goldOwed)} fine` : "✓ Returned", icon: Coins,
+          tone: goldOwed > 0.0005 ? "out" as const : "in" as const, sub: goldOwed > 0.0005 ? "24K gold to give back" : "Nothing owed in gold" }] : []),
       ]} />
       <ExportDialog open={showExport} onClose={() => setShowExport(false)} title={`${supplier.name} ledger`} options={[
         { label: "Account Statement — PDF", sublabel: "Purchases, payments & receipts", kind: "pdf", run: exportPdf },
