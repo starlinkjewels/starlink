@@ -100,12 +100,18 @@ export interface CostLine {
   amountInr: number;
   /** Not yet on record: the order's own estimate, until the real thing is. */
   estimate?: boolean;
+  /** The issue it values, and its rate per unit — the order's material table shows the same figure. */
+  issuanceId?: string;
+  rateInr?: number;
+  /** What the rate is per, when not the material's own unit ("g fine"). */
+  rateUnit?: string;
 }
 
 export interface MissingCost {
   label: string;
   /** Why it cannot be valued yet. */
   reason: string;
+  issuanceId?: string;
 }
 
 export interface OrderCost {
@@ -342,7 +348,7 @@ export function orderCost(db: DB, order: Order, depth = 0): OrderCost {
         label: clientGold
           ? `Gold we added — the client's gold was ${fine}g fine short × ${fmtRate(fg.rate, "g fine")} (${fg.basis})`
           : `${mi.finishedNetWeight}g at ${purityTxt} = ${fine}g fine × ${fmtRate(fg.rate, "g fine")} (${fg.basis})`,
-        amountInr: r2(fine * fg.rate),
+        amountInr: r2(fine * fg.rate), issuanceId: mi.id, rateInr: fg.rate, rateUnit: "g fine",
       });
       continue;
     }
@@ -361,10 +367,10 @@ export function orderCost(db: DB, order: Order, depth = 0): OrderCost {
         if (pk.purchaseId) counted.add(pk.purchaseId);
         if (mi.finishDisposition === "returned") continue;
         if (!pk.ratePerCaratInr) {
-          out.missing.push({ label: `${pk.shape} ${pk.carat}ct (${pk.certificateNumber})`, reason: "no purchase rate recorded on the stone" });
+          out.missing.push({ label: `${pk.shape} ${pk.carat}ct (${pk.certificateNumber})`, reason: "no purchase rate recorded on the stone", issuanceId: mi.id });
           continue;
         }
-        bucket.push({ label: `${pk.shape} ${pk.carat}ct certified · ${pk.certificateNumber}`, amountInr: r2(pk.ratePerCaratInr * pk.carat) });
+        bucket.push({ label: `${pk.shape} ${pk.carat}ct certified · ${pk.certificateNumber}`, amountInr: r2(pk.ratePerCaratInr * pk.carat), issuanceId: mi.id });
       }
       if (mi.sourcePurchaseId) counted.add(mi.sourcePurchaseId);
       continue;
@@ -401,7 +407,7 @@ export function orderCost(db: DB, order: Order, depth = 0): OrderCost {
       const desc = [spec.mm && `${spec.mm} mm`, spec.color, spec.clarity].filter(Boolean).join(" ");
       bucket.push({
         label: `${used}${unit} ${what}${desc ? ` ${desc}` : ""} · from stock, at the price entered${spec.ratePerCaratInr ? ` (${fmtRate(spec.ratePerCaratInr, unit)})` : ""}`,
-        amountInr: r2((typed / mi.quantityIssued) * used),
+        amountInr: r2((typed / mi.quantityIssued) * used), issuanceId: mi.id, rateInr: r2(typed / mi.quantityIssued),
       });
       continue;
     }
@@ -422,14 +428,14 @@ export function orderCost(db: DB, order: Order, depth = 0): OrderCost {
       if (fg && fine > 0) {
         bucket.push({
           label: `${used}g ${mi.purityOrQuality} ${where} = ${fine}g fine × ${fmtRate(fg.rate, "g fine")} (${fg.basis}) — until the finished weight is in`,
-          amountInr: r2(fine * fg.rate),
+          amountInr: r2(fine * fg.rate), issuanceId: mi.id, rateInr: fg.rate, rateUnit: "g fine",
         });
         continue;
       }
     }
     if (avg === null) {
       out.missing.push({
-        label: `${used}${unit} ${what}`,
+        label: `${used}${unit} ${what}`, issuanceId: mi.id,
         reason: mi.material === "gold"
           ? `${where} — no gold purchase with a price is on file to value it by`
           : `${where} — no ${what} has ever been bought with a price to value it by`,
@@ -438,7 +444,7 @@ export function orderCost(db: DB, order: Order, depth = 0): OrderCost {
     }
     bucket.push({
       label: `${used}${unit} ${what} · ${where}, at average cost ${fmtRate(avg, unit)}`,
-      amountInr: r2(avg * used),
+      amountInr: r2(avg * used), issuanceId: mi.id, rateInr: avg,
     });
   }
 

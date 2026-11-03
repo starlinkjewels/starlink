@@ -12,6 +12,7 @@ import { fmtMoneyInr, issuancePending, issuanceUsed, purchasePending } from "./m
 import { diamondSpec, fmtQty, isOtherMaterial, materialName, materialUnit, purchaseQty, type MaterialKey, type MaterialUnit } from "./materials";
 import { finishRecordOf, isReworkIssue } from "./rework";
 import { gstText } from "./purchaseGst";
+import { orderCost } from "./orderCost";
 
 export interface MaterialLine {
   id: string;
@@ -31,6 +32,10 @@ export interface MaterialLine {
   source: string;
   sourceSub?: string;
   costInr?: number;
+  /** What it was priced at, per unit (₹/ct, ₹/g, ₹/g fine), and on what basis. */
+  rate?: { inr: number; unit: string; basis: "bill" | "average" | "typed" | "fine gold" };
+  /** No figure in the Cost column, and why: "Not priced" — said, never left blank. */
+  costNote?: string;
   dueInr: number;
   labourDueInr: number;
   status: string;
@@ -56,7 +61,7 @@ export function repairIssuesOf(db: Pick<DB, "materialIssuances">, order: Pick<Or
   ];
 }
 
-export function orderMaterialLines(db: DB, order: Order, faDone: boolean): MaterialLine[] {
+export function orderMaterialLines(db: DB, order: Order, faDone: boolean, opts: { costs?: boolean } = {}): MaterialLine[] {
   const linkedPurchases = db.purchases.filter(p => p.orderId === order.id).sort((a, b) => +new Date(b.createdAt) - +new Date(a.createdAt));
   const linkedIssuances = db.materialIssuances.filter(i => i.orderId === order.id).sort((a, b) => +new Date(b.issuedAt) - +new Date(a.issuedAt));
   const repairs = repairIssuesOf(db, order);
@@ -73,6 +78,24 @@ export function orderMaterialLines(db: DB, order: Order, faDone: boolean): Mater
     : material === "diamond" ? (kind === "certified" ? "Certified diamond" : "Loose diamond")
     : materialName(db.settings, material as MaterialKey);
 
+  // What each issue cost, as the order's Cost & Profit values it (lib/orderCost.ts): stones from
+  // our stock at their bag's weighted-average cost (or the price typed when they went out), gold
+  // by its fine content — the same figure in both places. Skipped where no cost is wanted.
+  const valued = new Map<string, { inr: number; rate?: number; rateUnit?: string }>();
+  const unpriced = new Map<string, string>();
+  let goldFinished = false;
+  if (opts.costs !== false) {
+    const c = orderCost(db, order);
+    for (const l of [...c.gold, ...c.diamond, ...c.materials]) {
+      if (!l.issuanceId) continue;
+      const cur = valued.get(l.issuanceId);
+      valued.set(l.issuanceId, { inr: Math.round(((cur?.inr ?? 0) + l.amountInr) * 100) / 100, rate: l.rateInr, rateUnit: l.rateUnit });
+    }
+    for (const m of c.missing) if (m.issuanceId) unpriced.set(m.issuanceId, m.reason);
+    goldFinished = linkedIssuances.some(i => i.material === "gold" && i.finishedNetWeight != null);
+  }
+  const perUnit = (inr: number | undefined, q: number) => (inr != null && q > 0 ? Math.round((inr / q) * 100) / 100 : undefined);
+
   const lines: MaterialLine[] = [];
   // Purchases not yet shown as an issue below — a bought diamond is one row, not two.
   for (const p of linkedPurchases.filter(x => !linkedIssuances.some(i => i.sourcePurchaseId === x.id))) {
@@ -85,6 +108,7 @@ export function orderMaterialLines(db: DB, order: Order, faDone: boolean): Mater
       pcs: p.material === "diamond" ? (p.diamond?.kind === "certified" ? 1 : p.diamond?.pieces) : materialUnit(db.settings, p.material) === "pcs" ? undefined : p.other?.pieces,
       source: supplierText(p), sourceSub: brokerText(p),
       costInr: p.totalInr, dueInr: purchasePending(p), labourDueInr: 0,
+      ...(perUnit(p.totalInr, purchaseQty(p)) ? { rate: { inr: perUnit(p.totalInr, purchaseQty(p))!, unit: materialUnit(db.settings, p.material), basis: "bill" as const } } : {}),
       status: "Bought", tone: "neutral", purchase: p,
     });
   }
@@ -112,6 +136,28 @@ export function orderMaterialLines(db: DB, order: Order, faDone: boolean): Mater
           ? [`${r3(mi.quantityIssued - returnedCt)} ct used · ${returnedCt} ct back`, "amber"]
           : mi.finishDisposition === "returned" ? [mi.source === "client" ? "Back to the client" : "Back to stock", "amber"] : ["Used in piece", "green"])
       : mi.status === "open" ? ["In progress", "blue"] : ["Closed", "green"];
+    // The bill it was bought on; else the price typed when it went out; else what the order's
+    // cost values it at (the bag's average) — or why it can't be priced yet.
+    const costOfIssue = (): Pick<MaterialLine, "costInr" | "rate" | "costNote"> => {
+      if (srcPurchase) {
+        const r = perUnit(srcPurchase.totalInr, purchaseQty(srcPurchase));
+        return { costInr: srcPurchase.totalInr, ...(r ? { rate: { inr: r, unit, basis: "bill" } } : {}) };
+      }
+      if (spec?.amountInr != null) {
+        const r = spec.ratePerCaratInr || perUnit(spec.amountInr, mi.quantityIssued);
+        return { costInr: spec.amountInr, ...(r ? { rate: { inr: r, unit, basis: "typed" } } : {}) };
+      }
+      if (mi.source === "client") return { costNote: "Client's own" };
+      const v = valued.get(mi.id);
+      if (v) {
+        // Several certified stones: their own prices added up, so the rate is what they came to per carat.
+        const rate = v.rate ?? perUnit(v.inr, mi.diamondKind === "certified" ? packs.reduce((t, x) => t + (mi.finishDisposition === "returned" ? 0 : x.carat), 0) : used || mi.quantityIssued);
+        return { costInr: v.inr, ...(rate ? { rate: { inr: rate, unit: v.rateUnit ?? unit, basis: mi.diamondKind === "certified" ? "bill" : v.rateUnit === "g fine" ? "fine gold" : "average" } } : {}) };
+      }
+      if (unpriced.has(mi.id)) return { costNote: "Not priced" };
+      if (mi.material === "gold" && goldFinished) return { costNote: "In the finished gold" };
+      return {};
+    };
     lines.push({
       // Stones a diamond-only order sold straight from stock have no factory: the row opens the bags.
       id: mi.id, href: mi.factoryId ? `/factories/${mi.factoryId}` : "/stock/diamond", gold: mi.material === "gold",
@@ -128,7 +174,8 @@ export function orderMaterialLines(db: DB, order: Order, faDone: boolean): Mater
         : mi.piecesIssued ? Math.max(0, mi.piecesIssued - (mi.finishReturnedPcs ?? 0)) : undefined,
       source: srcPurchase ? supplierText(srcPurchase) : mi.source === "stock" ? "Our stock" : mi.source === "factoryPool" ? "Factory's holding" : mi.source === "melt" ? "Melted piece" : mi.source === "transfer" ? "Transfer" : mi.source === "client" ? "Client's own" : "—",
       sourceSub: [srcPurchase ? brokerText(srcPurchase) : undefined, mi.factoryId ? `to ${factory?.name || "factory"}` : "sold with the order"].filter(Boolean).join(" · "),
-      costInr: srcPurchase?.totalInr ?? spec?.amountInr, dueInr: srcPurchase ? purchasePending(srcPurchase) : 0, labourDueInr: issuancePending(mi),
+      ...costOfIssue(),
+      dueInr: srcPurchase ? purchasePending(srcPurchase) : 0, labourDueInr: issuancePending(mi),
       status, tone, purchase: srcPurchase, issuance: mi,
     });
   }
@@ -165,6 +212,9 @@ export function orderMaterialLines(db: DB, order: Order, faDone: boolean): Mater
       }
     }
     const labour = issues.reduce((s, i) => s + (i.makingCharges?.amountInr ?? 0), 0);
+    // The stones and gold it added, valued as the order's cost values them, besides its labour.
+    const added = issues.reduce((s, i) => s + (valued.get(i.id)?.inr ?? 0), 0);
+    const notPriced = issues.some(i => unpriced.has(i.id));
     const qty = [goldG ? signed(goldG, "g") : "", diaCt ? signed(diaCt, "ct") : ""].filter(Boolean).join(" · ");
     return {
       id: `repair:${key}`, href: issues[0].factoryId ? `/factories/${issues[0].factoryId}` : "/factories", gold: true,
@@ -173,7 +223,9 @@ export function orderMaterialLines(db: DB, order: Order, faDone: boolean): Mater
       qty: qty || "Labour only",
       pcs: pcs || undefined,
       source: factory?.name || "Factory", sourceSub: fmtDate(at),
-      costInr: labour || undefined, dueInr: 0, labourDueInr: issues.reduce((s, i) => s + issuancePending(i), 0),
+      costInr: labour + added ? Math.round((labour + added) * 100) / 100 : undefined,
+      ...(notPriced ? { costNote: "Part not priced" } : {}),
+      dueInr: 0, labourDueInr: issues.reduce((s, i) => s + issuancePending(i), 0),
       status: "Repair", tone: "amber" as const,
       repair: { key, at, billNo, issues },
     };
