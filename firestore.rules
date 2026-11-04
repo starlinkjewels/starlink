@@ -358,6 +358,17 @@ service cloud.firestore {
     match /campaignVersions/{id} { allow read, create, delete: if isAdmin(); allow update: if false; }
     match /campaignSuppress/{id} { allow read: if isAdmin(); allow write: if false; }
     match /campaignSettings/{id} { allow read, write: if isAdmin(); }
+    // Live gold and $ rates (functions-rates): written only by the server, every minute.
+    // The rates themselves are market prices every signed-in person may see (the
+    // catalogue prices from them); the settings are the admin's; the history and its
+    // events are for admins; the server's own memory (rateState) is nobody else's.
+    match /rates/{id} { allow read: if signedIn(); allow write: if false; }
+    match /rateSettings/{id} { allow read: if isStaff(); allow write: if isAdmin(); }
+    match /rateHistory/{day} {
+      allow read: if isAdmin(); allow write: if false;
+      match /ticks/{t} { allow read: if isAdmin(); allow write: if false; }
+    }
+    match /rateEvents/{id} { allow read: if isAdmin(); allow write: if false; }
     match /apiKeys/{id}   { allow read, write: if isAdmin(); }
     match /apiQuota/{id}  { allow read: if isAdmin(); allow write: if false; }
     match /apiStats/{id}  { allow read: if isAdmin(); allow write: if false; }

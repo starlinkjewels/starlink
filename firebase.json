@@ -29,6 +29,10 @@
     {
       "source": "functions-campaigns",
       "codebase": "campaigns"
+    },
+    {
+      "source": "functions-rates",
+      "codebase": "rates"
     }
   ],
   "hosting": [

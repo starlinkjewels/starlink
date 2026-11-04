@@ -1,5 +1,6 @@
 import { ShopifySettings } from "@/components/settings/ShopifySettings";
 import { EtsySettings } from "@/components/settings/EtsySettings";
+import { LiveRatesSettings } from "@/components/settings/LiveRatesSettings";
 import { CurrencyRatesSettings } from "@/components/CurrencyRatesSettings";
 import { InfoTip, SectionTitle } from "@/components/SectionTitle";
 import { PageHeader } from "@/components/PageHeader";
@@ -11,7 +12,7 @@ import { AppearanceSettings } from "@/components/AppearanceSettings";
 import { BrandStudio } from "@/components/BrandStudio";
 import { ServerTotalsCheck } from "@/components/ServerTotalsCheck";
 import { DataSizePanel } from "@/components/DataSizePanel";
-import { Table2, Palette, Sparkles, ShoppingBag, Store } from "lucide-react";
+import { Table2, Palette, Sparkles, ShoppingBag, Store, TrendingUp } from "lucide-react";
 import { MAIN_COMPANY_ID, companyIdOfInvoice } from "@/lib/companies";
 import { CompaniesSettings } from "@/components/CompaniesSettings";
 import { MaterialsSettings } from "@/components/MaterialsSettings";
@@ -819,6 +820,7 @@ export function SettingsPage() {
     { id: "brand", label: "Brand Studio", icon: Sparkles, show: isAdmin, group: "Business", hint: "Logo, name and colour across the app" },
     { id: "invoice", label: "Invoice & Bill", icon: FileText, show: true, group: "Sales & billing", hint: "Address, bank details and stamp on every bill" },
     { id: "pricing", label: "Pricing Rates", icon: DollarSign, show: canEditRates, group: "Sales & billing", hint: "Rates, exchange rates, shipping" },
+    { id: "liverates", label: "Live gold & $ rates", icon: TrendingUp, show: isAdmin, group: "Sales & billing", hint: "Gold, platinum and ₹/$ every minute, by hand when needed" },
     { id: "labels", label: "Labels & Barcode", icon: Tag, show: canEditRates, group: "Sales & billing", hint: "Jewellery tags and printed labels" },
     { id: "timeline", label: "Production Timeline", icon: ListOrdered, show: isAdmin, group: "Production", hint: "The stages of each kind of order" },
     { id: "orderpage", label: "Order page", icon: LayoutList, show: isAdmin, group: "Production", hint: "The order page's sections, in your order" },
@@ -1596,6 +1598,7 @@ export function SettingsPage() {
       {activeId === "orderpage" && <OrderLayoutSettings />}
       {activeId === "shopify" && <ShopifySettings />}
       {activeId === "etsy" && <EtsySettings />}
+      {activeId === "liverates" && <LiveRatesSettings />}
       {activeId === "videos" && <VideoFixSettings />}
       {activeId === "previews" && <PhotoPreviewSettings />}
 
