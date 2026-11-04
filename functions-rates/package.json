@@ -1,0 +1,22 @@
+{
+  "name": "functions-rates",
+  "description": "Live gold and dollar rates: fetched, checked and chosen every minute (its own codebase: 'rates')",
+  "scripts": {
+    "prebuild": "node scripts/sync-shared.cjs",
+    "build": "tsc",
+    "test": "npm run build && node scripts/test-logic.cjs"
+  },
+  "engines": {
+    "node": "22"
+  },
+  "main": "lib/index.js",
+  "dependencies": {
+    "firebase-admin": "^13.10.0",
+    "firebase-functions": "^6.6.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "typescript": "^5.6.3"
+  },
+  "private": true
+}
