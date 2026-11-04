@@ -3,7 +3,8 @@
 // check of the reading (correct it, confirm it, or have it read again). Shown
 // beside the picture in the Catalog viewer and in Catalog → Please check.
 import { useState } from "react";
-import { CheckCircle2, FileSpreadsheet, Gem, Loader2, Pencil, Plus, RefreshCw, Ruler, Trash2, Undo2 } from "lucide-react";
+import { Link } from "react-router-dom";
+import { CheckCircle2, FileSpreadsheet, Gem, Loader2, Pencil, Plus, RefreshCw, Ruler, ShoppingBag, Trash2, Undo2 } from "lucide-react";
 import { toast } from "sonner";
 import { CellTag } from "@/components/DataTable";
 import { Button } from "@/components/ui/button";
@@ -221,14 +222,17 @@ export function DesignDetails({ item, staff }: { item: CatalogItem; staff: boole
   const key = item.design?.key;
   const design = useDesign(key);
   // A client sees clean or checked details only — never a reading still to check.
+  const open = key && design ? (
+    <Button asChild size="sm" className="w-full gap-1.5 mt-4"><Link to={`/catalog/design/${encodeURIComponent(key)}`}><ShoppingBag className="h-4 w-4" />Open product page{staff ? " & price" : ""}</Link></Button>
+  ) : null;
   if (!staff) {
     if (!design || design.status !== "ok" || !design.specs) return <p className="text-sm text-muted-foreground">{design === undefined && key ? "Loading…" : "Details for this design are not ready yet."}</p>;
-    return <SpecsView specs={design.specs} />;
+    return <><SpecsView specs={design.specs} />{open}</>;
   }
   if (live?.status === "queued") return <p className="text-sm text-muted-foreground flex items-center gap-2"><Loader2 className="h-4 w-4 animate-spin" />Reading this sheet… it takes a few seconds.</p>;
   const again = live?.pending ? <p className="text-xs text-muted-foreground flex items-center gap-1.5 mb-3"><Loader2 className="h-3.5 w-3.5 animate-spin" />Reading it again — the details below stay until then.</p> : null;
   if (!key) return <p className="text-sm text-muted-foreground">This file isn't filed under a design yet — that happens when it is uploaded, or when the catalogue is read (Settings → Catalogue reading).</p>;
   if (design === undefined) return <p className="text-sm text-muted-foreground flex items-center gap-2"><Loader2 className="h-4 w-4 animate-spin" />Loading…</p>;
   if (!design) return <p className="text-sm text-muted-foreground">No details for this design yet.</p>;
-  return <>{again}<DesignDetailsBody design={design} item={item} staff={staff} sheetItem={design.sheetId ? { id: design.sheetId, name: design.items[design.sheetId]?.n ?? "" } : undefined} /></>;
+  return <>{again}<DesignDetailsBody design={design} item={item} staff={staff} sheetItem={design.sheetId ? { id: design.sheetId, name: design.items[design.sheetId]?.n ?? "" } : undefined} />{open}</>;
 }

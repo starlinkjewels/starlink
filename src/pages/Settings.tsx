@@ -2,6 +2,7 @@ import { ShopifySettings } from "@/components/settings/ShopifySettings";
 import { EtsySettings } from "@/components/settings/EtsySettings";
 import { LiveRatesSettings } from "@/components/settings/LiveRatesSettings";
 import { CatalogReadingSettings } from "@/components/settings/CatalogReadingSettings";
+import { ProductPricingSettings } from "@/components/settings/ProductPricingSettings";
 import { CurrencyRatesSettings } from "@/components/CurrencyRatesSettings";
 import { InfoTip, SectionTitle } from "@/components/SectionTitle";
 import { PageHeader } from "@/components/PageHeader";
@@ -22,7 +23,7 @@ import { TimelineSettings } from "@/components/TimelineSettings";
 import { OrderLayoutSettings } from "@/components/OrderLayoutSettings";
 import { VideoFixSettings } from "@/components/VideoFixSettings";
 import { PhotoPreviewSettings } from "@/components/PhotoPreviewSettings";
-import { ListOrdered, LayoutList, Film, Images, ChevronLeft, ScanText } from "lucide-react";
+import { ListOrdered, LayoutList, Film, Images, ChevronLeft, ScanText, Tags } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useUrlState } from "@/hooks/useUrlState";
 import { SettingsSearch } from "@/components/settings-search/SettingsSearch";
@@ -822,6 +823,7 @@ export function SettingsPage() {
     { id: "invoice", label: "Invoice & Bill", icon: FileText, show: true, group: "Sales & billing", hint: "Address, bank details and stamp on every bill" },
     { id: "pricing", label: "Pricing Rates", icon: DollarSign, show: canEditRates, group: "Sales & billing", hint: "Rates, exchange rates, shipping" },
     { id: "liverates", label: "Live gold & $ rates", icon: TrendingUp, show: isAdmin, group: "Sales & billing", hint: "Gold, platinum and ₹/$ every minute, by hand when needed" },
+    { id: "productpricing", label: "Product pricing", icon: Tags, show: isAdmin, group: "Sales & billing", hint: "Catalogue prices: making, diamond grid, margin, each client's prices" },
     { id: "labels", label: "Labels & Barcode", icon: Tag, show: canEditRates, group: "Sales & billing", hint: "Jewellery tags and printed labels" },
     { id: "timeline", label: "Production Timeline", icon: ListOrdered, show: isAdmin, group: "Production", hint: "The stages of each kind of order" },
     { id: "orderpage", label: "Order page", icon: LayoutList, show: isAdmin, group: "Production", hint: "The order page's sections, in your order" },
@@ -1601,6 +1603,7 @@ export function SettingsPage() {
       {activeId === "shopify" && <ShopifySettings />}
       {activeId === "etsy" && <EtsySettings />}
       {activeId === "liverates" && <LiveRatesSettings />}
+      {activeId === "productpricing" && <ProductPricingSettings />}
       {activeId === "videos" && <VideoFixSettings />}
       {activeId === "previews" && <PhotoPreviewSettings />}
       {activeId === "catalogread" && <CatalogReadingSettings />}

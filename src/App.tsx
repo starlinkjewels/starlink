@@ -36,6 +36,7 @@ const ExpensesPage = lazy(() => import("./pages/Expenses").then(m => ({ default:
 const IncomePage = lazy(() => import("./pages/Income").then(m => ({ default: m.IncomePage })));
 const CatalogPage = lazy(() => import("./pages/Catalog").then(m => ({ default: m.CatalogPage })));
 const CatalogCheckPage = lazy(() => import("./pages/CatalogCheck").then(m => ({ default: m.CatalogCheckPage })));
+const ProductPage = lazy(() => import("./pages/ProductPage").then(m => ({ default: m.ProductPage })));
 const ProductPhotosPage = lazy(() => import("./pages/ProductPhotos").then(m => ({ default: m.ProductPhotosPage })));
 const SharedGalleryPage = lazy(() => import("./pages/SharedGallery").then(m => ({ default: m.SharedGalleryPage })));
 const DocShareViewPage = lazy(() => import("./pages/DocShareView").then(m => ({ default: m.DocShareViewPage })));
@@ -219,6 +220,7 @@ export function App() {
           <Route path="income" element={<IncomePage />} />
           <Route path="catalog" element={<CatalogPage />} />
           <Route path="catalog/check" element={<Protected roles={["admin","employee"]}><CatalogCheckPage /></Protected>} />
+          <Route path="catalog/design/:key" element={<ProductPage />} />
           <Route path="product-photos" element={<ProductPhotosPage />} />
           <Route path="ai" element={<StarlinkAiPage />} />
           <Route path="locker" element={<Protected roles={["admin","employee"]}><LockerPage /></Protected>} />

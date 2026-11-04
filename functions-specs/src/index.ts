@@ -31,8 +31,10 @@ import { onTaskDispatched } from "firebase-functions/v2/tasks";
 import { HttpsError, onCall } from "firebase-functions/v2/https";
 import { OWNER_EMAILS, REGION } from "./region";
 import { OCR_VERSION, readExcel, readPicture, type OcrText } from "./ocr";
-import { better, PARSER_VERSION, parseSpecs, sameDesign, type Specs } from "./shared/specParse";
+import { PARSER_VERSION, parseBoth, sameDesign, type Specs } from "./shared/specParse";
 import { arrangeDesign, designOf, isJunk, isSheetFile, learnRules, roleOf, type DesignEntry, type DesignOf, type ItemDesign, type ItemSpecs, type MediaRole, type MediaRules } from "./shared/catalogMedia";
+import { categoryOf, cleanRules, clientSees, defaultChoice, gramsFor, priceDesign, sheetRingUs, takesRingSize, type Ccy, type Choice, type MetalKey } from "./shared/pricing";
+import { cleanSettings as cleanRateSettings, karatRates, type PriceBase } from "./shared/liveRates";
 
 // Local tests run against the emulators only — never the live database.
 if (process.env.FUNCTIONS_EMULATOR === "true" && !process.env.FIRESTORE_EMULATOR_HOST) {
@@ -349,11 +351,8 @@ async function wordsOf(buf: Buffer, kind: "picture" | "excel"): Promise<{ text: 
 }
 
 function meaning(t: OcrText, ctx: { folderName?: string; fileName?: string }): Specs {
-  const a = parseSpecs(t.page, ctx);
-  if (!t.table) return a;
-  const pick = better(a, parseSpecs(t.table, ctx));
-  // The page's sizes and ring size stay from the whole page; the table from whichever read it better.
-  return { ...pick, dimsMm: a.dimsMm.length ? a.dimsMm : pick.dimsMm, ...(a.ringSize ?? pick.ringSize ? { ringSize: a.ringSize ?? pick.ringSize } : {}) };
+  // Both readings as one: the stones from whichever read them, the gold from both (shared/specParse.ts).
+  return parseBoth(t.page, t.table, ctx);
 }
 
 /** A reading kept on its file — in a transaction: not if the file was replaced, deleted or checked by a person meanwhile. */
@@ -547,4 +546,118 @@ export const specsAdmin = onCall<AdminCall>({ region: REGION, memory: "512MiB", 
     return { learnt, preview: { designs: keys.size, ...from, junk, files: its.size, folders: fs.size, loose } };
   }
   throw new HttpsError("invalid-argument", "Unknown action.");
+});
+
+
+/* ─────────────── A design's price (its product page; a shared link) ─────────────── */
+
+// What a buyer may know of a design for the options they choose: the options,
+// the details, and — where they may see it — the price. Never the costs, the
+// rates or the margin behind it: the rules are staff-only (priceRules), and only
+// these answers leave the server. A price with any part missing is no price.
+
+const KEY_OK = /^~?[A-Za-z0-9_~-]{1,140}$/;
+type Ask = { key: string; choice?: Partial<Choice>; clientId?: string; ccy?: Ccy; showPrice: boolean };
+
+async function quote(ask: Ask) {
+  if (!KEY_OK.test(ask.key)) throw new HttpsError("invalid-argument", "Which design?");
+  const [rulesDoc, design, ratesDoc, rateSet] = await Promise.all([
+    db.collection("priceRules").doc("main").get(), db.collection(DESIGNS).doc(ask.key).get(),
+    db.collection("rates").doc("current").get(), db.collection("rateSettings").doc("main").get(),
+  ]);
+  if (!design.exists) throw new HttpsError("not-found", "No such design.");
+  const specs = design.get("specs") as ItemSpecs | null;
+  const ready = !!specs && design.get("status") === "ok";
+  if (!ready) return { ready: false as const, designNo: String(design.get("designNo") ?? "") };
+  const rules = cleanRules(rulesDoc.data());
+  const metal = (specs!.metal ?? {}) as Record<string, number>;
+  // A ring or a band — by its folders, else its letters, else a ring size on its sheet: ring sizes.
+  const names: string[] = [];
+  let fid: string | null = ((design.get("folderIds") as string[] | undefined) ?? [])[0] ?? null;
+  for (let g = 0; fid && g < 30; g++) { const f = (await db.collection(FOLDERS).doc(fid).get()).data(); if (!f) break; names.push(String(f.name ?? "")); fid = (f.parentId as string) || null; }
+  const category = categoryOf(names, String(design.get("designNo") ?? ""), rules);
+  const ring = takesRingSize(category) || (!category && !!specs!.ringSize);
+  const ccy: Ccy = ask.ccy ?? (ask.clientId ? rules.clients[ask.clientId]?.ccy : undefined) ?? (ask.choice?.ccy === "INR" ? "INR" : "USD");
+  const options = {
+    metals: rules.metals.filter(m => gramsFor(metal, m, rules).g > 0),
+    colours: rules.colours.map(c => ({ id: c.id, label: c.label })),
+    ringSizes: ring ? rules.ring.sizes : [], types: rules.diamonds.types, qualities: rules.diamonds.qualities,
+    ccy, hasStones: (specs!.stones?.length ?? 0) > 0, category: category ?? null,
+  };
+  const c = ask.choice ?? {};
+  const pick = options.metals.includes(c.metal as MetalKey) ? (c.metal as MetalKey) : (options.metals.find(m => metal[m] > 0) ?? options.metals[0]);
+  const sheetUs = sheetRingUs(specs!);
+  const choice: Choice | null = pick ? {
+    metal: pick,
+    colour: rules.colours.some(x => x.id === c.colour) ? c.colour : rules.colours[0]?.id,
+    ringUs: ring ? (typeof c.ringUs === "number" && rules.ring.sizes.includes(c.ringUs) ? c.ringUs : sheetUs ?? rules.ring.baseUs) : undefined,
+    diamondType: rules.diamonds.types.some(t => t.id === c.diamondType) ? c.diamondType! : rules.diamonds.types[0]?.id ?? "natural",
+    quality: rules.diamonds.qualities.some(q => q.id === c.quality) ? c.quality! : rules.diamonds.qualities[0]?.id ?? "",
+    ccy, ...(ask.clientId ? { clientId: ask.clientId } : {}),
+  } : null;
+  const price = ratesDoc.get("price") as PriceBase | undefined;
+  const rates = price ? { karat: karatRates(price, cleanRateSettings(rateSet.data())), usdInr: price.usdInr } : null;
+  const p = choice ? priceDesign(specs!, choice, rules, rates) : null;
+  // The details a buyer sees: the stones, and the grams of the metal chosen — nothing of the sheet's other numbers.
+  const details = { stones: specs!.stones ?? [], stoneTotals: specs!.stoneTotals ?? null, dimsMm: specs!.dimsMm ?? [], ringSize: specs!.ringSize ?? null, grams: p?.grams ?? 0, sheetUs: sheetUs ?? null };
+  const priced = ask.showPrice && p && !p.missing.length;
+  return {
+    ready: true as const, designNo: String(design.get("designNo") ?? ""), options, choice, details,
+    // The total for the selection — nothing of how it is made up, not even its GST.
+    ...(priced ? { price: p!.price, ccy: p!.ccy, asOf: price?.at ?? null } : { price: null }),
+  };
+}
+
+/** A signed-in buyer (a client) — their own price, or details only. Staff: any client's, to see what they see. */
+export const specsPrice = onCall<{ key: string; choice?: Partial<Choice> }>({ region: REGION, memory: "256MiB", maxInstances: 5, timeoutSeconds: 30 }, async req => {
+  if (!req.auth?.uid) throw new HttpsError("unauthenticated", "Sign in first.");
+  const idx = (await db.collection("userByAuth").doc(req.auth.uid).get()).data() as { role?: string; status?: string; clientId?: string } | undefined;
+  const owner = OWNER_EMAILS.includes(String(req.auth.token?.email ?? "").toLowerCase());
+  if (!owner && idx?.status !== "active") throw new HttpsError("permission-denied", "Your account is not active.");
+  const staff = owner || idx?.role === "admin" || idx?.role === "employee";
+  // A client is always priced as themselves — never as a client they name.
+  const clientId = staff ? (typeof req.data?.choice?.clientId === "string" ? req.data.choice.clientId : undefined) : idx?.clientId;
+  const rules = cleanRules((await db.collection("priceRules").doc("main").get()).data());
+  const see = staff ? "price" : clientSees(rules, clientId);
+  const q = await quote({ key: String(req.data?.key ?? ""), choice: req.data?.choice, clientId, showPrice: see === "price" });
+  return { see, ...q };
+});
+
+/** Anyone with a shared design's link: what the share lets them see (the price only if it was shared with one). */
+export const specsShare = onCall<{ id: string; choice?: Partial<Choice> }>({ region: REGION, memory: "256MiB", maxInstances: 5, timeoutSeconds: 30 }, async req => {
+  const id = String(req.data?.id ?? "");
+  if (!/^[A-Za-z0-9_-]{1,80}$/.test(id)) throw new HttpsError("invalid-argument", "Which link?");
+  const share = (await db.collection("shares").doc(id).get()).data() as { kind?: string; designKey?: string; showPrice?: boolean; priceFor?: string; ccy?: Ccy; expiresAt?: string } | undefined;
+  if (!share || share.kind !== "design" || !share.designKey) throw new HttpsError("not-found", "This link isn't there any more.");
+  if (share.expiresAt && Date.parse(share.expiresAt) < Date.now()) throw new HttpsError("failed-precondition", "This link has expired.");
+  return quote({ key: share.designKey, choice: req.data?.choice, clientId: share.priceFor || undefined, ccy: share.ccy === "INR" || share.ccy === "USD" ? share.ccy : undefined, showPrice: !!share.showPrice });
+});
+
+/** A page of catalogue cards: each design's price as the card shows it (defaultChoice) — the total alone, for whoever may see it. */
+export const specsCards = onCall<{ keys: string[] }>({ region: REGION, memory: "256MiB", maxInstances: 5, timeoutSeconds: 30 }, async req => {
+  if (!req.auth?.uid) throw new HttpsError("unauthenticated", "Sign in first.");
+  const idx = (await db.collection("userByAuth").doc(req.auth.uid).get()).data() as { role?: string; status?: string; clientId?: string } | undefined;
+  const owner = OWNER_EMAILS.includes(String(req.auth.token?.email ?? "").toLowerCase());
+  if (!owner && idx?.status !== "active") throw new HttpsError("permission-denied", "Your account is not active.");
+  const staff = owner || idx?.role === "admin" || idx?.role === "employee";
+  const clientId = staff ? undefined : idx?.clientId;
+  const keys = [...new Set((Array.isArray(req.data?.keys) ? req.data.keys : []).map(String).filter(k => KEY_OK.test(k)))].slice(0, 60);
+  const [rulesDoc, ratesDoc, rateSet] = await Promise.all([db.collection("priceRules").doc("main").get(), db.collection("rates").doc("current").get(), db.collection("rateSettings").doc("main").get()]);
+  const rules = cleanRules(rulesDoc.data());
+  const see = staff ? "price" : clientSees(rules, clientId);
+  if (see !== "price" || !keys.length) return { see, prices: {} };
+  const price = ratesDoc.get("price") as PriceBase | undefined;
+  const rates = price ? { karat: karatRates(price, cleanRateSettings(rateSet.data())), usdInr: price.usdInr } : null;
+  const ccy: Ccy = (clientId ? rules.clients[clientId]?.ccy : undefined) ?? "USD";
+  const docs = await db.getAll(...keys.map(k => db.collection(DESIGNS).doc(k)));
+  const prices: Record<string, { price: number; ccy: Ccy }> = {};
+  for (const d of docs) {
+    const specs = d.get("specs") as ItemSpecs | null;
+    if (!d.exists || !specs || d.get("status") !== "ok") continue;
+    const choice = defaultChoice(specs, rules, ccy, clientId);
+    if (!choice) continue;
+    const p = priceDesign(specs, choice, rules, rates);
+    if (!p.missing.length) prices[d.id] = { price: p.price, ccy: p.ccy };
+  }
+  return { see, prices };
 });
