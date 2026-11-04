@@ -33,6 +33,10 @@
     {
       "source": "functions-rates",
       "codebase": "rates"
+    },
+    {
+      "source": "functions-specs",
+      "codebase": "specs"
     }
   ],
   "hosting": [

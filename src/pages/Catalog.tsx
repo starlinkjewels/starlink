@@ -31,8 +31,12 @@ import {
   ArrowUp,
   ArrowDown,
   Search,
+  Info,
+  ClipboardCheck,
 } from "lucide-react";
 import { useUrlState } from "@/hooks/useUrlState";
+import { useBackToClose } from "@/hooks/useBackNav";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { MoreMenu, type MoreAction } from "@/components/MoreMenu";
 import { PageHeader } from "@/components/PageHeader";
 import { ActionSheet } from "@/components/ActionSheet";
@@ -51,6 +55,8 @@ import { uploadDataUrl, uploadFile } from "@/lib/storage";
 import { imageForUpload, keepsOriginal } from "@/lib/images";
 import { makePreview } from "@/lib/photoPreview";
 import { VideoPoster } from "@/components/VideoPoster";
+import { DesignDetails } from "@/components/catalog/DesignDetails";
+import { SpecsBadge } from "@/components/catalog/SpecsBadge";
 import { useAuth } from "@/lib/auth";
 import { VirtualGrid } from "@/components/VirtualGrid";
 import {
@@ -112,6 +118,7 @@ function Lightbox({
   onClose,
   onDownload,
   downloadBlocked,
+  staff,
 }: {
   items: CatalogItem[];
   startIndex: number;
@@ -122,9 +129,15 @@ function Lightbox({
   onDownload?: (item: CatalogItem) => void;
   /** Why this person can't download (greyed, saying so), as the ⋯ does. */
   downloadBlocked?: string;
+  /** Staff: may check and correct a design's details. */
+  staff?: boolean;
 }) {
   const [idx, setIdx] = useState(startIndex);
   const [dir, setDir] = useState(0);
+  // Back closes the viewer first, and the folder stays.
+  useBackToClose(true, onClose);
+  // The design's details beside the picture: open at first on a laptop, a tap away on a phone.
+  const [info, setInfo] = useState(() => typeof window !== "undefined" && window.innerWidth >= 1024);
 
   const item = items[idx];
   const hasPrev = idx > 0;
@@ -178,6 +191,18 @@ function Lightbox({
           )}
         </p>
         <div className="flex items-center gap-2 shrink-0">
+          {item.design && (
+            <button
+              type="button"
+              onClick={() => setInfo(v => !v)}
+              aria-pressed={info}
+              aria-label="Details"
+              title="Details"
+              className={`h-10 px-3 rounded-full flex items-center gap-1.5 text-sm font-medium ${info ? "bg-white text-black" : "bg-white/10 active:bg-white/20 text-white"}`}
+            >
+              <Info className="h-4 w-4" /><span className="hidden sm:inline">Details</span>
+            </button>
+          )}
           {onDownload && (
           <button
             type="button"
@@ -200,8 +225,9 @@ function Lightbox({
         </div>
       </div>
 
+      <div className="flex-1 flex min-h-0 relative">
       {/* Media + side arrows */}
-      <div className="flex-1 flex items-center min-h-0 relative">
+      <div className="flex-1 flex items-center min-h-0 min-w-0 relative">
         {hasPrev && (
           <button
             onClick={prev}
@@ -264,6 +290,19 @@ function Lightbox({
             <ChevronRight className="h-6 w-6" />
           </button>
         )}
+      </div>
+      {info && item.design && (
+        <aside className="absolute inset-x-0 bottom-0 z-20 max-h-[60%] rounded-t-2xl lg:static lg:max-h-none lg:w-[380px] lg:rounded-none lg:rounded-l-2xl bg-white text-foreground overflow-y-auto overscroll-contain shrink-0">
+          <div className="sticky top-0 bg-white/95 backdrop-blur px-4 pt-3 pb-2 border-b border-border/60 flex items-center justify-between gap-2">
+            <div className="min-w-0">
+              <p className="text-[11px] text-muted-foreground">Design</p>
+              <p className="text-base font-semibold truncate">{item.design.no}</p>
+            </div>
+            <button type="button" onClick={() => setInfo(false)} aria-label="Close details" className="h-8 w-8 rounded-full hover:bg-secondary grid place-items-center"><X className="h-4 w-4" /></button>
+          </div>
+          <div className="p-4"><DesignDetails item={item} staff={!!staff} /></div>
+        </aside>
+      )}
       </div>
 
       {/* Thumbnail strip */}
@@ -463,6 +502,7 @@ function ItemCard({
             <ImagePlus className="h-3.5 w-3.5" />
           </button>
         )}
+        {canEdit && !picking && !isBanner && <SpecsBadge item={item} />}
         {isBanner && (
           <div className="absolute bottom-2 left-2">
             <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[10px] font-medium bg-primary text-primary-foreground">
@@ -1050,11 +1090,38 @@ export function CatalogPage() {
   const [folderThumbs, setFolderThumbs] = useState<Record<string, CatalogItem | null>>({});
   const [favoriteItems, setFavoriteItems] = useState<CatalogItem[]>([]);
 
-  // Navigation stack (empty = root)
-  const [folderPath, setFolderPath] = useState<string[]>([]);
+  // Where we are lives in the address (?f=folder, ?fav=1): each folder opened is a
+  // step in the history, so the phone's or browser's Back goes up one folder, and
+  // a link or a reload opens the same folder. The way down to it (the breadcrumb)
+  // comes from the folders themselves — they are all here already, a small list;
+  // only a folder's files are loaded, a page at a time.
+  const navigate = useNavigate();
+  const [sp, setSp] = useSearchParams();
+  const openId = sp.get("f");
+  const viewingFavorites = sp.get("fav") === "1";
+  const folderPath = useMemo(() => {
+    if (!openId) return [] as string[];
+    const chain: string[] = [];
+    let cur: string | null | undefined = openId;
+    for (let guard = 0; cur && guard < 50; guard++) {
+      chain.unshift(cur);
+      const f = folders.find((x) => x.id === cur);
+      if (!f) break;
+      cur = f.parentId;
+    }
+    return chain;
+  }, [openId, folders]);
   const currentFolderId = folderPath.length > 0 ? folderPath[folderPath.length - 1] : null;
-
-  const [viewingFavorites, setViewingFavorites] = useState(false);
+  /** Go to a folder (null: the top) or the favourites — a new step, unless `replace` (a folder that was deleted). */
+  const go = (to: string | null, opt: { fav?: boolean; replace?: boolean } = {}) =>
+    setSp((prev) => {
+      const n = new URLSearchParams(prev);
+      if (to) n.set("f", to); else n.delete("f");
+      if (opt.fav) n.set("fav", "1"); else n.delete("fav");
+      // Going anywhere ends a search — the folder is what is shown then.
+      n.delete("q");
+      return n;
+    }, { replace: !!opt.replace });
 
   const [showNewFolder, setShowNewFolder] = useState(false);
   const [newFolderName, setNewFolderName] = useState("");
@@ -1117,6 +1184,18 @@ export function CatalogPage() {
   // Picks belong to the folder on screen.
   useEffect(() => { stopPicking(); }, [currentFolderId, viewingFavorites]);
 
+  // The pages of a folder already loaded, kept a few minutes: Back to a folder
+  // shows it at once, as it was — then its first page is read again quietly, and
+  // if anything changed meanwhile (an upload, a move, someone else's change) the
+  // folder is shown afresh.
+  const pageCache = useRef(new Map<string, { items: CatalogItem[]; cursor: QueryDocumentSnapshot<DocumentData> | null; hasMore: boolean; at: number }>());
+  const cacheKey = currentFolderId ? `${currentFolderId}|${itemsSort}` : "";
+  // Whose files `items` holds now — a moment after a folder changes it is still the last one's.
+  const itemsFor = useRef("");
+  useEffect(() => {
+    if (cacheKey && cacheKey === itemsFor.current && !itemsLoading) pageCache.current.set(cacheKey, { items, cursor: itemsCursor, hasMore: itemsHasMore, at: Date.now() });
+  }, [cacheKey, items, itemsCursor, itemsHasMore, itemsLoading]);
+
   /* ── Load current folder's first page of items whenever it changes ── */
   useEffect(() => {
     if (!currentFolderId) {
@@ -1125,7 +1204,26 @@ export function CatalogPage() {
       setItemsHasMore(false);
       return;
     }
+    const key = `${currentFolderId}|${itemsSort}`;
+    const kept = pageCache.current.get(key);
+    itemsFor.current = "";
     let cancelled = false;
+    if (kept && Date.now() - kept.at < 3 * 60_000) {
+      itemsFor.current = key;
+      setItems(kept.items);
+      setItemsCursor(kept.cursor);
+      setItemsHasMore(kept.hasMore);
+      setItemsLoading(false);
+      fetchCatalogItemsPage(currentFolderId, null, itemsSort).then((page) => {
+        if (cancelled || itemsFor.current !== key) return;
+        const same = page.items.every((it, i) => kept.items[i]?.id === it.id && kept.items[i]?.name === it.name);
+        if (same) return;
+        setItems(page.items);
+        setItemsCursor(page.cursor);
+        setItemsHasMore(page.hasMore);
+      }).catch(() => undefined);
+      return () => { cancelled = true; };
+    }
     setItems([]);
     setItemsCursor(null);
     setItemsHasMore(false);
@@ -1133,6 +1231,7 @@ export function CatalogPage() {
     fetchCatalogItemsPage(currentFolderId, null, itemsSort)
       .then((page) => {
         if (cancelled) return;
+        itemsFor.current = key;
         setItems(page.items);
         setItemsCursor(page.cursor);
         setItemsHasMore(page.hasMore);
@@ -1147,14 +1246,18 @@ export function CatalogPage() {
 
   const loadMoreItems = useCallback(async () => {
     if (!currentFolderId || !itemsHasMore || itemsLoading) return;
+    // The page belongs to this folder: arriving after a move to another, it is dropped.
+    const key = itemsFor.current;
+    if (key !== `${currentFolderId}|${itemsSort}`) return;
     setItemsLoading(true);
     try {
       const page = await fetchCatalogItemsPage(currentFolderId, itemsCursor, itemsSort);
+      if (itemsFor.current !== key) return;
       setItems((prev) => [...prev, ...page.items]);
       setItemsCursor(page.cursor);
       setItemsHasMore(page.hasMore);
     } finally {
-      setItemsLoading(false);
+      if (itemsFor.current === key) setItemsLoading(false);
     }
   }, [currentFolderId, itemsCursor, itemsHasMore, itemsLoading, itemsSort]);
 
@@ -1178,14 +1281,17 @@ export function CatalogPage() {
   }, [itemsHasMore, currentFolderId, itemsCursor]);
 
   /* ── Folder counts/thumbnails for whichever folders are currently on screen ── */
+  // Counted once in a few minutes: going back up does not count them all again.
+  const countedAt = useRef(new Map<string, number>());
   useEffect(() => {
-    if (subfolders.length === 0) return;
+    const due = subfolders.filter((f) => Date.now() - (countedAt.current.get(f.id) ?? 0) > 3 * 60_000);
+    if (due.length === 0) return;
     let cancelled = false;
     (async () => {
       const counts: Record<string, number> = {};
       const thumbs: Record<string, CatalogItem | null> = {};
       await Promise.all(
-        subfolders.map(async (folder) => {
+        due.map(async (folder) => {
           const ids = [folder.id, ...descendantIds(folder.id)];
           // Skip the thumbnail lookup entirely when an explicit banner is
           // set — folder.bannerUrl already covers rendering, no extra read needed.
@@ -1198,6 +1304,7 @@ export function CatalogPage() {
         }),
       );
       if (!cancelled) {
+        for (const id of Object.keys(counts)) countedAt.current.set(id, Date.now());
         setFolderCounts((prev) => ({ ...prev, ...counts }));
         setFolderThumbs((prev) => ({ ...prev, ...thumbs }));
       }
@@ -1256,37 +1363,23 @@ export function CatalogPage() {
   const filesPending = searching && !allItems && !allFailed.current && folders.length > 0;
   /** Open a folder found by the search: the way down to it, as if walked. */
   function openFound(id: string) {
-    const chain: string[] = [];
-    let cur: string | null | undefined = id;
-    for (let guard = 0; cur && guard < 50; guard++) {
-      chain.unshift(cur);
-      cur = folders.find((f) => f.id === cur)?.parentId;
-    }
-    setFolderPath(chain);
+    go(id);
     setShowNewFolder(false);
-    setViewingFavorites(false);
-    setFindQ("");
   }
 
   /* ── Navigation ── */
-  // Going anywhere ends a search — the folder is what is shown then.
+  // Each a step in the history (see `go`): Back comes back here.
   function enterFolder(id: string) {
-    setFolderPath((p) => [...p, id]);
+    go(id);
     setShowNewFolder(false);
-    setViewingFavorites(false);
-    if (searching) setFindQ("");
   }
   function navigateTo(idx: number) {
-    setFolderPath((p) => (idx < 0 ? [] : p.slice(0, idx + 1)));
+    go(idx < 0 ? null : folderPath[idx] ?? null);
     setShowNewFolder(false);
-    setViewingFavorites(false);
-    if (searching) setFindQ("");
   }
   function goToRoot() {
-    setFolderPath([]);
+    go(null);
     setShowNewFolder(false);
-    setViewingFavorites(false);
-    if (searching) setFindQ("");
   }
 
   /* ── Favorites ── */
@@ -1361,10 +1454,9 @@ export function CatalogPage() {
     });
     setDeleteConfirm(null);
     setAllItems((prev) => prev && prev.filter((it) => !ids.includes(it.folderId)));
-    setFolderPath((p) => {
-      const cut = p.findIndex((x) => ids.includes(x));
-      return cut < 0 ? p : p.slice(0, cut);
-    });
+    // Standing in a folder that is gone: to the nearest one left, in place of this step.
+    const cut = folderPath.findIndex((x) => ids.includes(x));
+    if (cut >= 0) go(cut === 0 ? null : folderPath[cut - 1], { replace: true });
   }
 
   /* ── Upload ── */
@@ -1488,7 +1580,10 @@ export function CatalogPage() {
         await createCatalogItem(newItem);
         // Only the folder on screen is showing its items — a file that landed in
         // a freshly created sub-folder is loaded when you open it.
-        if (folderId === currentFolderId) setItems((prev) => [newItem, ...prev]);
+        // Read now, not when the upload began: someone may have opened another folder meanwhile.
+        // A folder kept for Back is read afresh when opened again.
+        for (const k of [...pageCache.current.keys()]) if (k.startsWith(`${folderId}|`)) pageCache.current.delete(k);
+        if (itemsFor.current.startsWith(`${folderId}|`)) setItems((prev) => [newItem, ...prev]);
       } catch (e) {
         // One bad file must not abandon the rest of a big folder upload.
         failed.push(file.name);
@@ -1761,7 +1856,7 @@ export function CatalogPage() {
     return (
       <motion.div whileTap={{ scale: 0.97 }} className="relative">
         <button
-          onClick={() => setViewingFavorites(true)}
+          onClick={() => go(currentFolderId, { fav: true })}
           className="w-full flex flex-col rounded-2xl border-2 border-rose-200 active:border-rose-400 bg-white shadow-sm overflow-hidden text-left"
         >
           {/* Mosaic thumbnail or solid colour */}
@@ -1899,7 +1994,8 @@ export function CatalogPage() {
               .filter(Boolean)
               .join(" · ") || "Empty"}
         primary={canAdd ? { label: "New Folder", icon: Plus, onClick: () => { setShowNewFolder((v) => !v); setNewFolderName(""); } } : null}
-        menu={!viewingFavorites && ((canEdit && subfolders.length > 1) || (isStaff && (subfolders.length > 0 || items.length > 0))) ? [
+        menu={!viewingFavorites && isStaff ? [
+          { label: "Please check", icon: ClipboardCheck, hint: "Sheets whose details didn't add up", onSelect: () => navigate("/catalog/check") },
           { label: "Select to move", icon: ListChecks, show: isStaff && (subfolders.length > 0 || items.length > 0),
             hint: isAdmin ? "Several folders and files at once" : ADMIN_MOVE, disabled: !isAdmin, onSelect: () => { setFindQ(""); setPicking(true); } },
           { label: "Arrange folders", icon: ArrowUpDown, show: canEdit && subfolders.length > 1, hint: "Set the order they show in", onSelect: () => setArranging(true) },
@@ -2368,6 +2464,7 @@ export function CatalogPage() {
             // a client downloads what they can see, as they always could from here.
             onDownload={(item) => downloadFile(item.data, downloadName(item), !isAdmin)}
             downloadBlocked={isStaff && !canShare ? needsAccess("catalog", "export") : undefined}
+            staff={isStaff}
           />
         )}
       </AnimatePresence>
