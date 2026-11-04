@@ -39,7 +39,7 @@ eq(learnRules(["SRG0001", "SRG0002", "SRG0003", "IMAGE 2025", "IMG_2034", "SLR-0
     marginPct: 20, roundTo: { INR: 100, USD: 5 }, gstPct: 3,
     labour: { gold: { perGram: { amount: 500, ccy: "INR" }, minimum: { amount: 2000, ccy: "INR" } } },
     settingPerStone: { amount: 200, ccy: "INR" },
-    diamonds: { types: [{ id: "lab", label: "Lab-grown" }], qualities: [{ id: "GH-SI", label: "GH · SI" }], prices: { lab: { "GH-SI": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 300] } } },
+    diamonds: { types: [{ id: "lab", label: "Lab-grown" }], qualities: [{ id: "GH-SI", label: "GH · SI" }], prices: { lab: { "GH-SI": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 250, 300] } } },
   });
   const rates = { karat: [{ key: "14K", purity: 0.585, inrPerG: 7000, usdPerG: 80 }], usdInr: 88 };
   const specs = { metal: { "10K": 3.1, "14K": 3.6, "18K": 4.2, PLT: 6 }, stones: [{ shape: "Heart", pcs: 1, perStone: 1.58, total: 1.58 }], ringSize: "53 EU" };
@@ -59,6 +59,16 @@ eq(learnRules(["SRG0001", "SRG0002", "SRG0003", "IMAGE 2025", "IMG_2034", "SLR-0
   eq([usd.gst, usd.lines.find(l => l.key === "metal").amount], [0, 288], "$ export: spot rate, no GST");
   eq(priceDesign(specs, { metal: "14K", diamondType: "lab", quality: "GH-SI", ccy: "INR" }, rules, null).missing.length > 0, true, "no rates yet: no price");
   eq([categoryOf(["Ring"], "X1", rules), categoryOf(["Nacklace"], "X1", rules), categoryOf(["New folder"], "SRG0034", cleanRules({ categoryByPrefix: { SRG: "Ring" } }))], ["Ring", "Necklace", "Ring"], "kind of piece from folders, else letters");
+  // The centre stone in another size: the heart at 2 ct — priced from the grid's 1.99 band ($300 → the 2.99 band is empty → no price).
+  const { centreSizes, withCentre } = require("../lib/shared/pricing");
+  eq(centreSizes(specs.stones, rules)?.drawn, 1.58, "the centre stone is the 1.58 ct heart");
+  eq(centreSizes(specs.stones, rules)?.sizes.includes(1.58), true, "…offered as drawn too");
+  eq(withCentre(specs.stones, 1.25, rules)[0].total, 1.25, "a 1.25 ct centre stone");
+  const c125 = priceDesign(specs, { metal: "14K", diamondType: "lab", quality: "GH-SI", ccy: "INR", centreCt: 1.25 }, rules, rates);
+  eq(c125.missing.length === 0 && c125.price < p.price, true, "a smaller centre stone: a lower price", `${c125.price} < ${p.price}`);
+  const c25 = priceDesign(specs, { metal: "14K", diamondType: "lab", quality: "GH-SI", ccy: "INR", centreCt: 2.5 }, rules, rates);
+  eq(c25.missing.length > 0, true, "a centre size with no grid price: price on request");
+  eq(centreSizes([{ shape: "Round", pcs: 30, perStone: 0.006, total: 0.18 }], rules), null, "small stones only: no centre stone");
 }
 var ok_;
 console.log(fail ? `${fail} failed` : "filing rules + pricing: all passed");

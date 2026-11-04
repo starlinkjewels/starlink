@@ -33,7 +33,7 @@ import { OWNER_EMAILS, REGION } from "./region";
 import { OCR_VERSION, readExcel, readPicture, type OcrText } from "./ocr";
 import { PARSER_VERSION, parseBoth, sameDesign, type Specs } from "./shared/specParse";
 import { arrangeDesign, designOf, isJunk, isSheetFile, learnRules, roleOf, type DesignEntry, type DesignOf, type ItemDesign, type ItemSpecs, type MediaRole, type MediaRules } from "./shared/catalogMedia";
-import { categoryOf, cleanRules, clientSees, defaultChoice, gramsFor, priceDesign, sheetRingUs, takesRingSize, type Ccy, type Choice, type MetalKey } from "./shared/pricing";
+import { categoryOf, centreSizes, cleanRules, clientSees, defaultChoice, gramsFor, priceDesign, sheetRingUs, takesRingSize, withCentre, type Ccy, type Choice, type MetalKey } from "./shared/pricing";
 import { cleanSettings as cleanRateSettings, karatRates, type PriceBase } from "./shared/liveRates";
 
 // Local tests run against the emulators only — never the live database.
@@ -583,6 +583,7 @@ async function quote(ask: Ask) {
     colours: rules.colours.map(c => ({ id: c.id, label: c.label })),
     ringSizes: ring ? rules.ring.sizes : [], types: rules.diamonds.types, qualities: rules.diamonds.qualities,
     ccy, hasStones: (specs!.stones?.length ?? 0) > 0, category: category ?? null,
+    centre: centreSizes(specs!.stones ?? [], rules),
   };
   const c = ask.choice ?? {};
   const pick = options.metals.includes(c.metal as MetalKey) ? (c.metal as MetalKey) : (options.metals.find(m => metal[m] > 0) ?? options.metals[0]);
@@ -594,13 +595,17 @@ async function quote(ask: Ask) {
     diamondType: rules.diamonds.types.some(t => t.id === c.diamondType) ? c.diamondType! : rules.diamonds.types[0]?.id ?? "natural",
     quality: rules.diamonds.qualities.some(q => q.id === c.quality) ? c.quality! : rules.diamonds.qualities[0]?.id ?? "",
     ccy, ...(ask.clientId ? { clientId: ask.clientId } : {}),
+    ...(options.centre && typeof c.centreCt === "number" && options.centre.sizes.includes(c.centreCt) ? { centreCt: c.centreCt } : {}),
   } : null;
   const price = ratesDoc.get("price") as PriceBase | undefined;
   const rates = price ? { karat: karatRates(price, cleanRateSettings(rateSet.data())), usdInr: price.usdInr } : null;
   const p = choice ? priceDesign(specs!, choice, rules, rates) : null;
   // The details a buyer sees: the stones, and the grams of the metal chosen — nothing of the sheet's other numbers.
-  const details = { stones: specs!.stones ?? [], stoneTotals: specs!.stoneTotals ?? null, dimsMm: specs!.dimsMm ?? [], ringSize: specs!.ringSize ?? null, grams: p?.grams ?? 0, sheetUs: sheetUs ?? null };
-  const priced = ask.showPrice && p && !p.missing.length;
+  const stones = withCentre(specs!.stones ?? [], choice?.centreCt, rules);
+  const details = { stones, stoneTotals: choice?.centreCt ? { pcs: stones.reduce((t, r) => t + r.pcs, 0), ct: Math.round(stones.reduce((t, r) => t + r.total, 0) * 1000) / 1000 } : specs!.stoneTotals ?? null, dimsMm: specs!.dimsMm ?? [], ringSize: specs!.ringSize ?? null, grams: p?.grams ?? 0, sheetUs: sheetUs ?? null };
+  // A sheet read by an older reader (or not since checked by a person) is never priced: it is read again first.
+  const current = !!specs!.checkedBy || specs!.v === PARSER_VERSION;
+  const priced = ask.showPrice && current && p && !p.missing.length;
   return {
     ready: true as const, designNo: String(design.get("designNo") ?? ""), options, choice, details,
     // The total for the selection — nothing of how it is made up, not even its GST.
@@ -653,7 +658,7 @@ export const specsCards = onCall<{ keys: string[] }>({ region: REGION, memory: "
   const prices: Record<string, { price: number; ccy: Ccy }> = {};
   for (const d of docs) {
     const specs = d.get("specs") as ItemSpecs | null;
-    if (!d.exists || !specs || d.get("status") !== "ok") continue;
+    if (!d.exists || !specs || d.get("status") !== "ok" || !(specs.checkedBy || specs.v === PARSER_VERSION)) continue;
     const choice = defaultChoice(specs, rules, ccy, clientId);
     if (!choice) continue;
     const p = priceDesign(specs, choice, rules, rates);

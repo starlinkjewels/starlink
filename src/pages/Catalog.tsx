@@ -431,8 +431,10 @@ function ItemCard({
   picked?: boolean;
   onPick?(): void;
 }) {
-  // A file of a design with details: the design, its price and what it is made of — not the file's name.
+  // A file of a design with details: the design, its price and what it is made of — not the file's name;
+  // a tap opens the design's product page (the picture itself: ⋯ → View picture).
   const info = useCardInfo(item);
+  const navigate = useNavigate();
   return (
     <motion.div
       whileTap={{ scale: 0.97 }}
@@ -440,7 +442,7 @@ function ItemCard({
     >
       {/* Thumbnail */}
       <button
-        onClick={picking ? onPick : onOpen}
+        onClick={picking ? onPick : info?.open ? () => navigate(`/catalog/design/${encodeURIComponent(info.key)}`) : onOpen}
         aria-pressed={picking ? !!picked : undefined}
         aria-label={picking ? `${picked ? "Untick" : "Tick"} ${item.name}` : undefined}
         className="block w-full aspect-square bg-secondary/30 overflow-hidden relative"
@@ -1652,6 +1654,8 @@ export function CatalogPage() {
   // Staff: what can be done to one item — each greyed with the reason when
   // this person's access doesn't reach it.
   const itemMenu = (item: CatalogItem): MoreAction[] => [
+    // A design's card opens its product page; the picture itself is here.
+    { label: "View picture", icon: ImageIcon, show: !!(item.design?.key && cardInfos[item.design.key]?.open), onSelect: () => setLightbox({ items: [item], idx: 0 }) },
     { label: "Download", icon: Download, hint: canShare ? undefined : needsAccess("catalog", "export"), disabled: !canShare,
       onSelect: () => downloadFile(item.data, downloadName(item), !isAdmin) },
     { label: "Rename", icon: Edit2, hint: canEdit ? undefined : needsAccess("catalog", "edit"), disabled: !canEdit, onSelect: () => setItemSheet({ item, mode: "rename" }) },

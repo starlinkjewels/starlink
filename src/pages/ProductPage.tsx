@@ -2,8 +2,8 @@
 // pictures, the options it comes in, and its price for those options — from
 // today's gold rate and the business's pricing rules (Settings → Product
 // pricing): one total price for the selection, never how it is made up (no
-// making, no GST, no price per material). Staff can see any client's price, see
-// what a price is still missing, and share the page as a link; a client sees their own price — or, where the
+// making, no GST, no price per material). Staff see what a price is still
+// missing, and share the page as a link; a client sees their own price — or, where the
 // business shows them details only, the details and "ask us for the price".
 // The page itself is components/catalog/ProductView.tsx (a shared link shows the same).
 import { useEffect, useMemo, useState } from "react";
@@ -20,7 +20,8 @@ import { fetchCatalogItemsByIds } from "@/lib/catalogItems";
 import { useDesign } from "@/lib/catalogSpecs";
 import type { CatalogItem } from "@/lib/db";
 import { clientQuote, useMetalRates, usePriceRules, type ClientQuote } from "@/lib/productPricing";
-import { categoryOf, gramsFor, priceDesign, sheetRingUs, takesRingSize, METAL_LABEL, type Ccy, type Choice } from "@/lib/pure/pricing";
+import { categoryOf, centreSizes, gramsFor, priceDesign, sheetRingUs, takesRingSize, withCentre, METAL_LABEL, type Ccy, type Choice } from "@/lib/pure/pricing";
+import { PARSER_VERSION } from "@/lib/pure/specParse";
 
 const pic = (i: CatalogItem): Pic => ({ id: i.id, url: i.data, thumb: i.thumb, name: i.name });
 const NONE: ProductOptions = { metals: [], colours: [], ringSizes: [], types: [], qualities: [], hasStones: false };
@@ -35,7 +36,6 @@ export function ProductPage() {
   const rates = useMetalRates();
   const [files, setFiles] = useState<Record<string, CatalogItem>>({});
   const [choice, setChoice] = useState<Partial<Choice>>({});
-  const [asClient, setAsClient] = useState("");
   const [quote, setQuote] = useState<ClientQuote | null>(null);
   const [quoting, setQuoting] = useState(false);
   const [sharing, setSharing] = useState(false);
@@ -61,10 +61,12 @@ export function ProductPage() {
     void fetchCatalogItemsByIds(ids).then(list => { if (alive) setFiles(Object.fromEntries(list.map(i => [i.id, i]))); });
     return () => { alive = false; };
   }, [media, staff]);
-  const renders = useMemo(() => (media ? media.renders.map(id => files[id]).filter(Boolean).map(pic) : []), [media, files]);
-  const sheetPics = useMemo(() => (media ? media.sheets.map(id => files[id]).filter(Boolean).map(pic) : []), [media, files]);
+  // Pictures only: an Excel sheet is a sheet, never a picture.
+  const isPic = (i?: CatalogItem): i is CatalogItem => !!i && i.type === "image";
+  const renders = useMemo(() => (media ? media.renders.map(id => files[id]).filter(isPic).map(pic) : []), [media, files]); // eslint-disable-line react-hooks/exhaustive-deps
+  const sheetPics = useMemo(() => (media ? media.sheets.map(id => files[id]).filter(isPic).map(pic) : []), [media, files]); // eslint-disable-line react-hooks/exhaustive-deps
   const pictures = useMemo(() => (staff || !renders.length ? [...renders, ...sheetPics] : renders), [staff, renders, sheetPics]);
-  const spin = useMemo(() => (media ? media.spin.map(id => files[id]).filter(Boolean).map(pic) : []), [media, files]);
+  const spin = useMemo(() => (media ? media.spin.map(id => files[id]).filter(isPic).map(pic) : []), [media, files]); // eslint-disable-line react-hooks/exhaustive-deps
   const videos = useMemo(() => (media ? media.videos.map(id => files[id]).filter(Boolean).map(pic) : []), [media, files]);
 
   // What it comes in: staff from the rules here; a client as the server says.
@@ -76,11 +78,11 @@ export function ProductPage() {
       metals: rules.metals.filter(m => gramsFor(specs.metal ?? {}, m, rules).g > 0),
       colours: rules.colours, ringSizes: ring ? rules.ring.sizes : [], types: rules.diamonds.types, qualities: rules.diamonds.qualities,
       hasStones: (specs.stones?.length ?? 0) > 0,
+      centre: centreSizes(specs.stones ?? [], rules),
     };
   }, [staff, quote, rules, specs, category]);
   const sheetUs = specs ? sheetRingUs(specs) : quote?.ready ? quote.details.sheetUs ?? undefined : undefined;
   const nearest = (us?: number) => (us && options.ringSizes.length ? options.ringSizes.reduce((a, b) => (Math.abs(b - us) < Math.abs(a - us) ? b : a)) : options.ringSizes[0]);
-  const clientCcy = asClient ? rules?.clients[asClient]?.ccy : undefined;
   const sheetMetal = specs?.metal ?? {};
   const pick: Choice | null = options.metals.length ? {
     metal: choice.metal && options.metals.includes(choice.metal) ? choice.metal : (options.metals.find(m => sheetMetal[m] > 0) ?? (quote?.ready ? quote.choice?.metal : undefined) ?? options.metals[0]),
@@ -88,9 +90,17 @@ export function ProductPage() {
     ringUs: options.ringSizes.length ? choice.ringUs ?? nearest(sheetUs ?? rules?.ring.baseUs ?? 7) : undefined,
     diamondType: choice.diamondType ?? options.types[0]?.id ?? "natural",
     quality: choice.quality ?? options.qualities[0]?.id ?? "",
-    ccy: (clientCcy || choice.ccy || (staff ? "USD" : quote?.ready ? quote.options.ccy : undefined) || "USD") as Ccy,
-    ...(asClient ? { clientId: asClient } : {}),
+    ccy: (choice.ccy || (staff ? "USD" : quote?.ready ? quote.options.ccy : undefined) || "USD") as Ccy,
+    ...(choice.centreCt && options.centre?.sizes.includes(choice.centreCt) ? { centreCt: choice.centreCt } : {}),
   } : null;
+  // The stones as chosen: the centre stone in its size, the totals with it.
+  const shownSpecs = (sp: NonNullable<typeof specs>) => {
+    if (!pick?.centreCt || !rules) return sp;
+    const stones = withCentre(sp.stones ?? [], pick.centreCt, rules);
+    return { ...sp, stones, stoneTotals: { pcs: stones.reduce((t, r) => t + r.pcs, 0), ct: Math.round(stones.reduce((t, r) => t + r.total, 0) * 1000) / 1000 } };
+  };
+  // A sheet read by an older reader is read again before it is priced (Settings → Catalogue reading).
+  const current = !!specs && (!!specs.checkedBy || specs.v === PARSER_VERSION);
 
   // Staff: worked out here. A client: asked of the server, which answers with the price alone.
   const priced = useMemo(() => (staff && rules && specs && pick ? priceDesign(specs, pick, rules, rates ?? null) : null), [staff, rules, specs, pick, rates]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -112,9 +122,8 @@ export function ProductPage() {
   const ccy = pick?.ccy ?? "USD";
   const ready = staff ? !!specs : !!quote?.ready;
   const seesDetailsOnly = !staff && quote?.see === "details";
-  const amount = staff ? (priced && !priced.missing.length ? priced.price : null) : quote?.ready && typeof quote.price === "number" ? quote.price : null;
+  const amount = staff ? (current && priced && !priced.missing.length ? priced.price : null) : quote?.ready && typeof quote.price === "number" ? quote.price : null;
   const at = rates?.at ?? (quote?.ready ? quote.asOf : null);
-  const clientName = (id: string) => { const c = db.clients.find(x => x.id === id); return c ? c.companyName || c.ownerName : "this client"; };
 
   return (
     <>
@@ -133,27 +142,20 @@ export function ProductPage() {
         extraControls={staff ? (
           <div className="grid grid-cols-2 gap-3">
             <div className="min-w-0"><p className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wide mb-1">Currency</p>
-              <Select value={ccy} onValueChange={v => set({ ccy: v as Ccy })} disabled={!!clientCcy}>
+              <Select value={ccy} onValueChange={v => set({ ccy: v as Ccy })}>
                 <SelectTrigger aria-label="Currency" className="h-11 rounded-xl bg-white"><SelectValue /></SelectTrigger>
                 <SelectContent><SelectItem value="USD">$ Export</SelectItem><SelectItem value="INR">₹ India</SelectItem></SelectContent>
-              </Select></div>
-            <div className="min-w-0"><p className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wide mb-1">Price for</p>
-              <Select value={asClient || "_"} onValueChange={v => setAsClient(v === "_" ? "" : v)}>
-                <SelectTrigger aria-label="Price for" className="h-11 rounded-xl bg-white"><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="_">Everyone (standard)</SelectItem>
-                  {db.clients.filter(c => c.status === "active").map(c => ({ id: c.id, n: c.companyName || c.ownerName })).sort((a, b) => a.n.localeCompare(b.n)).map(c => <SelectItem key={c.id} value={c.id}>{c.n}</SelectItem>)}
-                </SelectContent>
               </Select></div>
           </div>
         ) : undefined}
         price={{
           amount, ccy: staff ? ccy : (quote?.ready && quote.ccy) || ccy, busy: !staff && quoting,
-          label: asClient ? `Price for ${clientName(asClient)}` : undefined,
           note: <>At today's {pick ? METAL_LABEL[pick.metal].toLowerCase() : "metal"} rate{at ? ` (${new Date(at).toLocaleString("en-IN", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })})` : ""} — it moves with the rate.</>,
           ...(seesDetailsOnly ? { ask: "Ask us for the price of this piece in the options you chose." } : {}),
         }}
-        priceExtra={staff && priced ? <>
+        priceExtra={staff && specs && !current ? (
+          <p className="text-xs text-amber-900 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2">This sheet was read before the reader's last update — no price until it is read again: {user?.role === "admin" ? <Link to="/settings?tab=catalogread" className="text-primary underline">Settings → Catalogue reading → Read what's not read yet</Link> : "ask an admin to tap Read what's not read yet (Settings → Catalogue reading)"}.</p>
+        ) : staff && priced ? <>
           {priced.missing.length > 0 && (
             <div className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-900">
               <p className="font-medium flex items-center gap-1"><AlertTriangle className="h-3.5 w-3.5" />No price until these are set:</p>
@@ -166,7 +168,7 @@ export function ProductPage() {
         ) : undefined}
         grams={staff ? priced?.grams : quote?.ready ? quote.details.grams : undefined}
         gramsNote={staff && priced?.gramsFrom === "worked out" ? "(worked out from the sheet's other metal)" : undefined}
-        specs={staff ? specs : quote?.ready ? { stones: quote.details.stones, stoneTotals: quote.details.stoneTotals ?? undefined, dimsMm: quote.details.dimsMm, ringSize: quote.details.ringSize ?? undefined, metal: {} } : null}
+        specs={staff ? (specs ? shownSpecs(specs) : null) : quote?.ready ? { stones: quote.details.stones, stoneTotals: quote.details.stoneTotals ?? undefined, dimsMm: quote.details.dimsMm, ringSize: quote.details.ringSize ?? undefined, metal: {} } : null}
         aboveTabBar
       />
       {sharing && (

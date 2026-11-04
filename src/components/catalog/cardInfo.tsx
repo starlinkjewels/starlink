@@ -12,8 +12,10 @@ import type { CatalogItem } from "@/lib/db";
 import type { CatalogDesign } from "@/lib/catalogSpecs";
 import { money, useMetalRates, usePriceRules } from "@/lib/productPricing";
 import { defaultChoice, gramsFor, METAL_LABEL, priceDesign, type Ccy } from "@/lib/pure/pricing";
+import { PARSER_VERSION } from "@/lib/pure/specParse";
 
-export interface CardInfo { key: string; no: string; line: string; price?: string }
+/** open: the design has its details — a tap opens its product page, not the picture. */
+export interface CardInfo { key: string; no: string; line: string; price?: string; open: boolean }
 export const CardInfoContext = createContext<Record<string, CardInfo>>({});
 /** A card's design line, when its file has one. */
 export const useCardInfo = (item: CatalogItem): CardInfo | undefined => {
@@ -61,6 +63,9 @@ export function useCardInfos(items: CatalogItem[], staff: boolean): Record<strin
       const d = designs[k];
       if (!d) continue;
       const s = d.status === "ok" ? d.specs : null;
+      // A sheet read by an older reader is priced only once it is read again.
+      const current = !!s && (!!s.checkedBy || s.v === PARSER_VERSION);
+      const open = !!(staff ? d.specs : s) && (Object.keys((staff ? d.specs : s)?.metal ?? {}).length > 0 || ((staff ? d.specs : s)?.stones?.length ?? 0) > 0);
       let line = "", price: string | undefined;
       if (s) {
         const choice = rules ? defaultChoice(s, rules, "USD") : null;
@@ -68,10 +73,10 @@ export function useCardInfos(items: CatalogItem[], staff: boolean): Record<strin
         const g = metal ? (rules && choice ? gramsFor(s.metal ?? {}, choice.metal, rules).g : (s.metal ?? {})[metal]) : 0;
         const ct = s.stoneTotals?.ct ?? (s.stones ?? []).reduce((t, r) => t + r.total, 0);
         line = [metal ? (METAL_LABEL[metal as keyof typeof METAL_LABEL] ?? metal) : null, g ? `${+g.toFixed(2)} g` : null, ct ? `${+ct.toFixed(2)} ct` : null].filter(Boolean).join(" · ");
-        if (staff && rules && choice) { const p = priceDesign(s, choice, rules, rates ?? null); if (!p.missing.length) price = money(p.price, p.ccy); }
+        if (staff && rules && choice && current) { const p = priceDesign(s, choice, rules, rates ?? null); if (!p.missing.length) price = money(p.price, p.ccy); }
         else if (!staff && clientPrices[k]) price = money(clientPrices[k].price, clientPrices[k].ccy);
       }
-      out[k] = { key: k, no: d.designNo, line, ...(price ? { price } : {}) };
+      out[k] = { key: k, no: d.designNo, line, open, ...(price ? { price } : {}) };
     }
     return out;
   }, [keys, designs, rules, rates, staff, clientPrices]);
