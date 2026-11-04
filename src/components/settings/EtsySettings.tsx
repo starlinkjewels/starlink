@@ -315,7 +315,8 @@ export function EtsySettings() {
   }, [db.orders]);
   if (user?.role !== "admin") return <p className="text-sm text-muted-foreground">Only an admin can connect Etsy shops.</p>;
   return (
-    <div className="space-y-5">
+    // In a card, as every other Settings section.
+    <div className="card-luxe p-6 space-y-5">
       <SectionTitle title="Etsy shops" sub="Their paid orders come onto our board; our shipment and tracking go back"
         info="Each shop is connected with its own Etsy app, approved by the shop owner on Etsy (OAuth with PKCE). Its secret and tokens are kept encrypted on our server. Every 5 minutes the server checks each shop for new or changed orders; Etsy's order messages make it near-instant. Once every piece of an Etsy order is dispatched, one shipment with the tracking goes to Etsy, and Etsy emails the buyer."
         icon={Store} actions={<Button className="gap-1.5" onClick={() => setConnecting({ again: null })}><Plug className="h-4 w-4" />Connect a shop</Button>} />

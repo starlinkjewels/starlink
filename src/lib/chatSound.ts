@@ -4,17 +4,23 @@
 
 const OFF_KEY = "sl-chat-sound-off";
 let ctx: AudioContext | null = null;
+// The sound engine sleeps between sounds: a running one keeps the phone's audio
+// hardware on all the time (an iPhone's battery goes on it), just to be ready.
+let sleepTimer = 0;
+const sleepSoon = (ms = 1500) => { window.clearTimeout(sleepTimer); sleepTimer = window.setTimeout(() => { void ctx?.suspend().catch(() => undefined); }, ms); };
 
 /** Browsers start sound only after a tap: the first tap anywhere wakes it. */
 if (typeof window !== "undefined") {
   const wake = () => {
     try {
       ctx ??= new (window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext)();
-      void ctx.resume();
+      // Unlocked by this tap (browsers ask for one), then straight back to sleep.
+      void ctx.resume().then(() => sleepSoon(300), () => undefined);
     } catch { /* no sound on this device */ }
   };
   window.addEventListener("pointerdown", wake, { once: true, capture: true });
   window.addEventListener("keydown", wake, { once: true, capture: true });
+  document.addEventListener("visibilitychange", () => { if (document.visibilityState === "hidden") void ctx?.suspend().catch(() => undefined); });
 }
 
 export function chatSoundOn(): boolean {
@@ -26,20 +32,25 @@ export function setChatSound(on: boolean): void {
 
 function tone(notes: { f: number; at: number; len: number }[], volume: number): void {
   if (!ctx || !chatSoundOn()) return;
-  try {
-    const t0 = ctx.currentTime;
-    for (const n of notes) {
-      const o = ctx.createOscillator(), g = ctx.createGain();
-      o.type = "sine";
-      o.frequency.value = n.f;
-      g.gain.setValueAtTime(0, t0 + n.at);
-      g.gain.linearRampToValueAtTime(volume, t0 + n.at + 0.012);
-      g.gain.exponentialRampToValueAtTime(0.0001, t0 + n.at + n.len);
-      o.connect(g).connect(ctx.destination);
-      o.start(t0 + n.at);
-      o.stop(t0 + n.at + n.len + 0.02);
-    }
-  } catch { /* no sound on this device */ }
+  const c = ctx;
+  // Awake just for this sound.
+  void c.resume().then(() => { play(c); sleepSoon(); }, () => undefined);
+  function play(ctx: AudioContext) {
+    try {
+      const t0 = ctx.currentTime;
+      for (const n of notes) {
+        const o = ctx.createOscillator(), g = ctx.createGain();
+        o.type = "sine";
+        o.frequency.value = n.f;
+        g.gain.setValueAtTime(0, t0 + n.at);
+        g.gain.linearRampToValueAtTime(volume, t0 + n.at + 0.012);
+        g.gain.exponentialRampToValueAtTime(0.0001, t0 + n.at + n.len);
+        o.connect(g).connect(ctx.destination);
+        o.start(t0 + n.at);
+        o.stop(t0 + n.at + n.len + 0.02);
+      }
+    } catch { /* no sound on this device */ }
+  }
 }
 
 /** A short rising "pop" as a message goes. */

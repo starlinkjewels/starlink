@@ -344,7 +344,8 @@ export function ShopifySettings() {
   }, [db.orders]);
   if (user?.role !== "admin") return <p className="text-sm text-muted-foreground">Only an admin can connect Shopify stores.</p>;
   return (
-    <div className="space-y-5">
+    // In a card, as every other Settings section.
+    <div className="card-luxe p-6 space-y-5">
       <SectionTitle title="Shopify stores" sub="Their orders come onto our board; our dispatches and stages go back"
         info="Each store is connected with its own app (made in its Shopify Dev Dashboard). Orders are checked with Shopify's signature and brought in once; every 15 minutes the server also checks for anything missed."
         icon={ShoppingBag} actions={<Button className="gap-1.5" onClick={() => setConnecting(true)}><Plug className="h-4 w-4" />Connect a store</Button>} />

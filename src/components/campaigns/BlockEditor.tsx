@@ -150,10 +150,10 @@ function BlockBody({ b, set }: { b: CampaignBlock; set: (b: CampaignBlock) => vo
 
 function Colour({ label, value, onChange }: { label: string; value: string; onChange: (v: string) => void }) {
   return (
-    <Field label={label}>
-      <div className="flex items-center gap-2">
-        <input type="color" value={value} onChange={e => onChange(e.target.value)} className="h-9 w-11 rounded-lg border border-input bg-white p-1 cursor-pointer" aria-label={label} />
-        <Input className="h-9 rounded-lg font-mono text-xs w-24" value={value} onChange={e => { if (/^#[0-9a-f]{0,6}$/i.test(e.target.value)) onChange(e.target.value); }} />
+    <Field label={label} className="min-w-0">
+      <div className="flex items-center gap-2 min-w-0">
+        <input type="color" value={value} onChange={e => onChange(e.target.value)} className="h-9 w-10 shrink-0 rounded-lg border border-input bg-white p-1 cursor-pointer" aria-label={label} />
+        <Input className="h-9 min-w-0 w-[6.75rem] rounded-lg font-mono text-xs px-2.5" maxLength={7} aria-label={`${label} (hex)`} value={value} onChange={e => { if (/^#[0-9a-f]{0,6}$/i.test(e.target.value)) onChange(e.target.value); }} />
       </div>
     </Field>
   );
@@ -172,11 +172,12 @@ export function BlockEditor({ design, onChange }: { design: CampaignDesign; onCh
 
   return (
     <div className="space-y-4">
-      <div className="rounded-xl border border-border bg-white p-3.5 grid gap-3 grid-cols-2 sm:grid-cols-[repeat(3,auto)_1fr_1fr]">
+      {/* Wraps onto the next line where the column is narrow — never past its edge. */}
+      <div className="rounded-xl border border-border bg-white p-3.5 flex flex-wrap items-end gap-x-5 gap-y-3">
         <Colour label="Brand colour" value={design.theme.brand} onChange={brand => setTheme({ brand })} />
         <Colour label="Background" value={design.theme.page} onChange={page => setTheme({ page })} />
         <Colour label="Words" value={design.theme.ink} onChange={ink => setTheme({ ink })} />
-        <Field label="Letters"><Select value={design.theme.font} onValueChange={v => setTheme({ font: v as "sans" | "serif" })}><SelectTrigger className="h-9 rounded-lg"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="sans">Clean (Arial)</SelectItem><SelectItem value="serif">Classic (Georgia)</SelectItem></SelectContent></Select></Field>
+        <Field label="Letters" className="w-44"><Select value={design.theme.font} onValueChange={v => setTheme({ font: v as "sans" | "serif" })}><SelectTrigger className="h-9 rounded-lg"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="sans">Clean (Arial)</SelectItem><SelectItem value="serif">Classic (Georgia)</SelectItem></SelectContent></Select></Field>
         <Field label="Logo"><AlignPick value={design.theme.header} onChange={header => setTheme({ header })} /></Field>
       </div>
 

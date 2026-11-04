@@ -2,6 +2,47 @@ import { useEffect, useRef, useState, type VideoHTMLAttributes } from "react";
 import { Download, Maximize2, Pause, Play, Volume2, VolumeX, AlertTriangle, Loader2 } from "lucide-react";
 import { usePlayableSrc } from "@/lib/webVideo";
 
+/** How long a video plays by itself before it rests: muted (playing on its own) / with sound (someone watching). */
+const REST_MUTED_MS = 60_000;
+const REST_SOUND_MS = 5 * 60_000;
+
+/**
+ * A video that plays by itself never keeps the phone awake. On an iPhone a
+ * muted video on a loop stops the screen from locking (it is how "keep awake"
+ * pages work) — a page left open with one played all night and emptied the
+ * battery. So each stretch of playing stops by itself after a minute (five,
+ * with the sound on), and as soon as the app goes into the background; then the
+ * screen locks as usual. A tap plays it again. Returns whether it is resting.
+ */
+export function useVideoRest(ref: React.RefObject<HTMLVideoElement | null>, key: unknown): { rested: boolean; wake: () => void } {
+  const [rested, setRested] = useState(false);
+  useEffect(() => {
+    const v = ref.current;
+    if (!v) return;
+    // One stretch of playing is timed from its start — a loop says "playing" again at every turn,
+    // which must not start the minute over.
+    let timer = 0;
+    const clear = () => { window.clearTimeout(timer); timer = 0; };
+    const start = () => { clear(); timer = window.setTimeout(() => { timer = 0; setRested(true); v.pause(); }, v.muted ? REST_MUTED_MS : REST_SOUND_MS); };
+    const onPlaying = () => { if (!timer) start(); };
+    // The sound turned on (someone is watching): the longer stretch, from now.
+    const onVolume = () => { if (!v.paused) start(); };
+    const onHidden = () => { if (document.visibilityState === "hidden") { clear(); v.pause(); } };
+    v.addEventListener("playing", onPlaying);
+    v.addEventListener("pause", clear);
+    v.addEventListener("volumechange", onVolume);
+    document.addEventListener("visibilitychange", onHidden);
+    return () => {
+      clear();
+      v.removeEventListener("playing", onPlaying);
+      v.removeEventListener("pause", clear);
+      v.removeEventListener("volumechange", onVolume);
+      document.removeEventListener("visibilitychange", onHidden);
+    };
+  }, [ref, key]);
+  return { rested, wake: () => setRested(false) };
+}
+
 /**
  * A product video shown the way shop pages show them now: it plays by itself
  * (muted, on a loop, in the page) while it is on screen, over the piece's photo
@@ -29,6 +70,10 @@ export function ProductVideo({ src: original, poster, onDownload, onUnplayable, 
   const [progress, setProgress] = useState(0);
   // Paused by a tap: it stays paused, even when scrolled away and back.
   const userPaused = useRef(false);
+  // Resting (played a while by itself): it waits for a tap — scrolling back doesn't wake it.
+  const rest = useVideoRest(ref, src);
+  const restedRef = useRef(false);
+  restedRef.current = rest.rested;
 
   // A new video starts afresh — not a switch from the copy to the original, and not
   // the first showing (an error can arrive before this would run: Firefox refuses
@@ -47,7 +92,7 @@ export function ProductVideo({ src: original, poster, onDownload, onUnplayable, 
     const v = ref.current;
     if (!v || typeof IntersectionObserver === "undefined") return;
     const io = new IntersectionObserver(([e]) => {
-      if (e.isIntersecting) { if (!userPaused.current) v.play().catch(() => { /* waits for a tap */ }); }
+      if (e.isIntersecting) { if (!userPaused.current && !restedRef.current) v.play().catch(() => { /* waits for a tap */ }); }
       else v.pause();
     }, { threshold: 0.35 });
     io.observe(v);
@@ -64,7 +109,7 @@ export function ProductVideo({ src: original, poster, onDownload, onUnplayable, 
   const toggle = () => {
     const v = ref.current;
     if (!v || state === "error") return;
-    if (v.paused) { userPaused.current = false; v.play().catch(() => {}); }
+    if (v.paused) { userPaused.current = false; rest.wake(); v.play().catch(() => {}); }
     else { userPaused.current = true; v.pause(); }
   };
   // The copy isn't there (yet) or won't play: the original; nothing left: say so.
@@ -161,6 +206,8 @@ export function ProductVideo({ src: original, poster, onDownload, onUnplayable, 
 export function WebVideo({ src, onUnplayable, onError, ...rest }: Omit<VideoHTMLAttributes<HTMLVideoElement>, "src"> & { src: string; onUnplayable?: () => void }) {
   const playable = usePlayableSrc(src);
   const ref = useRef<HTMLVideoElement>(null);
+  // Never keeps the phone awake (useVideoRest): its own controls play it again.
+  useVideoRest(ref, playable.src);
   const fail = () => { if (!playable.failed()) onUnplayable?.(); };
   // An error that came before React was listening (see ProductVideo).
   useEffect(() => {

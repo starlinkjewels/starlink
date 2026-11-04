@@ -873,7 +873,7 @@ export function SettingsPage() {
         {/* Active section content */}
         {activeSection && (
         <div className="min-w-0 space-y-4 max-w-4xl settings-body">
-          {!compact && <p className="text-xs text-muted-foreground -mb-1">Settings <span className="mx-1 text-muted-foreground/50">/</span> {activeSection.group} <span className="mx-1 text-muted-foreground/50">/</span> <span className="text-foreground font-medium">{activeSection.label}</span></p>}
+          {!compact && <p className="text-xs leading-5 text-muted-foreground pb-1">Settings <span className="mx-1 text-muted-foreground/50">/</span> {activeSection.group} <span className="mx-1 text-muted-foreground/50">/</span> <span className="text-foreground font-medium">{activeSection.label}</span></p>}
 
 
       {/* ── Sample data — demo build only ── */}
