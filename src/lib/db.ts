@@ -575,6 +575,10 @@ export interface Order {
   otherMetal?: string;        // "Platinum" | "Silver" | "White Gold" | …
   otherMetalWeight?: number;  // grams
   otherMetalPurity?: number;  // ‰ (e.g. 950 for platinum) — optional
+  /** Every metal besides the gold, when there is more than one (gold + platinum + silver).
+   *  The first is also in otherMetal / otherMetalWeight / otherMetalPurity, as always —
+   *  read them through otherMetalsOf (lib/weights.ts). Unset: only the fields above. */
+  otherMetals?: { metal: string; weight?: number; purity?: number }[];
   clientId: string; // empty string when forReadyStock (in-house build, no client)
   forReadyStock?: boolean; // in-house order that becomes a Ready Stock item when finished
   readyStockCreatedId?: string; // ReadyStockItem.id created from this order (once "Add to Ready Stock" is done)
@@ -1925,7 +1929,9 @@ export interface Factory {
 export interface FactoryLabour { minimum?: number;
   /** The minimum is charged on a piece lighter than this (g); each factory sets its own. Unset: whenever gram × rate comes to less. */
   minimumUnder?: number;
-  perGram?: Record<string, number> }
+  perGram?: Record<string, number>;
+  /** ₹ a gram for a metal other than gold (Platinum, Silver, Titanium …), by its name. Unset: the gold rate. */
+  perMetal?: Record<string, number> }
 
 // Finished jewelry already sitting in physical inventory — separate from the
 // raw-material Stock (gold grams / diamond carats, src/lib/stock.ts). Readable
@@ -2086,6 +2092,10 @@ export interface MaterialIssuance {
     otherCharges?: number;
     metalByFactoryGrams?: number; // metal the factory supplied itself
     metalByFactoryRate?: number;  // ₹ per gram for that metal
+    /** The making by metal — each metal's grams at its own rate (gold ₹1,000/g, titanium ₹400/g).
+     *  Set: the making is these added up, the minimum applying to the sum; unset (every
+     *  piece before it, and a gold-only piece): perGramRate × the piece's net weight. */
+    lines?: { metal: string; grams: number; rate: number; /** The gold's own line (gold, and metal issued from stock). */ gold?: boolean }[];
   };
 }
 

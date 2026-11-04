@@ -12,7 +12,7 @@ import { ExportMenu, FilterChips, FiltersButton, useNarrow, type TableExport, ty
 import { OrderBoard } from "@/components/OrderBoard";
 import { ProductionInfo } from "@/components/ProductionInfo";
 import { diamondsMissing, productionDelayDays, productionTrack, type ProductionTrack } from "@/lib/production";
-import { pieceWeights } from "@/lib/weights";
+import { otherMetalsOf, pieceWeights } from "@/lib/weights";
 import { useCan, useMayExport } from "@/hooks/useCan";
 import { useMemo, useState } from "react";
 import { filled, when, userName, refLink, noteText, refNo, type Detail } from "@/components/rowDetails";
@@ -432,7 +432,7 @@ export function OrdersPage() {
       { label: "Rhodium", value: o.rhodium },
       { label: "Stamping", value: o.stamping },
       { label: "Engraving", value: o.engraving?.text ? `“${o.engraving.text}” (${o.engraving.font === "script" ? "script" : "block"} letters)` : undefined },
-      !!o.otherMetal && { label: "Second metal", value: `${o.otherMetal}${o.otherMetalWeight ? ` · ${o.otherMetalWeight} g` : ""}${o.otherMetalPurity ? ` · ${o.otherMetalPurity}‰` : ""}` },
+      !!o.otherMetal && { label: otherMetalsOf(o).length > 1 ? "Other metals" : "Second metal", value: otherMetalsOf(o).map(m => `${m.metal}${m.weight ? ` · ${m.weight} g` : ""}${m.purity ? ` · ${m.purity}‰` : ""}`).join("; ") },
       // The lab's rupees are ours to see; the client sees the dollars they are billed.
       !!o.certificate && { label: "Certificate", value: o.certificateFee ? `Yes · ${fmtMoney(o.certificateFee)}${isStaff && o.certificateFeeInr ? ` (₹${o.certificateFeeInr.toLocaleString("en-IN")})` : ""}` : "Yes" },
       { label: "Delivery time", value: o.deliveryTime },

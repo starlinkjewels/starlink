@@ -240,8 +240,18 @@ export function labourValue(labour: NonNullable<MaterialIssuance["labour"]> | un
  */
 export function makingCharge(labour: NonNullable<MaterialIssuance["labour"]> | undefined, netWeight: number): number {
   if (!labour) return 0;
-  const perGram = (labour.perGramRate || 0) * (netWeight || 0);
+  const perGram = byGramMaking(labour, netWeight);
   return Math.round((minimumLabourApplies(labour, netWeight) ? labour.minimumLabour || 0 : perGram) * 100) / 100;
+}
+
+/**
+ * Gram × rate: each metal at its own rate when the making is set by metal
+ * (labour.lines — gold at one rate, titanium at another), else the one rate on
+ * the piece's net weight, as every piece before metal rates was charged.
+ */
+export function byGramMaking(labour: NonNullable<MaterialIssuance["labour"]>, netWeight: number): number {
+  if (labour.lines?.length) return labour.lines.reduce((t, l) => t + (l.grams || 0) * (l.rate || 0), 0);
+  return (labour.perGramRate || 0) * (netWeight || 0);
 }
 
 /** True when the minimum is what is actually being charged, so the screen can
@@ -254,8 +264,9 @@ export function minimumLabourApplies(labour: NonNullable<MaterialIssuance["labou
   // minimum (when there is a rate to charge by). Under it, as always: the minimum
   // when gram × rate comes to less — never less than gram × rate.
   const band = labour.minimumUnderGrams || 0;
-  if (band > 0 && (netWeight || 0) >= band && (labour.perGramRate || 0) > 0) return false;
-  return labour.minimumLabour > (labour.perGramRate || 0) * (netWeight || 0);
+  const hasRate = labour.lines?.length ? labour.lines.some(l => (l.rate || 0) > 0) : (labour.perGramRate || 0) > 0;
+  if (band > 0 && (netWeight || 0) >= band && hasRate) return false;
+  return labour.minimumLabour > byGramMaking(labour, netWeight);
 }
 
 

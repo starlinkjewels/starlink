@@ -118,7 +118,7 @@ export function patchKey(hash: string, patch: Partial<ApiKey>): void {
 /* ─────────────── Ready Stock ─────────────── */
 
 const DESIGN_FIELDS = ["designNumber", "productSize", "productColor", "diamondShape", "actualDiamondPcs", "rhodium", "stamping",
-  "otherMetal", "otherMetalWeight", "otherMetalPurity", "certificate", "cad3dmUrl", "productVideo"];
+  "otherMetal", "otherMetalWeight", "otherMetalPurity", "otherMetals", "certificate", "cad3dmUrl", "productVideo"];
 
 export interface Stock {
   items: StockDoc[];

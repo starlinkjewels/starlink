@@ -2,7 +2,7 @@ import { LooseLotFields } from "@/components/LotFields";
 import { ListCombo } from "@/components/ListCombo";
 import type { ListKey } from "@/lib/optionLists";
 import { useState, type ReactNode } from "react";
-import { Info, Lock, Pencil, Undo2 } from "lucide-react";
+import { Info, Lock, Pencil, Plus, Trash2, Undo2 } from "lucide-react";
 import { toast } from "sonner";
 import {
   loadDb, updateDbAs, uid, findInvoiceForOrder, isDiamondOnlyOrder, fmtDate, dayOf, todayLocal,
@@ -12,7 +12,7 @@ import { useDb } from "@/hooks/useDb";
 import { useAuth } from "@/lib/auth";
 import { useCan } from "@/hooks/useCan";
 import { metalHasKarats, metalOptions } from "@/lib/metals";
-import { netFromGross } from "@/lib/weights";
+import { netFromGross, otherMetalsOf } from "@/lib/weights";
 import { activeMaterials } from "@/lib/materials";
 import { hasDiamonds } from "@/lib/orderText";
 import { choicesOf, listOf } from "@/lib/optionLists";
@@ -103,11 +103,20 @@ export function OrderEditDialog({ order, onClose }: { order: Order; onClose: () 
   const can = useCan();
   const [f, setF] = useState<Form>(() => formOf(order));
   const set = <K extends keyof Form>(k: K, v: Form[K]) => setF(p => ({ ...p, [k]: v }));
+  // The metals besides the main one, estimated (as New Order took them); Final Approval records the real weights.
+  const othersOf = (o: Order) => otherMetalsOf(o).map(m => ({ metal: m.metal, weight: m.weight != null ? String(m.weight) : "", purity: m.purity != null ? String(m.purity) : "" }));
+  const [others, setOthers] = useState(() => othersOf(order));
+  const othersG = (rows: { metal: string; weight: string }[]) => rows.filter(r => r.metal.trim()).reduce((t, r) => t + (Number(r.weight) || 0), 0);
+  const cleanOthers = (rows: { metal: string; weight: string; purity: string }[]) => rows.filter(r => r.metal.trim())
+    .map(r => ({ metal: r.metal.trim(), ...(Number(r.weight) > 0 ? { weight: Math.round(Number(r.weight) * 1000) / 1000 } : {}), ...(Number(r.purity) > 0 ? { purity: Number(r.purity) } : {}) }));
 
   const access = orderEditAccess(db, user, can, order);
   const locks = orderSpecLocks(db, order);
   const all = access ?? locks.all;
   const pieceLock = all ?? locks.piece;
+  // Approved: the metals' real weights are Final Approval's — changed there, not here.
+  const approved = (o: Order) => o.timeline?.some(t => t.step === "Final Approval" && t.status === "done");
+  const metalsLock = pieceLock ?? (approved(order) ? "Approved — the metals' weights are changed in Final Approval" : undefined);
   // Only the metal waits for its issue to be cancelled; type, karats, quantity
   // and diamond type change here, and what was issued stays issued.
   const doneLock = pieceLock ?? locks.finished;
@@ -181,7 +190,7 @@ export function OrderEditDialog({ order, onClose }: { order: Order; onClose: () 
     }
     const num = (s: string) => { const n = Number(s); return s.trim() && isFinite(n) && n > 0 ? n : undefined; };
     if (!diamondOnly && touched("estimatedGrossWeight", "estimatedNetWeight", "diamondWeight")) {
-      const wp = weightProblem({ gross: num(f.estimatedGrossWeight), net: num(f.estimatedNetWeight), diamondCt: num(f.diamondWeight) });
+      const wp = weightProblem({ gross: num(f.estimatedGrossWeight), net: num(f.estimatedNetWeight), other: othersG(others) || undefined, diamondCt: num(f.diamondWeight) });
       if (wp) { toast.error(wp); return; }
     }
     const txt = (s: string) => s.trim() || undefined;
@@ -220,7 +229,15 @@ export function OrderEditDialog({ order, onClose }: { order: Order; onClose: () 
     const changed = (Object.keys(next) as (keyof Order)[]).filter(k =>
       touched(...(FROM[k] ?? [k as keyof Form]))
       && !same(next[k], k === "expectedDelivery" ? (o.expectedDelivery ?? "").slice(0, 10) : o[k]));
-    if (!changed.length) { toast.message("Nothing changed"); onClose(); return; }
+    // The other metals: changed when the list as typed differs from the order's.
+    // The piece's own metal is not an "other" one.
+    const othersNext = diamondOnly ? [] : cleanOthers(others).filter(m => m.metal.toLowerCase() !== f.metal.trim().toLowerCase());
+    const metalsChanged = JSON.stringify(othersNext) !== JSON.stringify(cleanOthers(othersOf(o)));
+    if (metalsChanged) {
+      const why = nowLocks.piece ?? (approved(o) ? "Approved — the metals' weights are changed in Final Approval" : undefined);
+      if (why) { toast.error(`The other metals can't change: ${why}`); return; }
+    }
+    if (!changed.length && !metalsChanged) { toast.message("Nothing changed"); onClose(); return; }
 
     // Whatever is locked now is refused, not quietly skipped.
     const PIECE = ["jewelleryType", "metal", "productKarats", "productColor", "productSize", "quantity", "diamondType", "diamondShape", "diamondWeight", "estimatedGrossWeight", "estimatedNetWeight", "rhodium", "stamping", "engraving"];
@@ -245,7 +262,8 @@ export function OrderEditDialog({ order, onClose }: { order: Order; onClose: () 
     ))) return;
 
     const dueMoved = changed.includes("expectedDelivery");
-    updateDbAs({ summary: `Edited ${o.orderNumber}: ${changed.map(k => LABEL[k] ?? k).join(", ")}` }, d => {
+    const what = [...changed.map(k => LABEL[k] ?? k), ...(metalsChanged ? ["other metals"] : [])].join(", ");
+    updateDbAs({ summary: `Edited ${o.orderNumber}: ${what}` }, d => {
       const x = d.orders.find(y => y.id === o.id);
       if (!x) return;
       // The day it was first submitted moves with the order date (the step said the old day).
@@ -254,13 +272,22 @@ export function OrderEditDialog({ order, onClose }: { order: Order; onClose: () 
         if (sub?.date && dayOf(sub.date) === dayOf(o.createdAt)) sub.date = next.createdAt;
       }
       for (const k of changed) (x as unknown as Record<string, unknown>)[k] = next[k];
+      // The first metal in its own fields (every screen reads them); the list when there are more.
+      if (metalsChanged) {
+        const [first, ...more] = othersNext;
+        if (first) { x.otherMetal = first.metal; x.otherMetalWeight = first.weight; x.otherMetalPurity = first.purity; }
+        else { delete x.otherMetal; delete x.otherMetalWeight; delete x.otherMetalPurity; }
+        if (more.length) x.otherMetals = othersNext; else delete x.otherMetals;
+        if (first && x.otherMetalWeight === undefined) delete x.otherMetalWeight;
+        if (first && x.otherMetalPurity === undefined) delete x.otherMetalPurity;
+      }
       // A new due date is the one thing the client is waiting on — tell them.
       if (dueMoved && !x.forReadyStock) {
         const cu = d.users.find(u => u.clientId === x.clientId && u.role === "client");
         if (cu) d.notifications.unshift({ id: uid("n_"), userId: cu.id, title: "Delivery date updated", body: `${x.orderNumber} is now due ${fmtDate(x.expectedDelivery)}.`, type: "order", read: false, createdAt: new Date().toISOString() });
       }
     });
-    toast.success(`${o.orderNumber} updated — ${changed.map(k => LABEL[k] ?? k).join(", ")}`);
+    toast.success(`${o.orderNumber} updated — ${what}`);
     onClose();
   };
 
@@ -276,8 +303,14 @@ export function OrderEditDialog({ order, onClose }: { order: Order; onClose: () 
 
   // A business list: pick, or type a new word — used and remembered (ListCombo).
   // Net follows the gross and the diamonds, as on New Order.
-  const setGross = (v: string) => setF(p => ({ ...p, estimatedGrossWeight: v, estimatedNetWeight: Number(v) > 0 ? String(netFromGross(Number(v), Number(p.diamondWeight))) : "" }));
-  const setDiamondCt = (v: string) => setF(p => ({ ...p, diamondWeight: v, ...(Number(p.estimatedGrossWeight) > 0 ? { estimatedNetWeight: String(netFromGross(Number(p.estimatedGrossWeight), Number(v))) } : {}) }));
+  // …and the other metals: gross − stones − those metals.
+  const netOf = (g: number, ct: number, rows: { metal: string; weight: string }[]) => String(Math.max(0, Math.round((netFromGross(g, ct) - othersG(rows)) * 1000) / 1000));
+  const setGross = (v: string) => setF(p => ({ ...p, estimatedGrossWeight: v, estimatedNetWeight: Number(v) > 0 ? netOf(Number(v), Number(p.diamondWeight), others) : "" }));
+  const setDiamondCt = (v: string) => setF(p => ({ ...p, diamondWeight: v, ...(Number(p.estimatedGrossWeight) > 0 ? { estimatedNetWeight: netOf(Number(p.estimatedGrossWeight), Number(v), others) } : {}) }));
+  const changeOthers = (rows: { metal: string; weight: string; purity: string }[]) => {
+    setOthers(rows);
+    setF(p => (Number(p.estimatedGrossWeight) > 0 ? { ...p, estimatedNetWeight: netOf(Number(p.estimatedGrossWeight), Number(p.diamondWeight), rows) } : p));
+  };
   const pickList = (k: keyof Form, list: ListKey, disabled: string | undefined) => (
     <div title={disabled}>
       <ListCombo list={list} value={f[k]} onChange={v => set(k, v)} disabled={!!disabled} placeholder="Select…" className="h-10 rounded-xl" />
@@ -380,7 +413,20 @@ export function OrderEditDialog({ order, onClose }: { order: Order; onClose: () 
                 <Field label="Est. net weight (g) — auto">
                   <Input type="number" readOnly tabIndex={-1} value={f.estimatedNetWeight} placeholder="gross − diamonds" className="h-10 rounded-xl bg-secondary/60 text-muted-foreground cursor-default" aria-label="Est. net weight (worked out)" />
                 </Field>
-                <WeightCheck className="col-span-2 -mt-1" gross={Number(f.estimatedGrossWeight) || undefined} net={Number(f.estimatedNetWeight) || undefined} diamondCt={Number(f.diamondWeight) || undefined} />
+                <WeightCheck className="col-span-2 -mt-1" gross={Number(f.estimatedGrossWeight) || undefined} net={Number(f.estimatedNetWeight) || undefined} other={othersG(others) || undefined} diamondCt={Number(f.diamondWeight) || undefined} />
+                {/* Other metals — a platinum head on a gold ring, gold + silver … each estimated. */}
+                <div className="col-span-2 space-y-2" title={metalsLock}>
+                  <p className="text-xs font-medium text-foreground">Other metals <span className="font-normal text-muted-foreground">· {metalsLock ?? "optional — taken off the net above"}</span></p>
+                  {others.map((r, i) => (
+                    <div key={i} className="grid grid-cols-[1.3fr_1fr_1fr_auto] gap-2 items-end">
+                      <div className="min-w-0"><ListCombo list="metals" value={r.metal} onChange={v => changeOthers(others.map((x, j) => (j === i ? { ...x, metal: v } : x)))} disabled={!!metalsLock} placeholder="Metal" className="h-10 rounded-xl" ariaLabel={`Other metal ${i + 1}`} /></div>
+                      <Input type="number" min={0} step="0.001" value={r.weight} disabled={!!metalsLock} onChange={e => changeOthers(others.map((x, j) => (j === i ? { ...x, weight: e.target.value } : x)))} className="h-10 rounded-xl" placeholder="Est. g" aria-label={`Other metal ${i + 1} estimated weight`} />
+                      <Input type="number" min={0} step="0.1" value={r.purity} disabled={!!metalsLock} onChange={e => changeOthers(others.map((x, j) => (j === i ? { ...x, purity: e.target.value } : x)))} className="h-10 rounded-xl" placeholder="‰" aria-label={`Other metal ${i + 1} purity`} />
+                      <Button type="button" variant="ghost" size="icon" className="h-10 w-10" disabled={!!metalsLock} aria-label={`Remove other metal ${i + 1}`} onClick={() => changeOthers(others.filter((_, j) => j !== i))}><Trash2 className="h-4 w-4" /></Button>
+                    </div>
+                  ))}
+                  {!metalsLock && <Button type="button" variant="outline" size="sm" className="gap-1" onClick={() => changeOthers([...others, { metal: "", weight: "", purity: "" }])}><Plus className="h-3.5 w-3.5" />Add {others.length ? "another" : "a"} metal</Button>}
+                </div>
                 <Field label="Rhodium">{pickList("rhodium", "rhodium", pieceLock)}</Field>
                 <Field label="Stamping">{pickList("stamping", "stamping", pieceLock)}</Field>
                 {f.stamping === "Special Stamp" && (

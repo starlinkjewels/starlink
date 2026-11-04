@@ -55,7 +55,7 @@ import {
 } from "@/components/ui/select";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { toast } from "sonner";
-import { Users, Coins, Plus, DollarSign, Building2, ImagePlus, X, Gem, Clock, Sparkles, Truck, CreditCard, AlertCircle, BadgeCheck, Boxes, ShoppingBag, HelpCircle, PackageCheck, Gift, Factory as FactoryIconLucide, Search, MapPin, Copy, PenTool, Repeat } from "lucide-react";
+import { Users, Coins, Plus, Trash2, DollarSign, Building2, ImagePlus, X, Gem, Clock, Sparkles, Truck, CreditCard, AlertCircle, BadgeCheck, Boxes, ShoppingBag, HelpCircle, PackageCheck, Gift, Factory as FactoryIconLucide, Search, MapPin, Copy, PenTool, Repeat } from "lucide-react";
 import { DesignerFields, NO_DESIGNER, assignAndTell, type DesignerChoice } from "@/components/designers/AssignDesigner";
 
 const READY_STOCK_NONE = "none";
@@ -159,6 +159,8 @@ function NewOrderForm() {
     diamondWeight: "" as number | "",
     estimatedGrossWeight: 0,
     estimatedNetWeight: 0,
+    // Metals besides the main one (a platinum head on a gold ring, gold + silver): est. grams each.
+    otherMetals: [] as { metal: string; weight: string; purity: string }[],
     instructions: "",
     expectedDelivery: defaultDeliveryDate(), // 10 days out by default — staff can change it
     priority: "Normal",
@@ -222,12 +224,16 @@ function NewOrderForm() {
 
   const set = (key: string, value: unknown) =>
     setF(prev => ({ ...prev, [key]: value }));
-  // Net follows the gross and the diamonds: gross − stones (1 ct = 0.2 g).
+  // Net follows the gross, the diamonds and the other metals: gross − stones (1 ct = 0.2 g) − those metals.
+  const othersG = (rows: { metal: string; weight: string }[]) => rows.filter(r => r.metal.trim()).reduce((t, r) => t + (Number(r.weight) || 0), 0);
+  const netOf = (g: number, ct: number, rows: { metal: string; weight: string }[]) => (g > 0 ? Math.max(0, Math.round((netFromGross(g, ct) - othersG(rows)) * 1000) / 1000) : 0);
   const setGross = (g: number) =>
-    setF(prev => ({ ...prev, estimatedGrossWeight: g, estimatedNetWeight: g > 0 ? netFromGross(g, Number(prev.diamondWeight)) : 0 }));
+    setF(prev => ({ ...prev, estimatedGrossWeight: g, estimatedNetWeight: netOf(g, Number(prev.diamondWeight), prev.otherMetals) }));
   // Blank ("") is not entered — no stones taken off the gross.
   const setDiamondCt = (ct: number | "") =>
-    setF(prev => ({ ...prev, diamondWeight: ct, ...(prev.estimatedGrossWeight > 0 ? { estimatedNetWeight: netFromGross(prev.estimatedGrossWeight, Number(ct) || 0) } : {}) }));
+    setF(prev => ({ ...prev, diamondWeight: ct, ...(prev.estimatedGrossWeight > 0 ? { estimatedNetWeight: netOf(prev.estimatedGrossWeight, Number(ct) || 0, prev.otherMetals) } : {}) }));
+  const setOtherMetals = (rows: { metal: string; weight: string; purity: string }[]) =>
+    setF(prev => ({ ...prev, otherMetals: rows, ...(prev.estimatedGrossWeight > 0 ? { estimatedNetWeight: netOf(prev.estimatedGrossWeight, Number(prev.diamondWeight) || 0, rows) } : {}) }));
   // The colour follows the metal while nobody has picked one by hand (namedColour).
   const colourByHand = useRef(false);
   const colourFor = (prev: { metal: string; productColor: string }, metal: string): { productColor?: string } => {
@@ -560,7 +566,7 @@ function NewOrderForm() {
     // Gross is the whole piece, net the metal only: an estimate that says
     // otherwise is a typing slip, and it would carry onto every card and band.
     if (needSpecs) {
-      const wp = weightProblem({ gross: Number(f.estimatedGrossWeight), net: Number(f.estimatedNetWeight), diamondCt: Number(f.diamondWeight) });
+      const wp = weightProblem({ gross: Number(f.estimatedGrossWeight), net: Number(f.estimatedNetWeight), other: othersG(f.otherMetals), diamondCt: Number(f.diamondWeight) });
       if (wp) { toast.error(wp); return; }
     }
     // The production plan: what is taken must be there, and a piece's material needs its factory.
@@ -682,6 +688,13 @@ function NewOrderForm() {
         metalWeight: 0,
         estimatedGrossWeight: Number(f.estimatedGrossWeight) || undefined,
         estimatedNetWeight: Number(f.estimatedNetWeight) || undefined,
+        // The other metals, estimated (Final Approval starts from them): the first as always, the list when more.
+        ...(() => {
+          // The piece's own metal is not an "other" one (a platinum ring's platinum is its metal).
+          const rows = isDiamondOnly ? [] : f.otherMetals.filter(r => r.metal.trim() && r.metal.trim().toLowerCase() !== f.metal.trim().toLowerCase()).map(r => ({ metal: r.metal.trim(), ...(Number(r.weight) > 0 ? { weight: Math.round(Number(r.weight) * 1000) / 1000 } : {}), ...(Number(r.purity) > 0 ? { purity: Number(r.purity) } : {}) }));
+          if (!rows.length) return {};
+          return { otherMetal: rows[0].metal, ...(rows[0].weight ? { otherMetalWeight: rows[0].weight } : {}), ...(rows[0].purity ? { otherMetalPurity: rows[0].purity } : {}), ...(rows.length > 1 ? { otherMetals: rows } : {}) };
+        })(),
         images: imageUrls.length ? imageUrls : looks?.images ?? [],
         ...(looks ? { cadImage: looks.cadImage, productPhotos: looks.productPhotos, productVideo: looks.productVideo, cad3dmUrl: looks.cad3dmUrl,
           rhodium: f.rhodium || looks.rhodium, stamping: looks.stamping } : {}),
@@ -1377,11 +1390,24 @@ function NewOrderForm() {
                     className="rounded-xl h-11" placeholder="0.000" />
                 </Field>
                 {/* Net = gross − the stones' weight (1 ct = 0.2 g): worked out, not typed. */}
-                <Field label="Est. Net Weight (g)  —  auto">
+                <Field label={othersG(f.otherMetals) > 0 ? `Est. ${f.metal} Net (g)  —  auto` : "Est. Net Weight (g)  —  auto"}>
                   <Input type="number" readOnly tabIndex={-1} value={f.estimatedNetWeight ? fmtG(f.estimatedNetWeight) : ""}
-                    className="rounded-xl h-11 bg-secondary/60 text-muted-foreground cursor-default" placeholder="gross − diamonds" aria-label="Est. Net Weight (worked out)" />
+                    className="rounded-xl h-11 bg-secondary/60 text-muted-foreground cursor-default" placeholder={othersG(f.otherMetals) > 0 ? "gross − diamonds − other metals" : "gross − diamonds"} aria-label="Est. Net Weight (worked out)" />
                 </Field>
-                <WeightCheck className="col-span-2 -mt-1" gross={Number(f.estimatedGrossWeight)} net={Number(f.estimatedNetWeight)} diamondCt={Number(f.diamondWeight)} />
+                {/* Other metals in the piece, each estimated — taken off the net above, and where Final Approval starts. */}
+                <div className="col-span-2 space-y-2">
+                  <p className="text-xs font-medium text-foreground">Other metals <span className="font-normal text-muted-foreground">· optional — a platinum head on a gold ring, gold + silver …</span></p>
+                  {f.otherMetals.map((r, i) => (
+                    <div key={i} className="grid grid-cols-[1.3fr_1fr_1fr_auto] gap-2 items-end">
+                      <div className="min-w-0"><ListCombo list="metals" value={r.metal} onChange={v => setOtherMetals(f.otherMetals.map((x, j) => (j === i ? { ...x, metal: v } : x)))} placeholder="Metal" className="rounded-xl h-11" ariaLabel={`Other metal ${i + 1}`} /></div>
+                      <Input type="number" step="0.001" min={0} value={r.weight} onChange={e => setOtherMetals(f.otherMetals.map((x, j) => (j === i ? { ...x, weight: e.target.value } : x)))} className="rounded-xl h-11" placeholder="Est. g" aria-label={`Other metal ${i + 1} estimated weight`} />
+                      <Input type="number" step="0.1" min={0} value={r.purity} onChange={e => setOtherMetals(f.otherMetals.map((x, j) => (j === i ? { ...x, purity: e.target.value } : x)))} className="rounded-xl h-11" placeholder="‰ e.g. 950" aria-label={`Other metal ${i + 1} purity`} />
+                      <Button type="button" variant="ghost" size="icon" className="h-11 w-11" aria-label={`Remove other metal ${i + 1}`} onClick={() => setOtherMetals(f.otherMetals.filter((_, j) => j !== i))}><Trash2 className="h-4 w-4" /></Button>
+                    </div>
+                  ))}
+                  <Button type="button" variant="outline" size="sm" className="gap-1" onClick={() => setOtherMetals([...f.otherMetals, { metal: "", weight: "", purity: "" }])}><Plus className="h-3.5 w-3.5" />Add {f.otherMetals.length ? "another" : "a"} metal</Button>
+                </div>
+                <WeightCheck className="col-span-2 -mt-1" gross={Number(f.estimatedGrossWeight)} net={Number(f.estimatedNetWeight)} other={othersG(f.otherMetals)} diamondCt={Number(f.diamondWeight)} />
               </>
             )}
           </div>

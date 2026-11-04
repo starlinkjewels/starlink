@@ -277,7 +277,8 @@ export async function exportOrderXlsx(db: DB, order: Order, opts: { faDone: bool
       const L = fin.labour ?? {};
       r = section(ws, r, C, "Final Approval — labour & actuals");
       if (fin.factoryId) r = kvRow(ws, r, C, "Factory", db.factories.find(f => f.id === fin.factoryId)?.name ?? "");
-      if (L.perGramRate) r = kvRow(ws, r, C, "Labour per gram", L.perGramRate, FMT.inr);
+      if (L.lines?.length) for (const l of L.lines) r = kvRow(ws, r, C, `Making — ${l.metal}`, `${l.grams} g × ₹${(l.rate || 0).toLocaleString("en-IN")}/g`);
+      else if (L.perGramRate) r = kvRow(ws, r, C, "Labour per gram", L.perGramRate, FMT.inr);
       if (L.minimumLabour) r = kvRow(ws, r, C, L.minimumFlat ? "Minimum labour (flat)" : "Minimum labour", `₹${L.minimumLabour.toLocaleString("en-IN")}${L.minimumUnderGrams ? ` under ${L.minimumUnderGrams} g` : ""}`);
       if (L.diamondHandlingRate) r = kvRow(ws, r, C, "Diamond handling per ct", L.diamondHandlingRate, FMT.inr);
       if (L.cadCharge) r = kvRow(ws, r, C, "CAD charge", L.cadCharge, FMT.inr);

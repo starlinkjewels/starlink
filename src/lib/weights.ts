@@ -93,6 +93,20 @@ export interface PieceWeights {
   problem: string | null;
 }
 
+export interface OtherMetal { metal: string; weight?: number; purity?: number }
+/**
+ * Every metal of a piece besides its gold: the list (gold + platinum + silver),
+ * else the one "other metal" every order before the list had. The first is
+ * always the one in otherMetal / otherMetalWeight / otherMetalPurity.
+ */
+export function otherMetalsOf(o: Pick<Order, "otherMetal" | "otherMetalWeight" | "otherMetalPurity" | "otherMetals">): OtherMetal[] {
+  if (o.otherMetals?.length) return o.otherMetals.filter(m => m && m.metal?.trim());
+  return o.otherMetal?.trim() ? [{ metal: o.otherMetal, ...(o.otherMetalWeight != null ? { weight: o.otherMetalWeight } : {}), ...(o.otherMetalPurity != null ? { purity: o.otherMetalPurity } : {}) }] : [];
+}
+/** The grams of the metals after the first (none on a piece with one other metal, or none). */
+export const moreMetalsGrams = (o: Pick<Order, "otherMetal" | "otherMetalWeight" | "otherMetalPurity" | "otherMetals">) =>
+  otherMetalsOf(o).slice(1).reduce((t, m) => t + pos(m.weight), 0);
+
 /**
  * A platinum or silver piece whose own metal Final Approval recorded under
  * "other metal" (the scale's weight less the stones) — not a two-tone piece.
@@ -121,16 +135,17 @@ export function pieceWeights(o: Order, issuances: MaterialIssuance[] = []): Piec
     // and the estimate (the same metal, guessed) no longer counts. A net on
     // file is gold beside it only when the scale has room for it — else it is
     // the same metal written down before it was weighed.
-    const metal = pos(o.otherMetalWeight), stonesG = diamondCt * CARAT_TO_GRAM;
+    // Any metal after it (a silver part on a titanium piece) is a second metal, as on a gold one.
+    const metal = pos(o.otherMetalWeight), stonesG = diamondCt * CARAT_TO_GRAM, more = moreMetalsGrams(o);
     const onScale = pos(o.actualGrossWeight), typed = pos(actualNet);
-    const gold = typed && (!onScale || typed + metal + stonesG <= onScale + TOLERANCE_G) ? typed : 0;
+    const gold = typed && (!onScale || typed + metal + more + stonesG <= onScale + TOLERANCE_G) ? typed : 0;
     const net = metal + gold;
-    const gross = onScale || net + stonesG;
-    return { gross: n3(gross), net: n3(net), other: 0, diamondCt: n3(diamondCt), estimated: false, problem: weightProblem({ gross, net, diamondCt }) };
+    const gross = onScale || net + more + stonesG;
+    return { gross: n3(gross), net: n3(net), other: n3(more), diamondCt: n3(diamondCt), estimated: false, problem: weightProblem({ gross, net, other: more, diamondCt }) };
   }
   // metalWeight: the old single "gold weight" estimate — metal only, so net.
   const net = pos(actualNet ?? (o.estimatedNetWeight || o.metalWeight));
-  const other = pos(o.otherMetalWeight);
+  const other = pos(o.otherMetalWeight) + moreMetalsGrams(o);
   const built = net + other + diamondCt * CARAT_TO_GRAM;
   let gross: number;
   if (o.actualGrossWeight) gross = o.actualGrossWeight;

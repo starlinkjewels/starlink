@@ -64,6 +64,9 @@ export function downloadLedgerPdf(opts: {
    *  in a column of its own at `x`. Rows grow tall enough to show it. */
   pictures?: { header: string; x: number; images: (string | null | undefined)[] };
 }): void {
+  // A ₹ that reached a cell anyway (a particular written for the screen) prints as "Rs", never a broken glyph.
+  const rs = (t: string) => String(t ?? "").replace(/₹\s?/g, "Rs ");
+  opts = { ...opts, rows: opts.rows.map(r => r.map(rs)), totalsRow: opts.totalsRow?.map(rs), summary: opts.summary.map(x => ({ label: rs(x.label), value: rs(x.value) })), subjectLines: opts.subjectLines.map(rs) };
   const doc = new jsPDF(opts.landscape ? { orientation: "landscape" } : undefined);
   const PAGE_W = opts.landscape ? 297 : 210;
   const PAGE_H = opts.landscape ? 210 : 297;
@@ -192,6 +195,10 @@ export function downloadLedgerPdfMulti(opts: {
   /** See downloadLedgerPdf. */
   company?: string;
 }): void {
+  // A ₹ that reached a cell anyway prints as "Rs" (see downloadLedgerPdf).
+  const rs = (t: string) => String(t ?? "").replace(/₹\s?/g, "Rs ");
+  opts = { ...opts, summary: opts.summary.map(x => ({ label: rs(x.label), value: rs(x.value) })), subjectLines: opts.subjectLines.map(rs),
+    sections: opts.sections.map(sec => ({ ...sec, rows: sec.rows.map(r => r.map(rs)), totalsRow: sec.totalsRow?.map(rs) })) };
   const doc = new jsPDF(opts.landscape ? { orientation: "landscape" } : undefined);
   const PAGE_W = opts.landscape ? 297 : 210;
   const PAGE_H = opts.landscape ? 210 : 297;

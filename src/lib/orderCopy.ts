@@ -5,6 +5,7 @@
 // taken, its purchases, its payments, its dates and its number.
 import { isDiamondOnlyOrder, type Order, type User } from "./db";
 import { needsAccess } from "./actionHints";
+import { netFromGross, otherMetalsOf } from "./weights";
 
 export const COPY_PARAM = "copy";
 
@@ -38,7 +39,13 @@ export function copyFields(o: Order) {
     quantity: o.quantity || 1,
     diamondWeight: o.diamondWeight || 0,
     estimatedGrossWeight: o.estimatedGrossWeight || 0,
-    estimatedNetWeight: o.estimatedNetWeight || 0,
+    // Net = gross − diamonds − the other metals copied below (the order's own net was taken before they were).
+    estimatedNetWeight: o.estimatedGrossWeight && otherMetalsOf(o).some(m => m.weight)
+      ? Math.max(0, Math.round((netFromGross(o.estimatedGrossWeight, o.diamondWeight || 0) - otherMetalsOf(o).filter(m => m.metal.trim().toLowerCase() !== String(o.metal ?? "").trim().toLowerCase()).reduce((t, m) => t + (m.weight || 0), 0)) * 1000) / 1000)
+      : o.estimatedNetWeight || 0,
+    // The other metals, as estimates — not a platinum or titanium piece's own metal, which Final Approval records.
+    otherMetals: otherMetalsOf(o).filter(m => m.metal.trim().toLowerCase() !== String(o.metal ?? "").trim().toLowerCase())
+      .map(m => ({ metal: m.metal, weight: m.weight != null ? String(m.weight) : "", purity: m.purity != null ? String(m.purity) : "" })),
     instructions: o.instructions ?? "",
     priority: o.priority || "Normal",
     designNumber: o.designNumber ?? "",
