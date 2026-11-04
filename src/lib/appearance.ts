@@ -134,6 +134,14 @@ function fontSheet(id: string, spec: string | null) {
   el.href = href;
 }
 
+/** A font for one part of the app (the product page): its stylesheet on the page, and its stack — none for an unknown key. */
+export function loadFont(id: string, key: string | undefined): string | undefined {
+  const d = key ? fontDef(key) : undefined;
+  if (!d) return undefined;
+  fontSheet(id, d.spec);
+  return d.stack;
+}
+
 /** Every font's name drawn in itself, for the pickers — loaded the first time one opens. */
 export function loadFontPreviews(): void {
   const specs = ([...TEXT_FONTS, ...HEADING_SERIFS] as readonly UiFontDef[]).map(f => f.spec).filter((s): s is string => !!s)

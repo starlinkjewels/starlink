@@ -5,7 +5,7 @@
 // the details (the metal's weight for the options chosen, the stones) — one total
 // price for the selection, never how it is made up. On a phone: a shorter
 // picture, the dropdowns two by two, and the price kept in view at the bottom.
-import { useRef, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Link } from "react-router-dom";
 import { ArrowLeft, Gem, Loader2, Ruler, RotateCw } from "lucide-react";
 import { ActionSheet } from "@/components/ActionSheet";
@@ -13,6 +13,8 @@ import { WebVideo } from "@/components/ProductVideo";
 import { SpecsView } from "@/components/catalog/DesignDetails";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { money } from "@/lib/productPricing";
+import { useBrand } from "@/lib/brand";
+import { loadFont } from "@/lib/appearance";
 import type { ItemSpecs } from "@/lib/catalogSpecs";
 import { METAL_LABEL, ringChart, type Ccy, type Choice, type MetalKey } from "@/lib/pure/pricing";
 
@@ -25,6 +27,8 @@ export interface ProductOptions {
   types: { id: string; label: string }[];
   qualities: { id: string; label: string }[];
   hasStones: boolean;
+  /** The centre stone, offered in these sizes (ct each) — drawn: the sheet's own. */
+  centre?: { drawn: number; sizes: number[]; shape?: string; pcs: number } | null;
 }
 export interface ProductPrice {
   amount: number | null;
@@ -94,6 +98,12 @@ export function ProductView(p: {
 }) {
   const [shown, setShown] = useState<string | undefined>(undefined);
   const [chart, setChart] = useState(false);
+  // The business's product-page fonts (Settings → Product pricing), on this page only.
+  const brand = useBrand();
+  const [fonts, setFonts] = useState<{ text?: string; head?: string }>({});
+  useEffect(() => {
+    setFonts({ text: loadFont("product-font", brand.productFont), head: loadFont("product-head-font", brand.productHeadingFont) });
+  }, [brand.productFont, brand.productHeadingFont]);
   const main = shown === "spin" ? undefined : p.pictures.find(x => x.id === shown) ?? p.pictures[0];
   const { options: o, pick } = p;
   const ring = o.ringSizes.length > 0;
@@ -102,11 +112,11 @@ export function ProductView(p: {
   const priceLine = pr.amount != null ? money(pr.amount, pr.ccy) : pr.ask ? null : pr.busy ? "…" : "Price on request";
 
   return (
-    <div className="space-y-4 pb-24 lg:pb-0">
+    <div className="space-y-4 pb-24 lg:pb-0" style={fonts.text ? { fontFamily: fonts.text } : undefined}>
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
           {p.back && <Link to={p.back.to} className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground mb-1"><ArrowLeft className="h-4 w-4" />{p.back.label}</Link>}
-          <h1 className="font-display text-2xl md:text-3xl text-brand-dark truncate">{p.title}</h1>
+          <h1 className="font-display text-2xl md:text-3xl text-brand-dark truncate" style={fonts.head ? { fontFamily: fonts.head } : undefined}>{p.title}</h1>
           {p.subtitle && <p className="text-sm text-muted-foreground">{p.subtitle}</p>}
         </div>
         {p.headerActions && <div className="shrink-0 flex items-center gap-2 pt-1">{p.headerActions}</div>}
@@ -154,20 +164,14 @@ export function ProductView(p: {
                   )}
                   {o.hasStones && o.types.length > 0 && pick && <Pick label="Diamonds" value={pick.diamondType} options={o.types.map(t => ({ value: t.id, label: t.label }))} onPick={v => p.onPick({ diamondType: v })} />}
                   {o.hasStones && o.qualities.length > 0 && pick && <Pick label="Quality" value={pick.quality} options={o.qualities.map(q => ({ value: q.id, label: q.label }))} onPick={v => p.onPick({ quality: v })} />}
+                  {o.centre && pick && (
+                    <Pick label={`Centre stone${o.centre.shape ? ` · ${o.centre.shape}` : ""}${o.centre.pcs > 1 ? ` × ${o.centre.pcs}` : ""}`} wide
+                      value={String(pick.centreCt ?? o.centre.drawn)}
+                      options={o.centre.sizes.map(c => ({ value: String(c), label: `${c} ct${c === o.centre!.drawn ? " · as drawn" : ""}` }))}
+                      onPick={v => p.onPick({ centreCt: Number(v) === o.centre!.drawn ? undefined : Number(v) })} />
+                  )}
                 </div>
                 {p.extraControls && <div className="mt-3 pt-3 border-t border-border/60">{p.extraControls}</div>}
-              </div>
-
-              {/* The price — a card on a laptop; on a phone, also the bar at the bottom. */}
-              <div className="card-luxe p-4 sm:p-5 space-y-3">
-                {pr.ask && pr.amount == null ? <p className="text-sm">{pr.ask}</p> : (
-                  <div>
-                    <p className="text-xs text-muted-foreground">{pr.label ?? "Price"}</p>
-                    <p className="text-3xl font-semibold tabular-nums flex items-center gap-2">{priceLine}{pr.busy && pr.amount != null && <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />}</p>
-                    {pr.amount != null && pr.note && <p className="text-[11px] text-muted-foreground mt-1">{pr.note}</p>}
-                  </div>
-                )}
-                {p.priceExtra}
               </div>
 
               {p.specs && (
@@ -181,6 +185,18 @@ export function ProductView(p: {
                   <SpecsView specs={{ v: 0, status: "ok", at: "", stones: p.specs.stones ?? [], stoneTotals: p.specs.stoneTotals, dimsMm: p.specs.dimsMm ?? [], ringSize: p.specs.ringSize, metal: p.specs.metal ?? {} }} />
                 </div>
               )}
+
+              {/* The price — a card on a laptop; on a phone, also the bar at the bottom. */}
+              <div className="card-luxe p-4 sm:p-5 space-y-3">
+                {pr.ask && pr.amount == null ? <p className="text-sm">{pr.ask}</p> : (
+                  <div>
+                    <p className="text-xs text-muted-foreground">{pr.label ?? "Price"}</p>
+                    <p className="text-3xl font-semibold tabular-nums flex items-center gap-2">{priceLine}{pr.busy && pr.amount != null && <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />}</p>
+                    {pr.amount != null && pr.note && <p className="text-[11px] text-muted-foreground mt-1">{pr.note}</p>}
+                  </div>
+                )}
+                {p.priceExtra}
+              </div>
             </>
           )}
         </section>
@@ -191,7 +207,7 @@ export function ProductView(p: {
         <div className={`lg:hidden fixed inset-x-0 z-30 px-3 ${p.aboveTabBar ? "bottom-[calc(env(safe-area-inset-bottom)+4.4rem)] md:bottom-3" : "bottom-[calc(env(safe-area-inset-bottom)+0.75rem)]"}`}>
           <div className="mx-auto max-w-xl rounded-2xl border border-border bg-white/95 backdrop-blur shadow-lg px-4 py-2.5 flex items-center justify-between gap-3">
             <div className="min-w-0">
-              <p className="text-[11px] text-muted-foreground truncate">{pick ? [METAL_LABEL[pick.metal], ring && pick.ringUs ? `size ${pick.ringUs}` : null, o.hasStones ? o.qualities.find(q => q.id === pick.quality)?.label : null].filter(Boolean).join(" · ") : p.title}</p>
+              <p className="text-[11px] text-muted-foreground truncate">{pick ? [METAL_LABEL[pick.metal], ring && pick.ringUs ? `size ${pick.ringUs}` : null, o.centre ? `${pick.centreCt ?? o.centre.drawn} ct` : null, o.hasStones ? o.qualities.find(q => q.id === pick.quality)?.label : null].filter(Boolean).join(" · ") : p.title}</p>
               <p className="text-lg font-semibold tabular-nums leading-tight flex items-center gap-1.5">{pr.ask && pr.amount == null ? <span className="text-sm font-medium">{pr.ask}</span> : priceLine}{pr.busy && <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" />}</p>
             </div>
           </div>

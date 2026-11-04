@@ -4,7 +4,7 @@
 // setting, certificates, colours, ring sizes, extras, the margin and rounding,
 // GST, and each client's own prices. The product page prices from these the
 // moment they are saved; a price with any part missing shows "Price on request".
-import { useState, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { Link } from "react-router-dom";
 import { Plus, Save, Tags, Trash2 } from "lucide-react";
 import { toast } from "sonner";
@@ -16,6 +16,9 @@ import { Switch } from "@/components/ui/switch";
 import { useAuth } from "@/lib/auth";
 import { useDb } from "@/hooks/useDb";
 import { savePriceRules, usePriceRules } from "@/lib/productPricing";
+import { saveBrand, useBrand } from "@/lib/brand";
+import { HEADING_SERIFS, loadFontPreviews, TEXT_FONTS } from "@/lib/appearance";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { bandKey, METAL_LABEL, METALS, type Ccy, type Money, type PriceRules } from "@/lib/pure/pricing";
 
 const num = (v: string) => (v === "" ? 0 : Number(v));
@@ -33,6 +36,50 @@ function Block({ title, sub, info, children }: { title: string; sub?: string; in
   return <section className="space-y-3"><SectionTitle title={title} sub={sub} info={info} />{children}</section>;
 }
 const list = (s: string) => s.split(",").map(x => x.trim()).filter(Boolean);
+
+/** The product page's fonts — kept with the brand (public), so a shared link shows them too. */
+function ProductFonts() {
+  const { user } = useAuth();
+  const brand = useBrand();
+  const [text, setText] = useState<string | null>(null);
+  const [head, setHead] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  useEffect(() => { loadFontPreviews(); }, []);
+  const t = text ?? brand.productFont ?? "", h = head ?? brand.productHeadingFont ?? "";
+  const dirty = t !== (brand.productFont ?? "") || h !== (brand.productHeadingFont ?? "");
+  const stack = (k: string) => [...TEXT_FONTS, ...HEADING_SERIFS].find(f => f.key === k)?.stack;
+  const save = async () => {
+    setBusy(true);
+    try {
+      const next = { ...brand, productFont: t || undefined, productHeadingFont: h || undefined };
+      await saveBrand(JSON.parse(JSON.stringify(next)), user!.id);
+      setText(null); setHead(null);
+      toast.success("Product page fonts saved — the page and shared links use them now");
+    } catch (e) { toast.error((e as Error).message); } finally { setBusy(false); }
+  };
+  return (
+    <Block title="Product page font" sub="The product page and its shared links" info="Fonts for the product page alone — the rest of the app keeps its own (Settings → Appearance). 'As the app' uses those.">
+      <div className="grid gap-3 sm:grid-cols-2">
+        <div className="min-w-0"><Label className="text-xs">Text and prices</Label>
+          <Select value={t || "_"} onValueChange={v => setText(v === "_" ? "" : v)}>
+            <SelectTrigger aria-label="Product page text font" className="h-10 mt-1"><SelectValue /></SelectTrigger>
+            <SelectContent><SelectItem value="_">As the app</SelectItem>{TEXT_FONTS.map(f => <SelectItem key={f.key} value={f.key}><span style={{ fontFamily: f.stack }}>{f.name}</span></SelectItem>)}</SelectContent>
+          </Select></div>
+        <div className="min-w-0"><Label className="text-xs">Design name (heading)</Label>
+          <Select value={h || "_"} onValueChange={v => setHead(v === "_" ? "" : v)}>
+            <SelectTrigger aria-label="Product page heading font" className="h-10 mt-1"><SelectValue /></SelectTrigger>
+            <SelectContent><SelectItem value="_">As the app</SelectItem>{[...HEADING_SERIFS, ...TEXT_FONTS].map(f => <SelectItem key={f.key} value={f.key}><span style={{ fontFamily: f.stack }}>{f.name}</span></SelectItem>)}</SelectContent>
+          </Select></div>
+      </div>
+      <div className="rounded-xl border border-border bg-white px-4 py-3" style={t ? { fontFamily: stack(t) } : undefined}>
+        <p className="text-2xl text-brand-dark" style={h ? { fontFamily: stack(h) } : undefined}>LRS-1781</p>
+        <p className="text-sm text-muted-foreground">14K gold · 3.6 g · 1.58 ct</p>
+        <p className="text-2xl font-semibold tabular-nums mt-1">$2,450</p>
+      </div>
+      {dirty && <div className="flex gap-2"><Button size="sm" onClick={save} disabled={busy}>{busy ? "Saving…" : "Save fonts"}</Button><Button size="sm" variant="ghost" onClick={() => { setText(null); setHead(null); }}>Undo</Button></div>}
+    </Block>
+  );
+}
 
 export function ProductPricingSettings() {
   const { user } = useAuth();
@@ -141,6 +188,15 @@ export function ProductPricingSettings() {
         </div>
       </Block>
 
+      <Block title="Centre stone sizes" sub="The buyer picks the main stone's size; it is priced from the grid above" info="A design's centre stone is its biggest stone — at most this many pieces, each at least this size (a 2.66 ct pear, a pair of 1 ct studs). Its size is a dropdown on the product page: the sizes here, and the size it is drawn in.">
+        <div className="grid gap-3 sm:grid-cols-3">
+          <div><Label className="text-xs">Sizes offered (ct), comma between</Label>
+            <Input className="h-9 mt-1" defaultValue={v.centre.sizes.join(", ")} onBlur={e => set({ centre: { ...v.centre, sizes: [...new Set(list(e.target.value).map(Number).filter(x => x > 0 && x < 100))].sort((a, b) => a - b) } })} /></div>
+          <div><Label className="text-xs">A centre stone is at least (ct each)</Label><Input type="number" min={0.01} step="any" className="h-9 mt-1" value={v.centre.minCt} onChange={e => set({ centre: { ...v.centre, minCt: num(e.target.value) } })} /></div>
+          <div><Label className="text-xs">…and at most this many pieces</Label><Input type="number" min={1} max={10} className="h-9 mt-1" value={v.centre.maxPcs} onChange={e => set({ centre: { ...v.centre, maxPcs: num(e.target.value) } })} /></div>
+        </div>
+      </Block>
+
       <Block title="Stones: setting, gems, certificates">
         <div className="grid gap-3 sm:grid-cols-4">
           <div><Label className="text-xs">Setting, per stone</Label><MoneyInput label="Setting per stone" value={v.settingPerStone} onChange={m => set({ settingPerStone: m })} /></div>
@@ -223,6 +279,8 @@ export function ProductPricingSettings() {
         <Input className="h-9" placeholder="SRG=Ring, SBD=Band, SBR=Bracelet" defaultValue={Object.entries(v.categoryByPrefix).map(([k, c]) => `${k}=${c}`).join(", ")}
           onBlur={e => set({ categoryByPrefix: Object.fromEntries(list(e.target.value).map(x => x.split("=").map(y => y.trim())).filter(([k, c]) => k && c).map(([k, c]) => [k.toUpperCase(), c])) })} />
       </Block>
+
+      <ProductFonts />
 
       <p className="text-xs text-muted-foreground">Gold, platinum and silver are priced at today's rates — <Link to="/settings?tab=liverates" className="text-primary underline">Live gold & $ rates</Link>.</p>
 

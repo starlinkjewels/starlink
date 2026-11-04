@@ -40,7 +40,7 @@ export type DesignQuote =
   | {
       ready: true;
       designNo: string;
-      options: { metals: MetalKey[]; colours: { id: string; label: string }[]; ringSizes: number[]; types: { id: string; label: string }[]; qualities: DiamondQuality[]; ccy: Ccy; hasStones: boolean; category: string | null };
+      options: { metals: MetalKey[]; colours: { id: string; label: string }[]; ringSizes: number[]; types: { id: string; label: string }[]; qualities: DiamondQuality[]; ccy: Ccy; hasStones: boolean; category: string | null; centre: { drawn: number; sizes: number[]; shape?: string; pcs: number } | null };
       choice: Choice | null;
       details: { stones: StoneRow[]; stoneTotals: { pcs: number; ct: number } | null; dimsMm: number[]; ringSize: string | null; grams: number; sheetUs: number | null };
       price: number | null;

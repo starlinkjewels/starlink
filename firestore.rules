@@ -316,7 +316,9 @@ service cloud.firestore {
     match /brand/{doc} {
       allow read: if true;
       allow write: if isAdmin() && doc == 'public'
-        && request.resource.data.keys().hasOnly(['name', 'logo', 'logoDark', 'mark', 'color', 'updatedAt', 'updatedBy'])
+        && request.resource.data.keys().hasOnly(['name', 'logo', 'logoDark', 'mark', 'color', 'productFont', 'productHeadingFont', 'updatedAt', 'updatedBy'])
+        && (!('productFont' in request.resource.data) || (request.resource.data.productFont is string && request.resource.data.productFont.size() <= 40))
+        && (!('productHeadingFont' in request.resource.data) || (request.resource.data.productHeadingFont is string && request.resource.data.productHeadingFont.size() <= 40))
         && (!('name' in request.resource.data) || (request.resource.data.name is string && request.resource.data.name.size() <= 60))
         && (!('logo' in request.resource.data) || (request.resource.data.logo is string && request.resource.data.logo.size() <= 300000 && request.resource.data.logo.matches('^data:image/(png|webp|jpeg);base64,[A-Za-z0-9+/=]+$')))
         && (!('logoDark' in request.resource.data) || (request.resource.data.logoDark is string && request.resource.data.logoDark.size() <= 300000 && request.resource.data.logoDark.matches('^data:image/(png|webp|jpeg);base64,[A-Za-z0-9+/=]+$')))

@@ -79,6 +79,11 @@ export interface PriceRules {
   clientDefault: "price" | "details";
   /** Design letters → category, for designs no folder names ("SRG" → "Ring"). */
   categoryByPrefix: Record<string, string>;
+  /**
+   * The centre stone — the biggest stone of a design (a few pieces at most, at
+   * least `minCt` each) — in the size the buyer picks: one of `sizes`, or as drawn.
+   */
+  centre: { minCt: number; maxPcs: number; sizes: number[] };
 }
 
 export const DEFAULT_RULES: PriceRules = {
@@ -111,6 +116,7 @@ export const DEFAULT_RULES: PriceRules = {
   clients: {},
   clientDefault: "details",
   categoryByPrefix: {},
+  centre: { minCt: 0.3, maxPcs: 2, sizes: [0.5, 0.75, 1, 1.25, 1.5, 1.75, 2, 2.5, 3, 3.5, 4, 5] },
 };
 
 /** A size band's key in the price grid: its upper bound ("0.03"). */
@@ -172,6 +178,10 @@ export function cleanRules(x: unknown): PriceRules {
     }])),
     clientDefault: r.clientDefault === "price" ? "price" : "details",
     categoryByPrefix: r.categoryByPrefix && typeof r.categoryByPrefix === "object" ? r.categoryByPrefix : {},
+    centre: {
+      minCt: num(r.centre?.minCt, D.centre.minCt, 0.01, 50), maxPcs: Math.round(num(r.centre?.maxPcs, D.centre.maxPcs, 1, 10)),
+      sizes: Array.isArray(r.centre?.sizes) ? [...new Set(r.centre!.sizes.map(Number).filter(n => n > 0 && n < 100))].sort((a, b) => a - b) : D.centre.sizes,
+    },
   };
 }
 
@@ -225,6 +235,8 @@ export interface Choice {
   ccy: Ccy;
   /** Whose price: their own margin. */
   clientId?: string;
+  /** The centre stone in this size (ct each); unset: as drawn. */
+  centreCt?: number;
 }
 export interface Line { key: string; label: string; detail?: string; amount: number }
 export interface Priced {
@@ -287,8 +299,8 @@ export function priceDesign(specs: Partial<Pick<Specs, "metal" | "stones" | "rin
   const making = Math.max(conv(lab.perGram) * grams, conv(lab.minimum));
   add("labour", "Making", making, lab.perGram.amount ? `${grams} g × ${lab.perGram.ccy === "INR" ? "₹" : "$"}${lab.perGram.amount}/g${lab.minimum.amount ? `, at least ${lab.minimum.ccy === "INR" ? "₹" : "$"}${lab.minimum.amount}` : ""}` : undefined);
 
-  // Stones.
-  const rows: StoneRow[] = specs.stones ?? [];
+  // Stones — the centre stone in the size chosen.
+  const rows: StoneRow[] = withCentre(specs.stones ?? [], choice.centreCt, rules);
   let pcs = 0, ct = 0, dia = 0, gem = 0;
   const prices = rules.diamonds.prices[choice.diamondType]?.[choice.quality] ?? {};
   for (const r of rows) {
@@ -350,4 +362,28 @@ export function defaultChoice(specs: Partial<Pick<Specs, "metal">>, rules: Price
     metal: pick, colour: rules.colours[0]?.id, diamondType: rules.diamonds.types[0]?.id ?? "natural", quality: rules.diamonds.qualities[0]?.id ?? "",
     ccy, ...(clientId ? { clientId } : {}),
   };
+}
+
+/** The centre stone of a design: its biggest stone, of a few pieces at most and big enough to be one. */
+export function centreOf(stones: StoneRow[], rules: Pick<PriceRules, "centre">): { index: number; row: StoneRow } | null {
+  let best = -1;
+  stones.forEach((r, i) => {
+    const each = r.perStone || (r.pcs ? r.total / r.pcs : 0);
+    if (r.pcs >= 1 && r.pcs <= rules.centre.maxPcs && each >= rules.centre.minCt && (best < 0 || each > (stones[best].perStone || 0))) best = i;
+  });
+  return best < 0 ? null : { index: best, row: stones[best] };
+}
+/** The stones with the centre stone in the size chosen (each of its pieces that size). */
+export function withCentre(stones: StoneRow[], centreCt: number | undefined, rules: Pick<PriceRules, "centre">): StoneRow[] {
+  if (!centreCt || !(centreCt > 0)) return stones;
+  const c = centreOf(stones, rules);
+  if (!c) return stones;
+  return stones.map((r, i) => (i === c.index ? { ...r, perStone: centreCt, total: Math.round(centreCt * r.pcs * 1000) / 1000 } : r));
+}
+/** The sizes a centre stone is offered in: the rules' sizes, and the size drawn. */
+export function centreSizes(stones: StoneRow[], rules: Pick<PriceRules, "centre">): { drawn: number; sizes: number[]; shape?: string; pcs: number } | null {
+  const c = centreOf(stones, rules);
+  if (!c || !rules.centre.sizes.length) return null;
+  const drawn = c.row.perStone || Math.round((c.row.total / c.row.pcs) * 1000) / 1000;
+  return { drawn, sizes: [...new Set([...rules.centre.sizes, drawn])].sort((a, b) => a - b), shape: c.row.shape, pcs: c.row.pcs };
 }

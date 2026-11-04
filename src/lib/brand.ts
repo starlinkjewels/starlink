@@ -29,6 +29,9 @@ export interface Brand {
   mark?: string;
   /** The brand colour, "#2d4a9c". */
   color?: string;
+  /** The product page's fonts (Settings → Product pricing) — a font key of lib/appearance.ts; shared links use them too. */
+  productFont?: string;
+  productHeadingFont?: string;
   updatedAt?: string;
   updatedBy?: string;
 }
@@ -50,7 +53,7 @@ const KEY = "ui:brand";
 const IMG = /^data:image\/(png|webp|jpeg);base64,[A-Za-z0-9+/=]+$/;
 const REF = () => doc(db, "brand", "public");
 /** The fields the record may hold (the security rules allow only these). */
-const FIELDS = ["name", "logo", "logoDark", "mark", "color", "updatedAt", "updatedBy"] as const;
+const FIELDS = ["name", "logo", "logoDark", "mark", "color", "productFont", "productHeadingFont", "updatedAt", "updatedBy"] as const;
 
 function clean(v: unknown): Brand {
   const o = (v && typeof v === "object" ? v : {}) as Record<string, unknown>;
