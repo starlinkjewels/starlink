@@ -207,6 +207,38 @@ export async function saveShare(args: {
   return result;
 }
 
+/**
+ * One catalogue design's product page as a link (Catalog → a design → Share):
+ * its pictures kept with the link (the preview and the first view), its details,
+ * options and — when shared with one — its price worked out on the server each
+ * time it is opened (functions-specs specsShare), never the costs behind it.
+ * One link per design: sharing it again updates it.
+ */
+export function saveDesignShare(args: { designKey: string; title: string; items: ShareItem[]; showPrice: boolean; priceFor?: string; ccy: "INR" | "USD"; note?: string; createdBy: string }): Share {
+  const now = new Date().toISOString();
+  let result!: Share;
+  updateDb(d => {
+    if (!d.shares) d.shares = [];
+    const cur = d.shares.find(s => s.kind === "design" && s.designKey === args.designKey);
+    const fields = {
+      title: args.title, items: args.items.slice(0, SHARE_PAGE_SIZE), count: args.items.length, showPrice: args.showPrice, ccy: args.ccy,
+      ...(args.priceFor ? { priceFor: args.priceFor } : {}), ...(args.note ? { note: args.note } : {}), updatedAt: now,
+    };
+    if (cur) {
+      Object.assign(cur, fields);
+      if (!args.priceFor) delete cur.priceFor;
+      if (!args.note) delete cur.note;
+      result = cur;
+    } else {
+      const share: Share = { id: uid("shr_"), kind: "design", sourceFolderId: "", designKey: args.designKey, folders: [], pageCount: 0, createdBy: args.createdBy, createdAt: now, ...fields };
+      d.shares.push(share);
+      result = share;
+    }
+  });
+  return result;
+}
+export const findDesignShare = (designKey: string) => (loadDb().shares ?? []).find(s => s.kind === "design" && s.designKey === designKey);
+
 export async function deleteShare(id: string, pageCount = 0): Promise<void> {
   for (let n = 0; n < pageCount; n++) await deleteDoc(pageRef(id, n)).catch(() => {});
   updateDb(d => { d.shares = (d.shares ?? []).filter(s => s.id !== id); });

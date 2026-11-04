@@ -383,6 +383,9 @@ service cloud.firestore {
     match /specsSettings/{id} { allow read: if isStaff(); allow write: if isAdmin(); }
     match /specsState/{id}    { allow read: if isAdmin(); allow write: if false; }
     match /specsText/{id}     { allow read, write: if false; }
+    // Product pricing (Settings → Product pricing): costs and margins — staff read, admins write.
+    // A client's own price comes from the server (functions-specs specsPrice), never these rules.
+    match /priceRules/{id}    { allow read: if isStaff(); allow write: if isAdmin(); }
     match /apiKeys/{id}   { allow read, write: if isAdmin(); }
     match /apiQuota/{id}  { allow read: if isAdmin(); allow write: if false; }
     match /apiStats/{id}  { allow read: if isAdmin(); allow write: if false; }

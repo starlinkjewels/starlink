@@ -13,7 +13,7 @@
 //
 // Plain functions, no imports.
 
-export const PARSER_VERSION = 4;
+export const PARSER_VERSION = 5;
 
 export interface StoneRow { shape?: string; sieve?: string; size?: string; pcs: number; perStone: number; total: number }
 export interface Specs {
@@ -92,8 +92,63 @@ function sizeOf(ws: string[]): string | undefined {
 }
 const isDec = (t: string) => /^\d{0,3}\.\d{1,4}$/.test(t);
 
-export function parseSpecs(text: string, ctx: { folderName?: string; fileName?: string } = {}): Specs {
-  const reasons: string[] = [];
+type Ctx = { folderName?: string; fileName?: string };
+/** What one text says, before it is checked. */
+interface Parts {
+  printed?: string; designNo?: string; designNoSource?: Specs["designNoSource"]; fromFile?: string;
+  anchors: number; hasGold: boolean; stoneCols: boolean; noStone: boolean;
+  metal: Record<string, number>; tone?: string; code?: string;
+  rows: StoneRow[]; notes: string[]; stoneTotals?: Specs["stoneTotals"]; diaCts?: string;
+  dims: number[]; ring?: string; subCategory?: string; castingPcs?: string;
+}
+
+/** One text read and checked. */
+export function parseSpecs(text: string, ctx: Ctx = {}): Specs {
+  return finish(extract(text, ctx));
+}
+
+/**
+ * A sheet read twice — the whole page, and its table cut out and enlarged — as
+ * one reading: the stones from whichever read them (rows that make their own
+ * total first), the gold from both (the one with more karats first, the other
+ * filling gaps), the rest from the page; then checked as one. Either reading
+ * alone can miss what the other caught (a row the cut-out left off, a karat
+ * the page blurred).
+ */
+export function parseBoth(page: string, table: string | undefined, ctx: Ctx = {}): Specs {
+  const a = extract(page, ctx);
+  if (!table) return finish(a);
+  const b = extract(table, ctx);
+  const near = (x: number, y: number) => Math.abs(x - y) <= Math.max(0.011, y * 0.02);
+  const fits = (p: Parts, o: Parts) => {
+    if (!p.rows.length) return 0;
+    const pcs = p.rows.reduce((t, r) => t + r.pcs, 0), ct = r3(p.rows.reduce((t, r) => t + r.total, 0));
+    const own = (!p.stoneTotals || (p.stoneTotals.pcs === pcs && near(p.stoneTotals.ct, ct))) && (!p.diaCts || near(n(p.diaCts), ct)
+      // A table's border read as a leading "1" ("|0.54" → "10.54"): the same total.
+      || (/^1\d*\.\d+$/.test(p.diaCts) && near(n(p.diaCts.slice(1)), ct)));
+    // The other reading's total agreeing is a second witness.
+    const other = (o.stoneTotals && o.stoneTotals.pcs === pcs && near(o.stoneTotals.ct, ct)) || (o.diaCts && near(n(o.diaCts), ct));
+    return (own ? 1000 : 0) + (other ? 300 : 0) + p.rows.length;
+  };
+  // The stones' rows with their own totals (never a total borrowed from the other reading).
+  const S = fits(b, a) > fits(a, b) ? b : a;
+  // The gold: the reading with more karats; a karat only the other read is added when it fits
+  // the rest (rising from silver to platinum, in the usual weight ratios) — never a stray number.
+  const goldScore = (p: Parts) => (metalFits(p.metal) ? 100 : 0) + Object.keys(p.metal).length;
+  const M = goldScore(b) > goldScore(a) ? b : a, MO = M === a ? b : a;
+  const metal = { ...M.metal };
+  for (const [k, g] of Object.entries(MO.metal)) if (metal[k] === undefined && metalFits({ ...metal, [k]: g })) metal[k] = g;
+  return finish({
+    ...a,
+    printed: a.printed ?? b.printed,
+    anchors: Math.max(a.anchors, b.anchors), hasGold: a.hasGold || b.hasGold, stoneCols: a.stoneCols || b.stoneCols, noStone: a.noStone || b.noStone,
+    metal, tone: a.tone ?? b.tone, code: a.code ?? b.code,
+    rows: S.rows, notes: S.notes, stoneTotals: S.stoneTotals, diaCts: S.diaCts,
+    dims: a.dims.length ? a.dims : b.dims, ring: a.ring ?? b.ring, subCategory: a.subCategory ?? b.subCategory, castingPcs: a.castingPcs ?? b.castingPcs,
+  });
+}
+
+function extract(text: string, ctx: Ctx): Parts {
   const T = tokens(text);
   const U = T.map(t => t.toUpperCase());
   const flat = ` ${U.join(" ")} `;
@@ -215,9 +270,35 @@ export function parseSpecs(text: string, ctx: { folderName?: string; fileName?: 
   const dims: number[] = [];
   for (const m of flat.matchAll(/(\d{1,3}\.\d{1,2})\s?MM\b/g)) { const v = n(m[1]); if (v > 0.3 && v < 400 && !dims.includes(v)) dims.push(v); }
   const ring = /(?:SIZE|NO)[-\s.:]*(\d{1,2}(?:\.\d{1,2})?)\s*[-.]?\s*(US|UK|IN|EU)\b/.exec(flat) ?? /\((\d{1,2}(?:\.\d{1,2})?)\s*(US)\)/.exec(` ${String(ctx.fileName ?? "").toUpperCase()} `);
+  // "SIZ - 53", "SIZE 54": a ring size in mm round (the inside circumference — EU sizes), never a "54 MM" length.
+  // Whole numbers only, and never followed by a decimal or a unit ("SIZE 45.00 MM", "54.5MM", "45 CM" are lengths).
+  const mmSize = /\bSIZE?\s*[-:.]?\s*(\d{2})\b(?![.,]?\d|\s*(?:MM|CM|INCH|IN\b|"))/.exec(flat)?.[1];
+  const ringMm = mmSize && n(mmSize) >= 38 && n(mmSize) <= 80 ? n(mmSize) : undefined;
   const subCategory = /SUB\.?\s?CTG\s*[:\-]*\s*([A-Z]{2,10})/.exec(flat)?.[1];
   const castingPcs = /CASTING\s+PCS\s*[:\-]*\s*(\d+\s?[A-Z]{2,4})/.exec(flat)?.[1]?.replace(/\s/g, "");
+  return {
+    printed, designNo, designNoSource, fromFile, anchors, hasGold,
+    stoneCols: anchors >= 3 && /SHAPE|SIEVE|PTS|PCS/.test(flat), noStone: /NO STONE|PLAIN/.test(flat),
+    metal, tone, code, rows, notes, stoneTotals, diaCts, dims, ring: ring ? `${n(ring[1])} ${ring[2]}` : ringMm ? `${ringMm} EU` : undefined, subCategory, castingPcs,
+  };
+}
 
+/** What is wrong with a set of metal weights: out of order (silver → platinum), or not in the usual ratios. */
+function metalProblems(metal: Record<string, number>): string[] {
+  const out: string[] = [];
+  const order = ["SILVER", "9K", "10K", "14K", "18K", "22K", "PLT"].filter(k => metal[k] !== undefined).map(k => [k, metal[k]] as const);
+  for (let i = 1; i < order.length; i++) if (order[i][1] < order[i - 1][1]) { out.push(`Gold weights out of order (${order[i - 1][0]} ${order[i - 1][1]} g > ${order[i][0]} ${order[i][1]} g)`); break; }
+  // Metal density sanity: 18K vs 14K is about 1.19×; a misread digit shows here.
+  if (metal["14K"] && metal["18K"]) { const r = metal["18K"] / metal["14K"]; if (r < 1.05 || r > 1.4) out.push(`18K ${metal["18K"]} g vs 14K ${metal["14K"]} g doesn't look right`); }
+  if (metal["10K"] && metal["14K"]) { const r = metal["14K"] / metal["10K"]; if (r < 1.03 || r > 1.35) out.push(`14K ${metal["14K"]} g vs 10K ${metal["10K"]} g doesn't look right`); }
+  return out;
+}
+const metalFits = (metal: Record<string, number>) => metalProblems(metal).length === 0;
+
+/** The checks, and the reading as kept. */
+function finish(p: Parts): Specs {
+  const { printed, designNo, designNoSource, fromFile, anchors, hasGold, metal, rows, notes, stoneTotals, diaCts, dims } = p;
+  const reasons: string[] = [];
   // ── Checks.
   if (printed && designNo && !sameDesign(printed, designNo) && !sameDesign(printed, fromFile)) reasons.push(`The sheet says ${printed}, the folder/file says ${designNo}`);
   const sumPcs = rows.reduce((t, r) => t + r.pcs, 0), sumCt = r3(rows.reduce((t, r) => t + r.total, 0));
@@ -229,21 +310,18 @@ export function parseSpecs(text: string, ctx: { folderName?: string; fileName?: 
   const dia = diaCts ? (Math.abs(n(diaCts) - sumCt) > 0.011 && /^1\d*\.\d+$/.test(diaCts) && Math.abs(n(diaCts.slice(1)) - sumCt) <= 0.011 ? n(diaCts.slice(1)) : n(diaCts)) : undefined;
   if (dia !== undefined && rows.length && Math.abs(dia - sumCt) > Math.max(0.011, sumCt * 0.02)) reasons.push(`Total diamond carats ${dia}, rows add up to ${sumCt}`);
   if (stoneTotals && !rows.length) reasons.push("A stone total was read but not its rows");
-  const order = ["SILVER", "9K", "10K", "14K", "18K", "22K", "PLT"].filter(k => metal[k] !== undefined).map(k => [k, metal[k]] as const);
-  for (let i = 1; i < order.length; i++) if (order[i][1] < order[i - 1][1]) { reasons.push(`Gold weights out of order (${order[i - 1][0]} ${order[i - 1][1]} g > ${order[i][0]} ${order[i][1]} g)`); break; }
-  // Metal density sanity: 18K vs 14K is about 1.19×; a misread digit shows here.
-  if (metal["14K"] && metal["18K"]) { const r = metal["18K"] / metal["14K"]; if (r < 1.05 || r > 1.4) reasons.push(`18K ${metal["18K"]} g vs 14K ${metal["14K"]} g doesn't look right`); }
-  if (metal["10K"] && metal["14K"]) { const r = metal["14K"] / metal["10K"]; if (r < 1.03 || r > 1.35) reasons.push(`14K ${metal["14K"]} g vs 10K ${metal["10K"]} g doesn't look right`); }
+  reasons.push(...metalProblems(metal));
 
   const table = anchors >= 2 || rows.length > 0 || Object.keys(metal).length > 0;
   let status: Specs["status"] = !table ? "noTable" : reasons.length ? "review" : "ok";
   if (table && !rows.length && !Object.keys(metal).length) { status = "review"; reasons.push("A table was seen but nothing could be read from it"); }
-  else if (table && anchors >= 3 && !rows.length && /SHAPE|SIEVE|PTS|PCS/.test(flat) && !/NO STONE|PLAIN/.test(flat)) { status = "review"; reasons.push("Stone columns were seen but no stone row could be read"); }
+  else if (table && !rows.length && p.stoneCols && !p.noStone) { status = "review"; reasons.push("Stone columns were seen but no stone row could be read"); }
   else if (table && hasGold && !Object.keys(metal).length) { status = "review"; reasons.push("Gold karats were seen but no weights"); }
+  const { tone, ring, subCategory, castingPcs, code } = p;
   return {
     v: PARSER_VERSION, status, ...(designNo ? { designNo, designNoSource } : {}), ...(printed && designNo && !sameDesign(printed, designNo) ? { designNoPrinted: printed } : {}),
     stones: rows, ...(stoneTotals ? { stoneTotals } : rows.length ? { stoneTotals: { pcs: sumPcs, ct: sumCt } } : {}), metal,
-    ...(tone ? { metalTone: tone } : {}), dimsMm: dims.slice(0, 12), ...(ring ? { ringSize: `${n(ring[1])} ${ring[2]}` } : {}),
+    ...(tone ? { metalTone: tone } : {}), dimsMm: dims.slice(0, 12), ...(ring ? { ringSize: ring } : {}),
     ...(subCategory ? { subCategory } : {}), ...(castingPcs ? { castingPcs } : {}), ...(code ? { code } : {}), reasons, ...(notes.length ? { notes } : {}),
   };
 }

@@ -10,6 +10,7 @@ import { SHARE_DATA_ID } from "@/lib/pure/shareHtml";
 import { VideoPoster } from "@/components/VideoPoster";
 import { BrandLogo } from "@/components/BrandLogo";
 import { PieceShareView } from "@/components/PieceShareView";
+import { DesignShareView } from "@/components/catalog/DesignShareView";
 import { useBrand, brandName } from "@/lib/brand";
 import { motion, AnimatePresence } from "framer-motion";
 import { Image as ImageIcon, Video, Play, Download, X, ChevronLeft, ChevronRight, Loader2, Camera, Clock, Folder, FileText, ChevronRight as Crumb } from "lucide-react";
@@ -185,6 +186,7 @@ export function SharedGalleryPage() {
 
   // Ready Stock pieces: their own page — photos, details, prices as chosen.
   if (status === "ok" && share?.kind === "readyStock") return <PieceShareView share={share} />;
+  if (status === "ok" && share?.kind === "design") return <DesignShareView share={share} />;
 
   return (
     // The app shell locks html/body/#root to height:100% overflow:hidden, so this

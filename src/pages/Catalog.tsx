@@ -57,6 +57,7 @@ import { makePreview } from "@/lib/photoPreview";
 import { VideoPoster } from "@/components/VideoPoster";
 import { DesignDetails } from "@/components/catalog/DesignDetails";
 import { SpecsBadge } from "@/components/catalog/SpecsBadge";
+import { CardInfoContext, useCardInfo, useCardInfos } from "@/components/catalog/cardInfo";
 import { useAuth } from "@/lib/auth";
 import { VirtualGrid } from "@/components/VirtualGrid";
 import {
@@ -430,6 +431,8 @@ function ItemCard({
   picked?: boolean;
   onPick?(): void;
 }) {
+  // A file of a design with details: the design, its price and what it is made of — not the file's name.
+  const info = useCardInfo(item);
   return (
     <motion.div
       whileTap={{ scale: 0.97 }}
@@ -459,8 +462,8 @@ function ItemCard({
           </div>
         )}
         {picking && <div className="absolute top-2 left-2 z-10"><PickTick on={!!picked} /></div>}
-        {/* Type badge */}
-        <div className={`absolute top-2 left-2 ${picking ? "hidden" : ""}`}>
+        {/* Type badge — a design's picture needs none */}
+        <div className={`absolute top-2 left-2 ${picking || (info && item.type === "image") ? "hidden" : ""}`}>
           <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[10px] font-medium bg-black/50 text-white backdrop-blur-sm">
             {item.type === "video" ? (
               <Video className="h-2.5 w-2.5" />
@@ -515,9 +518,22 @@ function ItemCard({
       {/* Bottom row: name + folder tag + heart */}
       <div className="flex items-center gap-1 px-2.5 pt-2 pb-1.5">
         <div className="flex-1 min-w-0">
+          {info ? (
+            <>
+              <p className="text-[12px] text-foreground font-semibold truncate" title={canEdit ? item.name : info.no}>{info.no}</p>
+              {(info.price || info.line) && (
+                <p className="text-[10.5px] truncate mt-0.5">
+                  {info.price && <span className="font-semibold text-primary tabular-nums">{info.price}</span>}
+                  {info.price && info.line && <span className="text-muted-foreground"> · </span>}
+                  {info.line && <span className="text-muted-foreground">{info.line}</span>}
+                </p>
+              )}
+            </>
+          ) : (
           <p className="text-[11px] text-foreground font-medium truncate" title={item.name}>
             {item.name}
           </p>
+          )}
           {folderName && (
             <p className="text-[10px] text-muted-foreground truncate flex items-center gap-0.5 mt-0.5" title={folderName}>
               <Folder className="h-2.5 w-2.5 shrink-0 text-amber-500" />
@@ -1970,8 +1986,12 @@ export function CatalogPage() {
     );
   }
 
+  // Under each card: its design, price and make-up (cardInfo.tsx) — for the cards on screen.
+  const cardInfos = useCardInfos(viewingFavorites ? favoriteItems : searching ? foundItems : items, isStaff);
+
   /* ─────────────── Render ─────────────── */
   return (
+    <CardInfoContext.Provider value={cardInfos}>
     <div className="max-w-7xl mx-auto space-y-5">
       {/* Header: where you are, the way up, and what can be done here. The two
           uploads stay in view (icons only on a phone); New Folder is the main button. */}
@@ -2469,5 +2489,6 @@ export function CatalogPage() {
         )}
       </AnimatePresence>
     </div>
+    </CardInfoContext.Provider>
   );
 }

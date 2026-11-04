@@ -1095,8 +1095,13 @@ export interface ShareBrand { name: string; logo?: string; website?: string; ema
 
 export interface Share {
   id: string;
-  /** "readyStock": chosen pieces (`pieces`), not a folder. */
-  kind: "catalog" | "productPhotos" | "readyStock";
+  /** "readyStock": chosen pieces (`pieces`), not a folder. "design": one catalogue design's product page (`designKey`). */
+  kind: "catalog" | "productPhotos" | "readyStock" | "design";
+  /** kind "design": the design (catalogDesigns key); its pictures are in `items`. */
+  designKey?: string;
+  /** kind "design" with showPrice: priced as this client (their margin), in this currency. */
+  priceFor?: string;
+  ccy?: "INR" | "USD";
   sourceFolderId: string; // the folder this snapshot was taken from (to find/refresh)
   title: string; // folder name shown to the public viewer
   items: ShareItem[];
