@@ -136,6 +136,7 @@ export type LedgerDir = "debit" | "credit";
 // very same code (see src/lib/pure). Re-exported so nothing that imports them
 // from here changes.
 import type { MaterialDef, MaterialKey } from "./materials";
+import type { ItemDesign, ItemSpecs } from "./pure/catalogMedia";
 export type { MaterialDef, MaterialKey } from "./materials";
 import { KARAT_PURITY, toPureGold, pureFromPurity, openingDebitAmt, openingCreditAmt, hasOpeningBalance } from "./pure/basics";
 export { KARAT_PURITY, toPureGold, pureFromPurity, openingDebitAmt, openingCreditAmt, hasOpeningBalance };
@@ -1014,6 +1015,10 @@ export interface CatalogItem {
   mime?: string; // original content type — set for "file" items (pdf, xls, zip…)
   createdBy: string; // userId
   createdAt: string;
+  /** Its spec table as read by the server (functions-specs) — or as staff checked it. Never sent with a new file. */
+  specs?: ItemSpecs;
+  /** The design the server filed it under, and what it is for it (sheet, render, CAD …). */
+  design?: ItemDesign;
 }
 
 // Manually-organised Product Photos library — staff create category folders,

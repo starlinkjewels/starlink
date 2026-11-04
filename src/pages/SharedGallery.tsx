@@ -1,6 +1,7 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { WebVideo } from "@/components/ProductVideo";
-import { useParams } from "react-router-dom";
+import { useParams, useSearchParams } from "react-router-dom";
+import { useBackToClose } from "@/hooks/useBackNav";
 import { doc, getDoc } from "firebase/firestore";
 import { db as fsdb } from "@/lib/firebase";
 import type { Share, ShareItem, ShareFolder } from "@/lib/db";
@@ -32,6 +33,8 @@ function filenameFor(it: ShareItem, i: number) {
 function Lightbox({ items, startIndex, onClose }: { items: ShareItem[]; startIndex: number; onClose(): void }) {
   const [idx, setIdx] = useState(startIndex);
   const [dir, setDir] = useState(0);
+  // Back closes the picture first; the folder stays.
+  useBackToClose(true, onClose);
   const item = items[idx];
   const hasPrev = idx > 0, hasNext = idx < items.length - 1;
   const prev = () => { if (hasPrev) { setDir(-1); setIdx(i => i - 1); } };
@@ -105,10 +108,17 @@ export function SharedGalleryPage() {
   const [lightbox, setLightbox] = useState<number | null>(null);
   const [downloading, setDownloading] = useState(false);
   const [allItems, setAllItems] = useState<ShareItem[]>(first?.items ?? []);
-  // Which sub-folder the visitor is looking at (null = the shared folder itself) — a
-  // folder's own link (?f=) opens on it.
-  const [path, setPath] = useState<ShareFolder[]>(() =>
-    pathTo(first?.share.folders, typeof window !== "undefined" ? new URLSearchParams(window.location.search).get("f") : null));
+  // Which sub-folder the visitor is looking at (null = the shared folder itself) is in
+  // the address (?f=): a folder's own link opens on it, and each folder opened is a
+  // step in the history — the phone's Back goes up one folder, as in the app.
+  const [sp, setSp] = useSearchParams();
+  const fid = sp.get("f");
+  const path = useMemo(() => pathTo(share?.folders, fid), [share, fid]);
+  const openFolder = (f: ShareFolder | null) => setSp(prev => {
+    const n = new URLSearchParams(prev);
+    if (f) n.set("f", f.id); else n.delete("f");
+    return n;
+  });
 
   useEffect(() => {
     if (first?.items) return; // all of it came with the page
@@ -122,7 +132,6 @@ export function SharedGalleryPage() {
           if (!snap.exists()) { setStatus("missing"); return; }
           s = snap.data() as Share;
           setShare(s);
-          setPath(pathTo(s.folders, new URLSearchParams(window.location.search).get("f")));
         }
         // The first page is on screen at once; a big folder's other pages
         // (shares/{id}/items/{n}) follow, read all together.
@@ -225,14 +234,14 @@ export function SharedGalleryPage() {
               {/* Breadcrumb — a shared folder keeps its sub-folders, so the
                   visitor browses it the same way we do. */}
               <nav className="flex items-center gap-1 flex-wrap text-sm mb-1">
-                <button onClick={() => setPath([])}
+                <button onClick={() => openFolder(null)}
                   className={`font-medium ${path.length ? "text-primary hover:underline" : "text-brand-dark"}`}>
                   {share.title}
                 </button>
                 {path.map((f, i) => (
                   <span key={f.id} className="flex items-center gap-1 min-w-0">
                     <Crumb className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
-                    <button onClick={() => setPath(path.slice(0, i + 1))}
+                    <button onClick={() => openFolder(f)}
                       className={`font-medium truncate ${i === path.length - 1 ? "text-brand-dark" : "text-primary hover:underline"}`}>
                       {f.name}
                     </button>
@@ -255,7 +264,7 @@ export function SharedGalleryPage() {
                 {subFolders.map(f => {
                   const cover = allItems.find(it => it.folderId === f.id && (it.type === "image" || (it.type === "video" && !!it.thumb)));
                   return (
-                    <button key={f.id} onClick={() => setPath([...path, f])}
+                    <button key={f.id} onClick={() => openFolder(f)}
                       className="rounded-2xl overflow-hidden border border-border/60 bg-white shadow-sm text-left hover:shadow-md transition-shadow">
                       <div className="aspect-square bg-secondary/30 overflow-hidden">
                         {cover

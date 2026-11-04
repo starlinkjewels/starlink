@@ -309,6 +309,20 @@
           "order": "DESCENDING"
         }
       ]
+    },
+    {
+      "collectionGroup": "catalogDesigns",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "status",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "updatedAt",
+          "order": "DESCENDING"
+        }
+      ]
     }
   ],
   "fieldOverrides": [
@@ -374,6 +388,21 @@
       "collectionGroup": "etsyPending",
       "fieldPath": "expireAt",
       "ttl": true,
+      "indexes": []
+    },
+    {
+      "collectionGroup": "catalogDesigns",
+      "fieldPath": "items",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "catalogDesigns",
+      "fieldPath": "media",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "catalogDesigns",
+      "fieldPath": "specs",
       "indexes": []
     }
   ]

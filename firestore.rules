@@ -261,7 +261,18 @@ service cloud.firestore {
 
     // Shared collections — any active user (catalog is a shared library).
     match /catalogFolders/{id}  { allow read, write: if isActive(); }
-    match /catalogItems/{id}    { allow read, write: if isActive(); }
+    // A file's reading (specs) and the design it is filed under (design) are the
+    // server's (functions-specs) — never sent with a new file, never changed by
+    // anyone else; staff may correct or confirm a reading (it is then never read over).
+    match /catalogItems/{id} {
+      allow read, delete: if isActive();
+      allow create: if isActive() && !request.resource.data.keys().hasAny(['specs', 'design']);
+      allow update: if isActive()
+        && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['design'])
+        && (isStaff() || !request.resource.data.diff(resource.data).affectedKeys().hasAny(['specs']));
+    }
+    // Designs (functions-specs): each design's files by role and its details — written only by the server.
+    match /catalogDesigns/{id} { allow read: if isActive(); allow write: if false; }
     match /catalogFavorites/{id}{ allow read, write: if isActive(); }
 
     // Product Photos library — staff author folders/media; any active user may
@@ -367,6 +378,11 @@ service cloud.firestore {
       match /ticks/{t} { allow read: if isAdmin(); allow write: if false; }
     }
     match /rateEvents/{id} { allow read: if isAdmin(); allow write: if false; }
+    // Catalogue reading (functions-specs): the settings are the admin's; how the whole-catalogue
+    // reading is going is the server's, for admins to see; the words read off each file are the server's own.
+    match /specsSettings/{id} { allow read: if isStaff(); allow write: if isAdmin(); }
+    match /specsState/{id}    { allow read: if isAdmin(); allow write: if false; }
+    match /specsText/{id}     { allow read, write: if false; }
     match /apiKeys/{id}   { allow read, write: if isAdmin(); }
     match /apiQuota/{id}  { allow read: if isAdmin(); allow write: if false; }
     match /apiStats/{id}  { allow read: if isAdmin(); allow write: if false; }

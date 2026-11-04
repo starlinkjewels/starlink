@@ -1,6 +1,7 @@
 import { ShopifySettings } from "@/components/settings/ShopifySettings";
 import { EtsySettings } from "@/components/settings/EtsySettings";
 import { LiveRatesSettings } from "@/components/settings/LiveRatesSettings";
+import { CatalogReadingSettings } from "@/components/settings/CatalogReadingSettings";
 import { CurrencyRatesSettings } from "@/components/CurrencyRatesSettings";
 import { InfoTip, SectionTitle } from "@/components/SectionTitle";
 import { PageHeader } from "@/components/PageHeader";
@@ -21,7 +22,7 @@ import { TimelineSettings } from "@/components/TimelineSettings";
 import { OrderLayoutSettings } from "@/components/OrderLayoutSettings";
 import { VideoFixSettings } from "@/components/VideoFixSettings";
 import { PhotoPreviewSettings } from "@/components/PhotoPreviewSettings";
-import { ListOrdered, LayoutList, Film, Images, ChevronLeft } from "lucide-react";
+import { ListOrdered, LayoutList, Film, Images, ChevronLeft, ScanText } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useUrlState } from "@/hooks/useUrlState";
 import { SettingsSearch } from "@/components/settings-search/SettingsSearch";
@@ -829,6 +830,7 @@ export function SettingsPage() {
     { id: "lists", label: "Dropdown lists", icon: ListChecks, show: isAdmin, group: "Lists & categories", hint: "The choices in every dropdown" },
     { id: "videos", label: "Videos", icon: Film, show: isAdmin, group: "Photos & videos", hint: "Make every video play on every device" },
     { id: "previews", label: "Photo previews", icon: Images, show: isAdmin, group: "Photos & videos", hint: "Small copies so shared links open fast" },
+    { id: "catalogread", label: "Catalogue reading", icon: ScanText, show: isAdmin, group: "Photos & videos", hint: "Each sheet's gold and stones read by themselves; files grouped by design" },
     { id: "appearance", label: "Appearance", icon: Palette, show: isAdmin, group: "Look & feel", hint: "Theme, density and the app's look" },
     { id: "tables", label: "Table Style", icon: Table2, show: isAdmin, group: "Look & feel", hint: "How every table looks" },
     { id: "logins", label: "Secure Logins", icon: ShieldCheck, show: isAdmin && pendingLogins.length > 0, group: "Security & data", hint: "Logins still to move to secure sign-in" },
@@ -1554,6 +1556,7 @@ export function SettingsPage() {
       {activeId === "liverates" && <LiveRatesSettings />}
       {activeId === "videos" && <VideoFixSettings />}
       {activeId === "previews" && <PhotoPreviewSettings />}
+      {activeId === "catalogread" && <CatalogReadingSettings />}
 
       {/* The business's own dropdown choices — admin only */}
       {activeId === "lists" && <OptionListsSettings />}
