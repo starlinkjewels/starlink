@@ -1,4 +1,4 @@
-import { pieceWeights } from "@/lib/weights";
+import { otherMetalsOf, pieceWeights } from "@/lib/weights";
 import {
   fmtDate, fmtMoney, orderTotal, totalAdvance, balanceDue, mainDiamondShape, costDataReady,
   CARAT_TO_GRAM, type DB, type Order, type ReadyStockItem,
@@ -66,7 +66,7 @@ export function buildProductRows(db: DB, orders: Order[]): ProductRow[] {
       karat: o.productKarats ?? "",
       grossG: n3(gross),
       netG: n3(net),
-      otherMetal: o.otherMetal ?? "",
+      otherMetal: otherMetalsOf(o).map(m => m.metal).join(", "),
       otherMetalG: n3(other),
       diamondCt: n3(dia),
       diamondPcs: o.actualDiamondPcs ?? "",

@@ -59,6 +59,7 @@ import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { confirmBox } from "@/lib/confirm";
+import { otherMetalsOf } from "@/lib/weights";
 
 /** An action on an issuance card: a light text button, icon and word. */
 const ISSUE_ACTION = "inline-flex items-center gap-1.5 h-9 px-2.5 rounded-lg text-sm font-medium text-primary hover:bg-primary/[0.07] transition-colors";
@@ -751,12 +752,13 @@ function FactoryHistoryPageBody() {
         // A two-tone piece comes back with a second metal in it. Silver gets its
         // own column because it is the common one; anything else (platinum, etc.)
         // shares the Other Metal column and is named in the row.
-        const om = (order?.otherMetal || "").trim();
-        const omW = order?.otherMetalWeight || 0;
-        if (om && omW > 0) {
+        // Every metal besides the gold, one row each (the first keeps its own row id, as always).
+        if (order) otherMetalsOf(order).forEach((m, k) => {
+          const om = m.metal.trim(), omW = m.weight || 0;
+          if (!om || !(omW > 0)) return;
           const isSilver = /silver/i.test(om);
-          rows.push({ ...zero(), id: mi.id + "-om", date: mi.issuedAt, ref, particular: `${om} in finished piece — ${omW}g`, crSilver: isSilver ? omW : 0, crOther: isSilver ? 0 : omW, otherLabel: isSilver ? undefined : om });
-        }
+          rows.push({ ...zero(), id: mi.id + (k ? `-om${k}` : "-om"), date: mi.issuedAt, ref, particular: `${om} in finished piece — ${omW}g`, crSilver: isSilver ? omW : 0, crOther: isSilver ? 0 : omW, otherLabel: isSilver ? undefined : om });
+        });
       }
       // Diamond issued in / used-in-piece + returned out.
       // Counted by the same rule as the Factory Account card (diamondFlow): a
@@ -883,6 +885,9 @@ function FactoryHistoryPageBody() {
     const hasDia = true;
     const hasSilver = rows.some(r => r.silverIn);
     const hasOther = rows.some(r => r.otherIn);
+    // Each other metal named, and the making by metal, when any row has them.
+    const hasMetalNames = rows.some(r => r.otherNote);
+    const hasMaking = rows.some(r => r.labourNote);
     // Estimates print on their row but never count toward a balance — see the
     // same rule in FactoryOrderLedger.
     const T = rows.reduce((t, r) => ({
@@ -913,6 +918,7 @@ function FactoryHistoryPageBody() {
       ] : []),
       ...(hasSilver ? [{ header: "Silver g", w: 18, right: true }] : []),
       ...(hasOther ? [{ header: "Other g", w: 18, right: true }] : []),
+      ...(hasMetalNames ? [{ header: "Metals (g)", w: 34 }] : []),
       { header: "Labour", w: 22, right: true },
       { header: "Paid", w: 20, right: true },
       { header: "Pending", w: 22, right: true },
@@ -924,7 +930,7 @@ function FactoryHistoryPageBody() {
     let cx = 14;
     const columns = want.map(c => { const col = { header: c.header, x: cx }; cx += c.w * scale; return col; });
     const align: ("left" | "right")[] = want.map(c => (c.right ? "right" : "left"));
-    downloadLedgerPdf({
+    const pdf = {
       title: `Factory Ledger — ${factory.name}${orderNo ? ` · Order ${orderNo}` : ""}`,
       subjectLines: [
         factory.contactPerson ? `Contact: ${factory.contactPerson}` : "",
@@ -949,6 +955,8 @@ function FactoryHistoryPageBody() {
         ...(hasDia ? [r.diaOut ? (r.diaEstimated ? "~" : "") + r.diaOut.toFixed(2) : "", r.diaIn ? r.diaIn.toFixed(2) : "", (r.diaOut - r.diaIn).toFixed(2)] : []),
         ...(hasSilver ? [q3(r.silverIn) || ""] : []),
         ...(hasOther ? [q3(r.otherIn) || ""] : []),
+        // jsPDF can't draw ₹: "Rs" in the PDF.
+        ...(hasMetalNames ? [fit(r.otherShort ?? "", 34 * scale)] : []),
         r.labour ? rs(r.labour) : "", r.paid ? rs(r.paid) : "",
         r.labour - r.paid > 0.5 ? rs(r.labour - r.paid) : "",
         r.open > 0 ? `${r.open} open` : "Done",
@@ -960,9 +968,25 @@ function FactoryHistoryPageBody() {
         ...(hasDia ? [T.diaOut.toFixed(2), T.diaIn.toFixed(2), (T.diaOut - T.diaIn).toFixed(2)] : []),
         ...(hasSilver ? [String(q3(rows.reduce((s, r) => s + r.silverIn, 0)))] : []),
         ...(hasOther ? [String(q3(rows.reduce((s, r) => s + r.otherIn, 0)))] : []),
+        ...(hasMetalNames ? [""] : []),
         rs(T.labour), rs(T.paid), rs(Math.max(0, T.labour - T.paid)), "",
       ],
       filename: `Factory-${factory.name.replace(/\s+/g, "_")}${ordSuffix(orderNo)}-Orders`,
+    };
+    if (!hasMaking) { downloadLedgerPdf(pdf); return; }
+    // Made by metal (Final Approval): each order's metals at their own rates — a table of its own after the ledger,
+    // every line in full (a narrow column would cut them off).
+    const mk = rows.flatMap(r => (r.labourLines ?? []).map(l => [r.orderNo, l.metal, (l.grams || 0).toFixed(3), rs(l.rate || 0), rs((l.grams || 0) * (l.rate || 0))]));
+    downloadLedgerPdfMulti({
+      title: pdf.title, landscape: true, filename: pdf.filename, summary: pdf.summary,
+      // The Labour column is the factory's bill: it may be its minimum instead, and carries CAD, handling and other charges.
+      subjectLines: [...pdf.subjectLines, "Making by metal: each metal's grams × its rate. Labour (By order) is the factory's bill — its minimum where that applied, with CAD, handling and other charges."],
+      sections: [
+        { heading: "By order", columns: pdf.columns, rows: pdf.rows, align: pdf.align, totalsRow: pdf.totalsRow },
+        { heading: "Making by metal", columns: [{ header: "Order", x: 14 }, { header: "Metal", x: 60 }, { header: "Grams", x: 130 }, { header: "Rs / g", x: 165 }, { header: "Making (Rs)", x: 200 }],
+          rows: mk, align: ["left", "left", "right", "right", "right"],
+          totalsRow: ["", "Total gram × rate", "", "", rs(rows.reduce((t, r) => t + (r.labourLines ?? []).reduce((u, l) => u + (l.grams || 0) * (l.rate || 0), 0), 0))] },
+      ],
     });
   };
 
@@ -971,15 +995,15 @@ function FactoryHistoryPageBody() {
     downloadCsv(
       `Factory-${factory.name.replace(/\s+/g, "_")}${ordSuffix(orderNo)}-Orders`,
       ["Order", "Date", "Item", "Net weight (g)", "Design number", "Gold given by us (g fine)", "Gold in the piece (g fine)", "Gold balance (g fine)",
-       "Diamond issued (ct)", "Diamond accounted (ct)", "Diamond open (ct)", "Silver (g)", "Other metal (g)",
-       "Labour billed (INR)", "Labour paid (INR)", "Labour pending (INR)", "Quoted (USD)", "Estimated?", "Status"],
+       "Diamond issued (ct)", "Diamond accounted (ct)", "Diamond open (ct)", "Silver (g)", "Other metal (g)", "Metals in the piece",
+       "Labour billed (INR)", "Making by metal", "Labour paid (INR)", "Labour pending (INR)", "Quoted (USD)", "Estimated?", "Status"],
       rows.map(r => [
         r.orderNo, fmtDate(r.date), r.jewellery,
         r.netWeight ? `${r.netEstimated ? "~" : ""}${r.netWeight.toFixed(3)}` : "", r.designNo ?? "",
         q3(r.goldOut), q3(r.goldIn), q3(r.goldOut - r.goldIn),
         q3(r.diaOut), q3(r.diaIn), q3(r.diaOut - r.diaIn),
-        q3(r.silverIn), q3(r.otherIn),
-        Math.round(r.labour), Math.round(r.paid), Math.round(Math.max(0, r.labour - r.paid)),
+        q3(r.silverIn), q3(r.otherIn), r.otherNote ?? "",
+        Math.round(r.labour), r.labourNote ?? "", Math.round(r.paid), Math.round(Math.max(0, r.labour - r.paid)),
         Math.round(r.quotedUsd),
         r.goldEstimated || r.diaEstimated ? "estimate — not yet finally approved" : "",
         r.open > 0 ? `${r.open} still with factory` : "Done",

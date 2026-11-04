@@ -2,7 +2,7 @@ import { useMemo, useState, type ReactNode } from "react";
 import { metalLabel } from "@/lib/metals";
 import { Link } from "react-router-dom";
 import { fmtDate, toPureGold, pureFromPurity, type MaterialIssuance, type Order, type Factory, type Settings } from "@/lib/db";
-import { fmtMoneyInr, diamondFlow, otherFlow } from "@/lib/manufacturing";
+import { fmtMoneyInr, diamondFlow, otherFlow, minimumLabourApplies } from "@/lib/manufacturing";
 import { isOtherMaterial, materialName, materialUnit } from "@/lib/materials";
 import { Download, Coins, Gem, Hammer } from "lucide-react";
 import { type TableFilter, StatStrip } from "@/components/TableToolbar";
@@ -10,6 +10,7 @@ import { DataTable, CellMain, CellTag, type DataColumn } from "@/components/Data
 import { SectionTitle } from "@/components/SectionTitle";
 import { finishRecordOf, isReworkIssue } from "@/lib/rework";
 import { useStickyFilter } from "@/hooks/useStickyFilter";
+import { otherMetalsOf } from "@/lib/weights";
 
 // A zero prints as a dash, never as an empty cell. A blank reads as missing
 // data; "—" says plainly that nothing moved.
@@ -17,6 +18,17 @@ const g3 = (n: number) => (Math.abs(n) < 0.0005 ? "—" : n.toFixed(3));
 const rs = (n: number) => (Math.abs(n) < 0.5 ? "—" : Math.round(n).toLocaleString("en-IN"));
 /** An estimate prints with a ~ so it is never mistaken for a real weight. */
 const est = (v: string) => (v ? `~${v}` : "");
+
+/** A metal's short name, for a narrow column: Au, Pt, Ag, Ti, Pd — else its first letters. */
+export function metalSymbol(m: string): string {
+  const s = m.trim().toLowerCase();
+  if (/gold/.test(s)) return "Au";
+  if (/platinum/.test(s)) return "Pt";
+  if (/silver/.test(s)) return "Ag";
+  if (/titanium/.test(s)) return "Ti";
+  if (/palladium/.test(s)) return "Pd";
+  return m.trim().slice(0, 3);
+}
 
 export interface FactoryOrderRow {
   /** The row's own key: the order, or the bulk delivery's own issue. */
@@ -41,6 +53,15 @@ export interface FactoryOrderRow {
   diaIn: number;     // carats accounted for (used in the piece + returned)
   silverIn: number;  // second metal the factory put into the piece
   otherIn: number;
+  /** Every metal besides the gold, named: "Platinum 1.000 g · Titanium 2.510 g". */
+  otherNote?: string;
+  /** The making by metal, when Final Approval set it so: "Gold 2.490 g × ₹1,000 + Titanium 2.510 g × ₹400". */
+  labourNote?: string;
+  /** The same two, short, for a narrow PDF column: "Ti 1 · Ag 0.4", "Au 4.6×1000 + Ti 1×400". */
+  otherShort?: string;
+  labourShort?: string;
+  /** The making's lines by metal, for a table of their own (the PDF's "Making by metal"). */
+  labourLines?: { metal: string; grams: number; rate: number }[];
   labour: number;    // making charges billed
   paid: number;      // paid against those charges
   open: number;      // issuances still open
@@ -244,6 +265,15 @@ export function buildFactoryOrderRows(
     }
 
     row.labour += mi.makingCharges?.amountInr || 0;
+    // Each metal at its own rate (Final Approval): said, so the factory's bill can be checked line by line.
+    if (mi.labour?.lines?.length) {
+      const note = mi.labour.lines.map(l => `${l.metal} ${(l.grams || 0).toFixed(3)} g × ₹${(l.rate || 0).toLocaleString("en-IN")}`).join(" + ")
+        + (minimumLabourApplies(mi.labour, mi.labour.lines.reduce((t, l) => t + (l.grams || 0), 0)) ? ` (minimum ₹${(mi.labour.minimumLabour || 0).toLocaleString("en-IN")} charged)` : "");
+      row.labourNote = row.labourNote ? `${row.labourNote}; ${note}` : note;
+      const short = mi.labour.lines.map(l => `${metalSymbol(l.metal)} ${+(l.grams || 0).toFixed(3)}×${l.rate || 0}`).join(" + ");
+      row.labourShort = row.labourShort ? `${row.labourShort}; ${short}` : short;
+      row.labourLines = [...(row.labourLines ?? []), ...mi.labour.lines];
+    }
     row.paid += (mi.makingCharges?.payments || []).reduce((s, p) => s + p.amountInr, 0);
   }
 
@@ -296,10 +326,17 @@ export function buildFactoryOrderRows(
     if (order.metal === "Silver" && order.actualNetWeight && row.silverIn === 0) {
       row.silverIn = order.actualNetWeight;
     }
-    const om = (order.otherMetal || "").trim();
-    const w = order.otherMetalWeight || 0;
-    if (om && w > 0) {
-      if (/silver/i.test(om)) row.silverIn += w; else row.otherIn += w;
+    // Every metal besides the gold — added up by column, and each named.
+    const named: string[] = [];
+    for (const m of otherMetalsOf(order)) {
+      const w = m.weight || 0;
+      if (!m.metal.trim() || !(w > 0)) continue;
+      if (/silver/i.test(m.metal)) row.silverIn += w; else row.otherIn += w;
+      named.push(`${m.metal.trim()} ${w.toFixed(3)} g`);
+    }
+    if (named.length) {
+      row.otherNote = named.join(" · ");
+      row.otherShort = otherMetalsOf(order).filter(m => (m.weight || 0) > 0).map(m => `${metalSymbol(m.metal)} ${+(m.weight || 0).toFixed(3)}`).join(" · ");
     }
   }
 
@@ -441,10 +478,11 @@ export function FactoryOrderLedger({
       cell: r => { const bal = r.diaOut - r.diaIn; return n(r.diaEstimated ? "—" : bal > 0.005 ? bal.toFixed(2) : "0", `font-semibold ${bal > 0.005 ? "text-blue-700" : "text-muted-foreground"}`); } },
     ...(hasSilver ? [{ key: "silver", header: "Silver (g)", align: "right" as const, kind: "number" as const, sortValue: (r: FactoryOrderRow) => r.silverIn, csv: (r: FactoryOrderRow) => g3(r.silverIn),
       cell: (r: FactoryOrderRow) => n(g3(r.silverIn)) }] : []),
-    ...(hasOther ? [{ key: "other", header: "Other (g)", align: "right" as const, kind: "number" as const, sortValue: (r: FactoryOrderRow) => r.otherIn, csv: (r: FactoryOrderRow) => g3(r.otherIn),
-      cell: (r: FactoryOrderRow) => n(g3(r.otherIn)) }] : []),
+    ...(hasOther ? [{ key: "other", header: "Other (g)", align: "right" as const, kind: "number" as const, sortValue: (r: FactoryOrderRow) => r.otherIn, csv: (r: FactoryOrderRow) => (r.otherNote ? `${g3(r.otherIn)} (${r.otherNote})` : g3(r.otherIn)),
+      cell: (r: FactoryOrderRow) => r.otherNote ? <span title={r.otherNote}>{n(g3(r.otherIn))}<span className="block text-[10px] text-muted-foreground font-normal max-w-[12rem] truncate">{r.otherNote}</span></span> : n(g3(r.otherIn)) }] : []),
     { key: "labour", header: "Labour billed (₹)", align: "right", kind: "number", sortValue: r => r.labour, csv: r => Math.round(r.labour),
-      cell: r => n(rs(r.labour)) },
+      // Made by metal: each metal's grams at its rate, under the total.
+      cell: r => r.labourNote ? <span title={r.labourNote}>{n(rs(r.labour))}<span className="block text-[10px] text-muted-foreground font-normal max-w-[16rem] truncate">{r.labourNote}</span></span> : n(rs(r.labour)) },
     // Paid by us, not money received: plain. Nothing pending: grey.
     { key: "paid", header: "Labour paid (₹)", align: "right", kind: "number", sortValue: r => r.paid, csv: r => Math.round(r.paid),
       cell: r => n(rs(r.paid)) },

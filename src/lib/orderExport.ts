@@ -8,7 +8,7 @@
 import { balanceDue, fmtDate, fmtMoney, orderTotal, totalAdvance, type DB, type Order } from "./db";
 import { downloadCsv, downloadLedgerPdfMulti, type PdfSection } from "./ledgerExport";
 import { orderMaterialLines } from "./orderMaterials";
-import { pieceWeights } from "./weights";
+import { isSelfMetal, otherMetalsOf, pieceWeights } from "./weights";
 import { fmtMoneyInr } from "./manufacturing";
 
 /** The PDF's fonts have no ₹, no minus sign, no curly quotes. */
@@ -56,7 +56,9 @@ export function buildSheet(db: DB, order: Order, opts: { faDone: boolean; withCo
     ["Weights are", pw.estimated ? "Estimated (no Final Approval yet)" : "Actual"],
     ["Gross", g3(pw.gross)],
     ["Net metal", g3(pw.net)],
-    ...(pw.other > 0 ? [[`${order.otherMetal || "Other metal"}`, g3(pw.other)]] : []),
+    ...(pw.other > 0 ? (otherMetalsOf(order).length > 1 && !isSelfMetal(order)
+      ? otherMetalsOf(order).filter(m => (m.weight || 0) > 0).map(m => [m.metal, g3(m.weight!)])
+      : [[`${isSelfMetal(order) ? otherMetalsOf(order).slice(1).map(m => m.metal).join(", ") || "Other metal" : order.otherMetal || "Other metal"}`, g3(pw.other)]]) : []),
     ...(pw.diamondCt > 0 ? [["Diamonds", `${Math.round(pw.diamondCt * 1000) / 1000} ct${order.actualDiamondPcs ? ` · ${order.actualDiamondPcs} pcs` : ""}`]] : []),
   ] as [string, string][]);
   const materials = orderMaterialLines(db, order, opts.faDone).map(l => ({

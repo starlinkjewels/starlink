@@ -20,6 +20,7 @@ import { openingCreditAmt, openingDebitAmt, pureFromPurity, toPureGold } from ".
 import type { OpeningBalanceInfo } from "./db";
 import { groupPaymentsAsMade } from "./manufacturing";
 import { isReworkIssue } from "./rework";
+import { otherMetalsOf } from "./weights";
 
 export type StatementKind = "opening" | "gold" | "diamond" | "bill" | "returned" | "repair" | "labour" | "payment" | "advance";
 
@@ -58,7 +59,7 @@ const latest = (dates: (string | undefined)[]) => dates.filter((d): d is string 
 
 export interface StatementInput {
   issuances: MaterialIssuance[];
-  orders: Pick<Order, "id" | "orderNumber" | "factoryBillNo" | "timeline" | "actualDiamondWeight" | "jewelleryType">[];
+  orders: Pick<Order, "id" | "orderNumber" | "factoryBillNo" | "timeline" | "actualDiamondWeight" | "jewelleryType" | "otherMetal" | "otherMetalWeight" | "otherMetalPurity" | "otherMetals">[];
   /** Advances and loans — money paid against no particular job. */
   advances: FactoryPayment[];
   /** The factory's opening balances (the first company's view only, as on the card). */
@@ -102,7 +103,7 @@ export function buildFactoryStatement(inp: StatementInput): { lines: StatementLi
   }
 
   // ── What the factory billed: one line per bill (its number), else per order ──
-  type Acc = { orderIds: Set<string>; date?: string; goldOut: number; diaUsed: number; diaRet: number; billed: number; voucher: string; facCt: number; ourCt: number; items: string[] };
+  type Acc = { orderIds: Set<string>; date?: string; goldOut: number; diaUsed: number; diaRet: number; billed: number; voucher: string; facCt: number; ourCt: number; items: string[]; making?: string[] };
   const bills = new Map<string, Acc>();
   const looseLabour: MaterialIssuance[] = [];
   for (const mi of issuances) {
@@ -138,8 +139,12 @@ export function buildFactoryStatement(inp: StatementInput): { lines: StatementLi
     const acc = bills.get(key) ?? { orderIds: new Set(), goldOut: 0, diaUsed: 0, diaRet: 0, billed: 0, voucher: o.factoryBillNo?.trim() || o.orderNumber, facCt: 0, ourCt: 0, items: [] };
     if (!acc.orderIds.has(o.id)) {
       acc.orderIds.add(o.id);
-      acc.items.push(`${o.orderNumber}${o.jewelleryType ? ` ${o.jewelleryType}` : ""}`);
+      // The metals besides gold in the piece, named with their grams.
+      const metals = otherMetalsOf(o).filter(m => (m.weight || 0) > 0).map(m => `${m.metal} ${(m.weight || 0).toFixed(3)} g`);
+      acc.items.push(`${o.orderNumber}${o.jewelleryType ? ` ${o.jewelleryType}` : ""}${metals.length ? ` (${metals.join(", ")})` : ""}`);
     }
+    // Made by metal (Final Approval): each metal's grams at its rate, so the factory's bill can be checked.
+    if (mi.labour?.lines?.length) (acc.making ??= []).push(mi.labour.lines.map(l => `${l.metal} ${(l.grams || 0).toFixed(3)} g × ₹${(l.rate || 0).toLocaleString("en-IN")}`).join(" + "));
     acc.goldOut += fine; acc.diaUsed += used; acc.diaRet += ret; acc.billed += charge;
     acc.date = latest([acc.date, when]) ?? when;
     bills.set(key, acc);
@@ -150,7 +155,7 @@ export function buildFactoryStatement(inp: StatementInput): { lines: StatementLi
     const facNote = a.facCt && Math.abs(a.facCt - (a.diaUsed + a.diaRet)) > 0.005 ? ` · factory's scale ${r3(a.facCt)} ct` : "";
     if (a.goldOut || a.diaUsed || a.billed) {
       raw.push({ ...blank, id: `${key}-bill`, kind: "bill", date: a.date ?? "", voucher: a.voucher, orderIds: [...a.orderIds],
-        particular: `Finished goods — ${a.items.join(", ")}${facNote}`, goldOut: r3(a.goldOut), diaOut: r3(a.diaUsed), billed: a.billed });
+        particular: `Finished goods — ${a.items.join(", ")}${facNote}${a.making?.length ? ` · making ${a.making.join("; ")}` : ""}`, goldOut: r3(a.goldOut), diaOut: r3(a.diaUsed), billed: a.billed });
     }
     if (a.diaRet > 0.0005) {
       raw.push({ ...blank, id: `${key}-ret`, kind: "returned", date: a.date ?? "", voucher: a.voucher, orderIds: [...a.orderIds],

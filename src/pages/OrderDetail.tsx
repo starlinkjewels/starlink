@@ -27,11 +27,11 @@ import { ClientMaterialSheet } from "@/components/ClientMaterialSheet";
 import { ClientSuppliedSheet } from "@/components/ClientSuppliedSheet";
 import { inrPerUnit } from "@/lib/currency";
 import { factoryRatesFor } from "@/components/FactoryLabourFields";
-import { isNonGoldMetal, metalLabel } from "@/lib/metals";
+import { isNonGoldMetal, metalHasKarats, metalLabel } from "@/lib/metals";
 import { AddNewItem, useAddNew } from "@/components/create/QuickCreate";
 import { SectionTitle } from "@/components/SectionTitle";
 import { WeightCheck } from "@/components/WeightCheck";
-import { weightProblem, pieceWeights, isSelfMetal, fmtG } from "@/lib/weights";
+import { weightProblem, pieceWeights, isSelfMetal, fmtG, otherMetalsOf, moreMetalsGrams } from "@/lib/weights";
 import { useCan, useMayExport } from "@/hooks/useCan";
 import { MoreMenu, type MoreAction } from "@/components/MoreMenu";
 import { OrderDesignBlock } from "@/components/designers/OrderDesignBlock";
@@ -96,7 +96,7 @@ import { BandDialog } from "@/components/BandDialog";
 import { AsyncButton } from "@/components/AsyncButton";
 import {
   fmtMoneyInr, manufacturingReadiness,
-  factoryPoolBalance, estimatedPureGoldNeeded, orderMaterialRequirements, issuanceUsed, labourValue, minimumLabourApplies, makingCharge, factoryFineGoldBalance,
+  factoryPoolBalance, estimatedPureGoldNeeded, orderMaterialRequirements, issuanceUsed, labourValue, minimumLabourApplies, makingCharge, byGramMaking, factoryFineGoldBalance,
   deriveStockBalances,
 } from "@/lib/manufacturing";
 import { decreaseStockSelfHealing, increaseStock, transferStock } from "@/lib/stock";
@@ -777,6 +777,11 @@ function OrderDetailPageBody() {
   // The minimum as this piece's making charge — flat, never gram × rate.
   const [faMinFlat, setFaMinFlat] = useState(false);
   const [faOtherPurity, setFaOtherPurity] = useState("");
+  // More metals after that one (gold + platinum + silver): each its own weight and purity.
+  const [faMore, setFaMore] = useState<{ metal: string; net: string; purity: string }[]>([]);
+  // Labour per gram for each metal besides gold, by name (lower case) — the factory's
+  // rate for that metal at first; blank: the gold rate.
+  const [faRates, setFaRates] = useState<Record<string, string>>({});
   const [faPerGram, setFaPerGram] = useState("");
   const [faCad, setFaCad] = useState("");
   const [faDiaHandling, setFaDiaHandling] = useState("");
@@ -886,9 +891,16 @@ function OrderDetailPageBody() {
       otherCharges: rcvOther ? Number(rcvOther) : undefined,
       metalByFactoryGrams: rcvMetalG ? Number(rcvMetalG) : undefined,
       metalByFactoryRate: rcvMetalRate ? Number(rcvMetalRate) : undefined,
+      // Made by metal at Final Approval (gold at one rate, titanium at another): kept, the gold at the rate given here.
+      ...(issuance.labour?.lines?.length ? { lines: issuance.labour.lines.map(l => {
+        if (!(l.gold ?? /^gold( and metal from stock)?$/i.test(l.metal.trim()))) return l;
+        // Its grams: the gold net typed here, with any metal from stock it carried; its rate: the one typed here.
+        const stockPart = Math.max(0, (l.grams || 0) - (issuance.finishedNetWeight || 0));
+        return { ...l, ...(rcvPerGram ? { rate: Number(rcvPerGram) } : {}), ...(hasNet ? { grams: Math.round((netW + stockPart) * 1000) / 1000 } : {}) };
+      }) } : {}),
     };
     const diamondCt = order.actualDiamondWeight || order.diamondWeight || 0;
-    const otherNet = order.otherMetal ? (order.otherMetalWeight || 0) : 0;
+    const otherNet = order.otherMetal ? (order.otherMetalWeight || 0) + moreMetalsGrams(order) : 0;
     const value = labourValue(
       labour,
       Math.round(((hasNet ? netW : (issuance.finishedNetWeight || 0)) + otherNet) * 1000) / 1000,
@@ -1099,26 +1111,47 @@ function OrderDetailPageBody() {
    *    stops); gold is only what is typed.
    * null = no gross entered: the weights are typed as before.
    */
+  /** The metals after the first other metal, as typed (a metal chosen, its weight, its purity). */
+  const faMoreRows = () => faMore.filter(r => r.metal.trim()).map(r => ({ metal: r.metal.trim(), w: Math.max(0, Number(r.net) || 0), purity: Number(r.purity) || 0 }));
+  /** Labour a gram for a metal: its own rate when one is set, else the gold rate. */
+  const faRateOf = (metal: string) => { const v = faRates[metal.trim().toLowerCase()]; return v != null && v !== "" ? Number(v) || 0 : Number(faPerGram) || 0; };
+  /**
+   * The making by metal, when the piece has a metal besides gold: each metal's
+   * grams at its own rate. Gold-only pieces: none — gram × rate on the net, as always.
+   */
+  const faLabourLines = (goldG: number, firstOtherG: number, stockMetalG: number) => {
+    const first = faOtherMetal.trim(), more = faMoreRows();
+    if (!first && !more.length) return undefined;
+    const lines = [
+      { metal: stockMetalG > 0 ? "Gold and metal from stock" : "Gold", grams: goldG + stockMetalG, rate: Number(faPerGram) || 0, gold: true },
+      ...(first ? [{ metal: first, grams: firstOtherG, rate: faRateOf(first) }] : []),
+      ...more.map(m => ({ metal: m.metal, grams: m.w, rate: faRateOf(m.metal) })),
+    ].filter(l => l.grams > 0).map(l => ({ ...l, grams: Math.round(l.grams * 1000) / 1000 }));
+    return lines.length ? lines : undefined;
+  };
+
   const faWeigh = (usedDiaCt: number, xG: { metal: number; stone: number }) => {
     const gross = parseFloat(faGrossIn);
     if (!(gross > 0)) return null;
     const r3 = (n: number) => Math.round(n * 1000) / 1000;
     const other = faOtherMetal.trim();
-    const fixed = usedDiaCt * CARAT_TO_GRAM + xG.stone + xG.metal;
+    // The metals after the first are typed, never worked out: they come off the scale's weight too.
+    const moreRows = faMoreRows(), moreW = moreRows.reduce((t, m) => t + m.w, 0), moreMissing = moreRows.some(m => m.w <= 0);
+    const fixed = usedDiaCt * CARAT_TO_GRAM + xG.stone + xG.metal + moreW;
     const nonGold = isNonGoldMetal(order.metal);
     const selfMetal = nonGold && !!other && other.toLowerCase() === order.metal.trim().toLowerCase();
     if (selfMetal) {
       const gold = Math.max(0, Number(faGoldNet) || 0);
       const rest = r3(gross - fixed - gold);
-      return { gross: r3(gross), selfMetal, gold, other: Math.max(0, rest), short: rest < -0.0005, needOther: false, needSelf: false };
+      return { gross: r3(gross), selfMetal, gold, other: Math.max(0, rest), short: rest < -0.0005, needOther: moreMissing, needSelf: false };
     }
     const otherW = other ? (Number(faOtherNet) || 0) : 0;
     if (nonGold) {
       // Nowhere to put the scale's weight but gold — refused, nothing worked out.
-      return { gross: r3(gross), selfMetal, gold: Math.max(0, Number(faGoldNet) || 0), other: otherW, short: false, needOther: false, needSelf: true };
+      return { gross: r3(gross), selfMetal, gold: Math.max(0, Number(faGoldNet) || 0), other: otherW, short: false, needOther: moreMissing, needSelf: true };
     }
     const rest = r3(gross - fixed - otherW);
-    return { gross: r3(gross), selfMetal, gold: Math.max(0, rest), other: otherW, short: rest < -0.0005, needOther: !!other && otherW <= 0, needSelf: false };
+    return { gross: r3(gross), selfMetal, gold: Math.max(0, rest), other: otherW, short: rest < -0.0005, needOther: (!!other && otherW <= 0) || moreMissing, needSelf: false };
   };
 
   const openFinalApproval = (idx: number) => {
@@ -1190,9 +1223,34 @@ function OrderDetailPageBody() {
     // be entered at once; leaving it blank disabled the weight box, which is
     // also the weight labour per gram is charged on.
     const selfMetal = isNonGoldMetal(order.metal) ? order.metal : "";
-    setFaOtherMetal(order.otherMetal ?? selfMetal);
-    setFaOtherNet(order.otherMetalWeight != null ? String(order.otherMetalWeight) : "");
-    setFaOtherPurity(order.otherMetalPurity != null ? String(order.otherMetalPurity) : "");
+    // A platinum or titanium piece whose other metals were set on the order (a silver part, say)
+    // but not yet its own: its own metal first — the scale's weight goes to it — then those.
+    const others = otherMetalsOf(order);
+    // Only before the piece is approved: an approved piece keeps its metals as saved.
+    const selfFirst = !approvedBefore && !!selfMetal && others.length > 0 && others[0].metal.trim().toLowerCase() !== selfMetal.trim().toLowerCase()
+      && !others.some(m => m.metal.trim().toLowerCase() === selfMetal.trim().toLowerCase());
+    // Gold set on the order beside a platinum or titanium piece's metal is the piece's gold — it goes to the
+    // gold weight (the factory's fine-gold account, the gold rate), not to a "metal besides gold".
+    const goldOthers = selfFirst ? others.filter(m => metalHasKarats(m.metal, db.settings)) : [];
+    const goldBesideW = goldOthers.reduce((t, m) => t + (m.weight || 0), 0);
+    if (goldBesideW > 0 && finish?.finishedNetWeight == null) setFaGoldNet(String(Math.round(goldBesideW * 1000) / 1000));
+    const rows = selfFirst ? [{ metal: selfMetal }, ...others.filter(m => !goldOthers.includes(m))] : others;
+    setFaOtherMetal(rows[0]?.metal ?? selfMetal);
+    setFaOtherNet(!selfFirst && order.otherMetalWeight != null ? String(order.otherMetalWeight) : "");
+    setFaOtherPurity(!selfFirst && order.otherMetalPurity != null ? String(order.otherMetalPurity) : "");
+    setFaMore(rows.slice(1).map(m => ({ metal: m.metal, net: "weight" in m && m.weight != null ? String(m.weight) : "", purity: "purity" in m && m.purity != null ? String(m.purity) : "" })));
+    // Each metal's labour rate: as saved; at the first approval, the factory's rate for that metal.
+    const savedLines = finish?.labour?.lines;
+    if (savedLines?.length) {
+      const goldRate = finish?.labour?.perGramRate ?? 0;
+      const isGoldLine = (l: { metal: string; gold?: boolean }) => l.gold ?? /^gold( and metal from stock)?$/i.test(l.metal.trim());
+      // A metal saved at the gold rate was left blank (it follows the gold rate): blank again.
+      setFaRates(Object.fromEntries(savedLines.filter(l => !isGoldLine(l) && l.rate !== goldRate).map(l => [l.metal.trim().toLowerCase(), String(l.rate)])));
+    }
+    else if (!finish?.labour) {
+      const fac = db.factories.find(x => x.id === (order.assignedFactoryId || issuedFactory?.id));
+      setFaRates(Object.fromEntries(Object.entries(fac?.labour?.perMetal ?? {}).map(([k, v]) => [k.trim().toLowerCase(), String(v)])));
+    } else setFaRates({});
     setFaOrderValue(order.amount ? String(order.amount) : "");
     setFaShipping(order.shippingCharge ? String(order.shippingCharge) : "");
     const shortCharge = (order.otherCharges ?? []).find(c => c.id === shortfallChargeId(order.id));
@@ -1241,7 +1299,12 @@ function OrderDetailPageBody() {
     const weighed = !!w;
     if (w?.short) { toast.error("The gross weight is less than the stones and other metal in the piece — check it."); return; }
     if (w?.needSelf) { toast.error(`A ${order.metal} piece: choose ${order.metal} under Other metal, so the scale's weight goes to it — not to gold.`); return; }
-    if (w?.needOther) { toast.error(`Enter the ${faOtherMetal.trim()} weight under Other metal — otherwise the rest of the piece is counted as gold.`); return; }
+    if (w?.needOther) { toast.error("Enter the weight of every metal under Other metal — otherwise the rest of the piece is counted as gold."); return; }
+    const moreRows = faMoreRows();
+    if (moreRows.length && !faOtherMetal.trim()) { toast.error("Choose the first other metal — or remove the metals below it."); return; }
+    const unweighed = moreRows.find(m => m.w <= 0);
+    if (!w && unweighed) { toast.error(`Enter the weight of ${unweighed.metal} under Other metal.`); return; }
+    const moreW = moreRows.reduce((t, m) => t + m.w, 0);
     const faOtherW = w ? w.other : faOtherMetal.trim() ? (Number(faOtherNet) || 0) : 0;
     const netW = w ? w.gold : netTyped;
     // A weight typed here is gold that went into the piece, whatever metal the
@@ -1249,7 +1312,10 @@ function OrderDetailPageBody() {
     // silver order the figure was taken, ignored and silently thrown away — and
     // a two-tone piece is platinum AND gold.
     const hasNet = !isNaN(netW) && netW > 0;
-    const labourNet = Math.round(((hasNet ? netW : 0) + faOtherW + xG.metal) * 1000) / 1000;
+    const labourNet = Math.round(((hasNet ? netW : 0) + faOtherW + moreW + xG.metal) * 1000) / 1000;
+    // Each metal at its own rate (gold, titanium …) when there is more than gold.
+    const lines = faLabourLines(hasNet ? netW : 0, faOtherW, xG.metal);
+    if (lines) (labour as NonNullable<MaterialIssuance["labour"]>).lines = lines;
     const labourVal = labourValue(labour, labourNet, usedDiaCt);
     // The factory that made it: the one set on the order, or — not set, but every
     // issue went to one — that one (as the Factory step suggests). Without either,
@@ -1369,6 +1435,13 @@ function OrderDetailPageBody() {
         o.otherMetal = faOtherMetal.trim() || undefined;
         o.otherMetalWeight = faOtherMetal.trim() && !isNaN(otherW) && otherW > 0 ? otherW : undefined;
         o.otherMetalPurity = faOtherMetal.trim() && !isNaN(otherP) && otherP > 0 ? otherP : undefined;
+        // More than one: the whole list, the first as above.
+        if (o.otherMetal && moreRows.length) {
+          o.otherMetals = [
+            { metal: o.otherMetal, ...(o.otherMetalWeight != null ? { weight: o.otherMetalWeight } : {}), ...(o.otherMetalPurity != null ? { purity: o.otherMetalPurity } : {}) },
+            ...moreRows.map(m => ({ metal: m.metal, weight: Math.round(m.w * 1000) / 1000, ...(m.purity > 0 ? { purity: m.purity } : {}) })),
+          ];
+        } else delete o.otherMetals;
 
         // The diamond figure the factory’s bill is based on, and the difference
         // from what we issued, so the two ledgers can be reconciled later.
@@ -1383,10 +1456,10 @@ function OrderDetailPageBody() {
         // Weighed as platinum or silver with no gold typed: a net on file from
         // before is the same metal, now under "other metal" — never counted twice.
         else if (w?.selfMetal) delete o.actualNetWeight;
-        const faGross = Math.round(((hasNet ? netW : 0) + faOtherW + xG.metal + xG.stone + usedDiaCt * CARAT_TO_GRAM) * 1000) / 1000;
+        const faGross = Math.round(((hasNet ? netW : 0) + faOtherW + moreW + xG.metal + xG.stone + usedDiaCt * CARAT_TO_GRAM) * 1000) / 1000;
         // What the scale said, when it was weighed; else worked out from the parts.
         if (weighed) o.actualGrossWeight = w!.gross;
-        else if (hasNet || faOtherW > 0 || xG.metal > 0) o.actualGrossWeight = faGross;
+        else if (hasNet || faOtherW > 0 || moreW > 0 || xG.metal > 0) o.actualGrossWeight = faGross;
         const diaPcsN = Math.round(Number(faDiaPcs) || 0);
         o.actualDiamondPcs = diaPcsN > 0 ? diaPcsN : undefined;
 
@@ -1872,12 +1945,13 @@ function OrderDetailPageBody() {
     if (isSelfMetal(order)) return {
       gross: keep(actGrossW, order.actualGrossWeight),
       net: keep(actNetW, pieceWeights(order, db.materialIssuances).net),
+      other: moreMetalsGrams(order) || undefined,
       diamondCt: keep(actDiamW, order.actualDiamondWeight ?? (order.diamondWeight || undefined)),
     };
     return {
       gross: keep(actGrossW, order.actualGrossWeight),
       net: keep(actNetW, order.actualNetWeight ?? finishNet),
-      other: order.otherMetal ? order.otherMetalWeight : undefined,
+      other: order.otherMetal ? (order.otherMetalWeight ?? 0) + moreMetalsGrams(order) : undefined,
       diamondCt: keep(actDiamW, order.actualDiamondWeight ?? (order.diamondWeight || undefined)),
     };
   };
@@ -1912,6 +1986,8 @@ function OrderDetailPageBody() {
       if (has(gw)) o.actualGrossWeight   = gw;
       if (has(nw) && self) {
         o.otherMetalWeight = Math.round((nw - goldBeside) * 1000) / 1000;
+        // The list's first metal is this one: kept the same.
+        if (o.otherMetals?.length) o.otherMetals[0] = { ...o.otherMetals[0], weight: o.otherMetalWeight };
         if (goldBeside <= 0) delete o.actualNetWeight;
       } else if (has(nw)) o.actualNetWeight = nw;
       if (has(dw)) o.actualDiamondWeight = dw;
@@ -4622,7 +4698,10 @@ The piece then takes ours — add them from stock or buy them, as for any order.
         // Gross entered on a gold piece: its gold net is worked out (shown, not typed).
         const faAutoNet = faW && !faW.selfMetal && !faW.needSelf ? faW.gold : null;
         const faEffNet = faW ? faW.gold : (Number(faGoldNet) || 0);
-        const faNetW = Math.round((faEffNet + faOtherG + faXG.metal) * 1000) / 1000;
+        const faMoreG = faMoreRows().reduce((t, m) => t + m.w, 0);
+        const faNetW = Math.round((faEffNet + faOtherG + faMoreG + faXG.metal) * 1000) / 1000;
+        const faLines = faLabourLines(faEffNet, faOtherG, faXG.metal);
+        if (faLines) (faLabour as NonNullable<MaterialIssuance["labour"]>).lines = faLines;
         const faLive = labourValue(faLabour, faNetW, usedDiaCt);
         const faMinInUse = minimumLabourApplies(faLabour, faNetW);
         const faFactory = db.factories.find(f => f.id === order.assignedFactoryId);
@@ -4673,7 +4752,7 @@ The piece then takes ours — add them from stock or buy them, as for any order.
                         ) : (
                           <Input type="number" min={0} step="0.001" value={faGoldNet} onChange={e => setFaGoldNet(e.target.value)} className="rounded-lg h-9 mt-1" placeholder="or enter the gross above" />
                         )}
-                        {faAutoNet != null && <p className="text-[10px] text-muted-foreground mt-1">{fmtG(faGrossN)} g − diamonds {usedDiaCt} ct ({fmtG(usedDiaCt * CARAT_TO_GRAM)} g){faXG.stone ? ` − other stones ${fmtG(faXG.stone)} g` : ""}{faOtherG ? ` − ${faOtherMetal.trim()} ${fmtG(faOtherG)} g` : ""}{faXG.metal ? ` − other metal ${fmtG(faXG.metal)} g` : ""}</p>}
+                        {faAutoNet != null && <p className="text-[10px] text-muted-foreground mt-1">{fmtG(faGrossN)} g − diamonds {usedDiaCt} ct ({fmtG(usedDiaCt * CARAT_TO_GRAM)} g){faXG.stone ? ` − other stones ${fmtG(faXG.stone)} g` : ""}{faOtherG ? ` − ${faOtherMetal.trim()} ${fmtG(faOtherG)} g` : ""}{faMoreRows().map(m => m.w ? ` − ${m.metal} ${fmtG(m.w)} g` : "").join("")}{faXG.metal ? ` − other metal ${fmtG(faXG.metal)} g` : ""}</p>}
                         {faW?.selfMetal && <p className="text-[10px] text-muted-foreground mt-1">A {order.metal} piece: the scale's weight goes to {order.metal} below. Enter gold only if the piece has some.</p>}
                         {faW?.needSelf && <p className="text-[10px] font-semibold text-destructive mt-1">A {order.metal} piece: choose {order.metal} under Other metal below — the scale's weight goes to it, not to gold.</p>}
                         {faW?.needOther && <p className="text-[10px] font-semibold text-destructive mt-1">Enter the {faOtherMetal.trim()} weight below — otherwise the rest of the piece counts as gold.</p>}
@@ -4746,7 +4825,11 @@ The piece then takes ours — add them from stock or buy them, as for any order.
                 <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5">
                   <div className="col-span-2 sm:col-span-1">
                     <Label className="text-[11px]">Metal</Label>
-                    <Select value={faOtherMetal || "__none"} onValueChange={v => setFaOtherMetal(v === "__none" ? "" : v)}>
+                    <Select value={faOtherMetal || "__none"} onValueChange={v => {
+                      // None, with more metals below: the next one moves up — never left counted but unsaved.
+                      if (v === "__none" && faMore.length) { const [next, ...rest] = faMore; setFaOtherMetal(next.metal); setFaOtherNet(next.net); setFaOtherPurity(next.purity); setFaMore(rest); return; }
+                      setFaOtherMetal(v === "__none" ? "" : v);
+                    }}>
                       <SelectTrigger className="h-9 rounded-lg mt-1"><SelectValue placeholder="None" /></SelectTrigger>
                       <SelectContent>
                         <SelectItem value="__none">None</SelectItem>
@@ -4775,8 +4858,33 @@ The piece then takes ours — add them from stock or buy them, as for any order.
                       onChange={e => setFaOtherPurity(e.target.value)} className="rounded-lg h-9 mt-1 disabled:opacity-60" placeholder="e.g. 950" />
                   </div>
                 </div>
+                {/* More metals: gold + platinum + silver, each weighed on its own. */}
+                {faMore.map((r, i) => (
+                  <div key={i} className="grid grid-cols-[1fr_1fr_1fr_auto] gap-2.5 mt-2 items-end">
+                    <div>
+                      <Label className="text-[11px]">Metal {i + 2}</Label>
+                      <Select value={r.metal || "__none"} onValueChange={v => setFaMore(rs => rs.map((x, j) => (j === i ? { ...x, metal: v === "__none" ? "" : v } : x)))}>
+                        <SelectTrigger className="h-9 rounded-lg mt-1" aria-label={`Metal ${i + 2}`}><SelectValue placeholder="Choose…" /></SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="__none">Choose…</SelectItem>
+                          {[...choicesOf("metals", r.metal === "Other" ? undefined : r.metal, undefined, { builtIn: false }), "Other"].map(m => <SelectItem key={m} value={m}>{m}</SelectItem>)}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div><Label className="text-[11px]">Net Weight (g)</Label>
+                      <Input type="number" min={0} step="0.001" value={r.net} disabled={!r.metal} aria-label={`${r.metal || "Metal"} net weight`}
+                        onChange={e => setFaMore(rs => rs.map((x, j) => (j === i ? { ...x, net: e.target.value } : x)))} className="rounded-lg h-9 mt-1 disabled:opacity-60" /></div>
+                    <div><Label className="text-[11px]">Purity (‰)</Label>
+                      <Input type="number" min={0} step="0.1" value={r.purity} disabled={!r.metal} aria-label={`${r.metal || "Metal"} purity`}
+                        onChange={e => setFaMore(rs => rs.map((x, j) => (j === i ? { ...x, purity: e.target.value } : x)))} className="rounded-lg h-9 mt-1 disabled:opacity-60" placeholder="e.g. 925" /></div>
+                    <Button type="button" variant="ghost" size="icon" className="h-9 w-9" aria-label={`Remove ${r.metal || "this metal"}`} onClick={() => setFaMore(rs => rs.filter((_, j) => j !== i))}><Trash2 className="h-4 w-4" /></Button>
+                  </div>
+                ))}
+                {faOtherMetal && (
+                  <Button type="button" variant="outline" size="sm" className="mt-2 gap-1" onClick={() => setFaMore(rs => [...rs, { metal: "", net: "", purity: "" }])}><Plus className="h-3.5 w-3.5" />Add another metal</Button>
+                )}
                 <p className="text-[11px] text-muted-foreground mt-1">
-                  Two-tone pieces only — added to the gross weight.
+                  Two-tone pieces only — added to the gross weight. More than one metal besides gold: Add another metal.
                 </p>
               </div>
 
@@ -4892,7 +5000,7 @@ The piece then takes ours — add them from stock or buy them, as for any order.
                 const netG = faEffNet;
                 const otherG = faOtherG;
                 // Weighed: the scale's figure; else the parts added up.
-                const gross = faGrossN > 0 ? Math.round(faGrossN * 1000) / 1000 : Math.round((netG + otherG + faXG.metal + faXG.stone + diaG) * 1000) / 1000;
+                const gross = faGrossN > 0 ? Math.round(faGrossN * 1000) / 1000 : Math.round((netG + otherG + faMoreRows().reduce((t, m) => t + m.w, 0) + faXG.metal + faXG.stone + diaG) * 1000) / 1000;
                 return (
                   <div className="mb-4 rounded-lg bg-secondary/60 p-3 text-xs space-y-1">
                     <div className="flex justify-between"><span className="text-muted-foreground">Issued to the factory</span><span className="font-semibold text-foreground">{usedDiaCtRaw} ct</span></div>
@@ -4905,6 +5013,7 @@ The piece then takes ours — add them from stock or buy them, as for any order.
                     )}
                     {netG > 0 && <div className="flex justify-between"><span className="text-muted-foreground">Gold net weight</span><span className="font-semibold text-foreground">{fmtG(netG)} g</span></div>}
                     {otherG > 0 && <div className="flex justify-between"><span className="text-muted-foreground">{faOtherMetal} net weight</span><span className="font-semibold text-foreground">{fmtG(otherG)} g</span></div>}
+                    {faMoreRows().filter(m => m.w > 0).map((m, i) => <div key={`${m.metal}-${i}`} className="flex justify-between"><span className="text-muted-foreground">{m.metal} net weight</span><span className="font-semibold text-foreground">{fmtG(m.w)} g</span></div>)}
                     {faXG.metal > 0 && <div className="flex justify-between"><span className="text-muted-foreground">Other metal from stock</span><span className="font-semibold text-foreground">{fmtG(faXG.metal)} g</span></div>}
                     {faXG.stone > 0 && <div className="flex justify-between"><span className="text-muted-foreground">Other stones</span><span className="font-semibold text-foreground">{fmtG(faXG.stone)} g</span></div>}
                     <div className="flex justify-between border-t border-border/50 pt-1"><span className="font-medium text-brand-dark">Gross weight (metal + diamond{faX.length ? " + other" : ""})</span><span className="font-bold text-brand-dark">{fmtG(gross)} g</span></div>
@@ -4915,7 +5024,13 @@ The piece then takes ours — add them from stock or buy them, as for any order.
               <div className="mb-4">
                 <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground mb-1.5">Labour (factory payable, ₹)</p>
                 <div className="grid grid-cols-2 gap-2.5">
-                  <div><Label className="text-[11px]">Labour / gram</Label><Input type="number" min={0} step="0.01" value={faPerGram} onChange={e => setFaPerGram(e.target.value)} className="rounded-lg h-9 mt-1" placeholder="₹ /g" /></div>
+                  <div><Label className="text-[11px]">{faLines ? "Labour / gram — gold" : "Labour / gram"}</Label><Input type="number" min={0} step="0.01" value={faPerGram} onChange={e => setFaPerGram(e.target.value)} className="rounded-lg h-9 mt-1" placeholder="₹ /g" /></div>
+                  {/* Each other metal at its own rate — the factory's for that metal, else the gold rate. */}
+                  {[...new Set([faOtherMetal.trim(), ...faMoreRows().map(m => m.metal)].filter(Boolean))].map(m => (
+                    <div key={m}><Label className="text-[11px]">Labour / gram — {m}</Label>
+                      <Input type="number" min={0} step="0.01" value={faRates[m.toLowerCase()] ?? ""} aria-label={`${m} labour per gram`}
+                        onChange={e => setFaRates(r => ({ ...r, [m.toLowerCase()]: e.target.value }))} className="rounded-lg h-9 mt-1" placeholder={faPerGram ? `₹${faPerGram} /g — as gold` : "₹ /g"} /></div>
+                  ))}
                   <div>
                     <Label className="text-[11px]">Minimum labour</Label>
                     <Input type="number" min={0} step="0.01" value={faMinLabour} onChange={e => setFaMinLabour(e.target.value)} className="rounded-lg h-9 mt-1" placeholder="₹ for a light piece" />
@@ -4946,7 +5061,7 @@ The piece then takes ours — add them from stock or buy them, as for any order.
                     which one is being charged rather than leave it unexplained. */}
                 {faMinInUse ? (
                   <p className="text-[11px] mt-1.5 text-warning">
-                    Making charged at the minimum {fmtMoneyInr(Number(faMinLabour) || 0)}{Number(faMinUnder) > 0 ? ` — the piece is ${faNetW.toFixed(3)} g, under ${Number(faMinUnder).toFixed(3)} g` : ""}, not {fmtMoneyInr((Number(faPerGram) || 0) * faNetW)} ({faNetW.toFixed(3)} g × {fmtMoneyInr(Number(faPerGram) || 0)}).
+                    Making charged at the minimum {fmtMoneyInr(Number(faMinLabour) || 0)}{Number(faMinUnder) > 0 ? ` — the piece is ${faNetW.toFixed(3)} g, under ${Number(faMinUnder).toFixed(3)} g` : ""}, not {fmtMoneyInr(byGramMaking(faLabour, faNetW))} ({faLines ? faLines.map(l => `${l.metal} ${l.grams.toFixed(3)} g × ${fmtMoneyInr(l.rate)}`).join(" + ") : `${faNetW.toFixed(3)} g × ${fmtMoneyInr(Number(faPerGram) || 0)}`}).
                   </p>
                 ) : faNetW > 0 && faNetW < 2 && !faMinLabour ? (
                   <p className="text-[11px] mt-1.5 text-muted-foreground">
@@ -4958,7 +5073,9 @@ The piece then takes ours — add them from stock or buy them, as for any order.
                 {(() => {
                   const making = makingCharge(faLabour, faNetW);
                   const rows: [string, number][] = [
-                    [faMinInUse ? `Making — minimum${faMinFlat ? " (flat)" : ""}` : `Making — ${faNetW.toFixed(3)} g × ${fmtMoneyInr(Number(faPerGram) || 0)}`, making],
+                    ...(faMinInUse ? [[`Making — minimum${faMinFlat ? " (flat)" : ""}`, making] as [string, number]]
+                      : faLines ? faLines.map(l => [`Making — ${l.metal} ${l.grams.toFixed(3)} g × ${fmtMoneyInr(l.rate)}`, Math.round(l.grams * l.rate * 100) / 100] as [string, number])
+                      : [[`Making — ${faNetW.toFixed(3)} g × ${fmtMoneyInr(Number(faPerGram) || 0)}`, making] as [string, number]]),
                     ...(faMetalG && faMetalRate ? [[`Metal by factory — ${Number(faMetalG)} g × ${fmtMoneyInr(Number(faMetalRate))}`, Math.round(Number(faMetalG) * Number(faMetalRate) * 100) / 100] as [string, number]] : []),
                     ...(faDiaHandling && usedDiaCt ? [[`Diamond handling — ${usedDiaCt} ct × ${fmtMoneyInr(Number(faDiaHandling))}`, Math.round(Number(faDiaHandling) * usedDiaCt * 100) / 100] as [string, number]] : []),
                     ...(Number(faCad) ? [["CAD charge", Number(faCad)] as [string, number]] : []),

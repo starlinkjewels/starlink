@@ -28,6 +28,7 @@ import {
 } from "./db";
 import { issuanceUsed } from "./manufacturing";
 import { finishRecordOf, isReworkIssue } from "./rework";
+import { otherMetalsOf } from "./weights";
 
 const r3 = (n: number) => Math.round(n * 1000) / 1000;
 
@@ -93,7 +94,7 @@ export function meltPlan(db: DB, o: Order): MeltPlan {
   const packetCt = r3(packets.reduce((s, p) => s + (p.carat || 0), 0));
   const plan: MeltPlan = {
     net, karat, purity, fine, factoryId: fin?.factoryId ?? o.assignedFactoryId, labourInr: Math.round(labourInr),
-    stones, packetIds, packetCt, others, otherMetal: o.otherMetal && (o.otherMetalWeight ?? 0) > 0 ? `${o.otherMetalWeight}g ${o.otherMetal}` : undefined,
+    stones, packetIds, packetCt, others, otherMetal: otherMetalsOf(o).filter(m => (m.weight ?? 0) > 0).map(m => `${m.weight}g ${m.metal}`).join(", ") || undefined,
   };
   const inv = findInvoiceForOrder(db.invoices ?? [], o.id);
   if (o.melted) plan.blocked = "This piece has already been melted.";

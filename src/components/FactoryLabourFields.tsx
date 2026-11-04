@@ -2,15 +2,17 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useDb } from "@/hooks/useDb";
 import { choicesOf } from "@/lib/optionLists";
+import { isNonGoldMetal } from "@/lib/metals";
 import type { FactoryLabour } from "@/lib/db";
 
 /** A factory's labour rates as a form holds them: every number still as typed. */
-export interface LabourDraft { minimum: string; minimumUnder?: string; perGram: Record<string, string> }
+export interface LabourDraft { minimum: string; minimumUnder?: string; perGram: Record<string, string>; perMetal?: Record<string, string> }
 
 export const labourDraftOf = (l?: FactoryLabour): LabourDraft => ({
   minimum: l?.minimum != null ? String(l.minimum) : "",
   minimumUnder: l?.minimumUnder != null ? String(l.minimumUnder) : "",
   perGram: Object.fromEntries(Object.entries(l?.perGram ?? {}).map(([k, v]) => [k, String(v)])),
+  perMetal: Object.fromEntries(Object.entries(l?.perMetal ?? {}).map(([k, v]) => [k, String(v)])),
 });
 
 /** What is saved: only the rates given; nothing at all when none is. */
@@ -19,8 +21,11 @@ export function labourOf(d: LabourDraft): FactoryLabour | undefined {
     .map(([k, v]) => [k, Math.round((Number(v) || 0) * 100) / 100] as const).filter(([, v]) => v > 0));
   const minimum = Math.round((Number(d.minimum) || 0) * 100) / 100;
   const minimumUnder = Math.round((Number(d.minimumUnder) || 0) * 1000) / 1000;
-  if (!minimum && !Object.keys(perGram).length) return undefined;
-  return { ...(minimum > 0 ? { minimum } : {}), ...(minimum > 0 && minimumUnder > 0 ? { minimumUnder } : {}), ...(Object.keys(perGram).length ? { perGram } : {}) };
+  const perMetal = Object.fromEntries(Object.entries(d.perMetal ?? {})
+    .map(([k, v]) => [k, Math.round((Number(v) || 0) * 100) / 100] as const).filter(([, v]) => v > 0));
+  if (!minimum && !Object.keys(perGram).length && !Object.keys(perMetal).length) return undefined;
+  return { ...(minimum > 0 ? { minimum } : {}), ...(minimum > 0 && minimumUnder > 0 ? { minimumUnder } : {}), ...(Object.keys(perGram).length ? { perGram } : {}),
+    ...(Object.keys(perMetal).length ? { perMetal } : {}) };
 }
 
 /**
@@ -34,6 +39,9 @@ export function FactoryLabourFields({ value, onChange, idPrefix }: { value: Labo
   const db = useDb();
   const types = choicesOf("jewelleryTypes", undefined, db.settings).filter(t => t !== "Diamond Only");
   const setRate = (t: string, v: string) => onChange({ ...value, perGram: { ...value.perGram, [t]: v } });
+  // Metals besides gold (platinum, silver, titanium …): each its own rate a gram.
+  const metals = choicesOf("metals", undefined, db.settings, { builtIn: false }).filter(m => isNonGoldMetal(m, db.settings));
+  const setMetalRate = (m: string, v: string) => onChange({ ...value, perMetal: { ...(value.perMetal ?? {}), [m]: v } });
   return (
     <div className="rounded-xl border border-border/70 p-4 space-y-3">
       <div>
@@ -72,6 +80,21 @@ export function FactoryLabourFields({ value, onChange, idPrefix }: { value: Labo
         </div>
         <p className="text-[11px] text-muted-foreground mt-1.5">Leave a type blank to enter its rate on each order (a custom piece).</p>
       </div>
+      {metals.length > 0 && (
+        <div>
+          <p className="text-xs font-medium text-foreground mb-1.5">Labour per gram, by metal (₹ / g)</p>
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5">
+            {metals.map(m => (
+              <div key={m}>
+                <Label htmlFor={`${idPrefix}-m-${m}`} className="text-[11px] text-muted-foreground">{m}</Label>
+                <Input id={`${idPrefix}-m-${m}`} type="number" min={0} step="0.01" inputMode="decimal" value={value.perMetal?.[m] ?? ""}
+                  onChange={e => setMetalRate(m, e.target.value)} className="rounded-lg h-9 mt-0.5" placeholder="as gold" aria-label={`${m} labour per gram`} />
+              </div>
+            ))}
+          </div>
+          <p className="text-[11px] text-muted-foreground mt-1.5">A piece of gold and {metals.slice(0, 2).join(" or ")} is charged each metal's grams at its own rate on Final Approval. Blank: the gold rate.</p>
+        </div>
+      )}
     </div>
   );
 }

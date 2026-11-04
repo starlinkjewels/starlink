@@ -41,6 +41,8 @@ export interface OrderDesign {
   otherMetal?: string;
   otherMetalWeight?: number;
   otherMetalPurity?: number;
+  /** Every metal besides the gold, when more than one (the first is also otherMetal above). */
+  otherMetals?: { metal: string; weight?: number; purity?: number }[];
   certificate?: boolean;
   cad3dmUrl?: string;
   productVideo?: string;
@@ -71,6 +73,8 @@ export interface Product {
   diamondShape: string | null;
   diamondPieces: number | null;
   otherMetal: { name: string; weightG: number | null; purity: number | null } | null;
+  /** Every metal besides the gold (two or more on a gold + platinum + silver piece); the first is otherMetal. */
+  otherMetals: { name: string; weightG: number | null; purity: number | null }[];
   size: string | null;
   designNumber: string | null;
   rhodium: string | null;
@@ -130,6 +134,8 @@ export function toProduct(d: StockDoc, design: OrderDesign | undefined, rules: K
     diamondShape: num(d.diamondWeight) ? str(o.diamondShape) : null,
     diamondPieces: num(d.diamondWeight) && typeof o.actualDiamondPcs === "number" && o.actualDiamondPcs > 0 ? Math.round(o.actualDiamondPcs) : null,
     otherMetal: str(o.otherMetal) ? { name: str(o.otherMetal)!, weightG: num(o.otherMetalWeight), purity: num(o.otherMetalPurity) } : null,
+    otherMetals: (Array.isArray(o.otherMetals) && o.otherMetals.length ? o.otherMetals.map(m => ({ name: str(m?.metal) ?? "", weightG: num(m?.weight), purity: num(m?.purity) }))
+      : str(o.otherMetal) ? [{ name: str(o.otherMetal)!, weightG: num(o.otherMetalWeight), purity: num(o.otherMetalPurity) }] : []).filter(m => m.name),
     size: str(o.productSize),
     designNumber: str(o.designNumber),
     rhodium: str(o.rhodium),
@@ -261,7 +267,7 @@ function date(name: string, v: string | undefined): string | undefined {
 
 export const PRODUCT_FIELDS: (keyof Product)[] = [
   "id", "sku", "name", "category", "metal", "karat", "metalColor", "grossWeightG", "netWeightG", "diamondCt", "diamondType",
-  "diamondShape", "diamondPieces", "otherMetal", "size", "designNumber", "rhodium", "stamping", "certified", "price", "currency",
+  "diamondShape", "diamondPieces", "otherMetal", "otherMetals", "size", "designNumber", "rhodium", "stamping", "certified", "price", "currency",
   "quantity", "inStock", "office", "images", "image", "video", "model3d", "createdAt", "updatedAt",
 ];
 
@@ -316,7 +322,7 @@ export function parseQuery(params: Record<string, string | undefined>, priceShow
 /** Words, as search reads them: letters and digits ("LR-534" = "lr", "534"). */
 const words = (s: string) => s.toLowerCase().split(/[^\p{L}\p{N}.]+/u).filter(Boolean);
 /** The words a piece is found by. */
-const haystack = (p: Product) => words([p.name, p.sku, p.designNumber, p.category, p.metal, p.karat, p.metalColor, p.diamondType, p.diamondShape, p.office, p.size, p.otherMetal?.name]
+const haystack = (p: Product) => words([p.name, p.sku, p.designNumber, p.category, p.metal, p.karat, p.metalColor, p.diamondType, p.diamondShape, p.office, p.size, ...p.otherMetals.map(m => m.name)]
   .filter(Boolean).join(" "));
 
 /** Does a piece pass the query — leaving out one list filter (for that filter's own counts). */
