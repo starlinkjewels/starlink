@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button";
 import { AsyncButton } from "@/components/AsyncButton";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { FactoryLabourFields, labourDraftOf, labourOf, type LabourDraft } from "@/components/FactoryLabourFields";
+import { FactoryLabourFields, labourDraftOf, labourOf, rememberItems, type LabourDraft } from "@/components/FactoryLabourFields";
 
 const FIELDS = ["name", "contactPerson", "phone", "email", "address"] as const;
 type Field = (typeof FIELDS)[number];
@@ -42,6 +42,7 @@ export function FactoryEditDialog({ factory, onClose }: { factory: Factory | nul
       }
       const rates = labourOf(labour);
       if (rates) x.labour = rates; else delete x.labour;
+      rememberItems(d, labour);
     });
     toast.success("Factory updated");
     onClose();

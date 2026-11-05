@@ -1925,8 +1925,16 @@ export interface Factory {
   labour?: FactoryLabour;
 }
 
-/** A factory's labour: ₹ a gram for each jewellery type, and the least it charges for a light piece. */
-export interface FactoryLabour { minimum?: number;
+/** One line of a factory's rate card: a metal ("Gold" = every gold), an item (unset = every item
+ *  without its own line), its ₹ a gram and its minimum (charged under so many grams). */
+export interface LabourRate { metal: string; item?: string; perGram?: number; minimum?: number; minimumUnder?: number }
+
+/** A factory's labour: ₹ a gram for each jewellery type, and the least it charges for a light piece.
+ *  Since 2026-11-05 `rates` (the rate card, lib/factoryRates.ts) — when set, the only rates read;
+ *  the fields before it are what a factory saved earlier had, read as card lines. */
+export interface FactoryLabour {
+  rates?: LabourRate[];
+  minimum?: number;
   /** The minimum is charged on a piece lighter than this (g); each factory sets its own. Unset: whenever gram × rate comes to less. */
   minimumUnder?: number;
   perGram?: Record<string, number>;

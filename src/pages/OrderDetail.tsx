@@ -26,7 +26,7 @@ import { engravingFontCss, engravingFontLabel } from "@/components/order/Engravi
 import { ClientMaterialSheet } from "@/components/ClientMaterialSheet";
 import { ClientSuppliedSheet } from "@/components/ClientSuppliedSheet";
 import { inrPerUnit } from "@/lib/currency";
-import { factoryRatesFor } from "@/components/FactoryLabourFields";
+import { GOLD_CARD, cardMetal, factoryRate, fromLabel, rateCardOf, sameName } from "@/lib/factoryRates";
 import { isNonGoldMetal, metalHasKarats, metalLabel } from "@/lib/metals";
 import { AddNewItem, useAddNew } from "@/components/create/QuickCreate";
 import { SectionTitle } from "@/components/SectionTitle";
@@ -1183,11 +1183,13 @@ function OrderDetailPageBody() {
     const from: string[] = [];
     if (!finish?.labour) {
       const fac = db.factories.find(x => x.id === (order.assignedFactoryId || issuedFactory?.id));
-      const r = factoryRatesFor(fac?.labour, order.jewelleryType);
-      if (r.perGram) setFaPerGram(String(r.perGram));
-      if (r.minimum) setFaMinLabour(String(r.minimum));
-      if (r.minimumUnder) setFaMinUnder(String(r.minimumUnder));
-      if (r.perGram || r.minimum) from.push(`Labour from ${fac!.name}'s rates${r.perGram ? ` for a ${order.jewelleryType}` : ""}`);
+      // The rate card: gold's rate for this item; the minimum of the piece's own metal (a platinum ring: Platinum · Ring).
+      const gold = factoryRate(fac?.labour, GOLD_CARD, order.jewelleryType, db.settings);
+      const main = factoryRate(fac?.labour, order.metal, order.jewelleryType, db.settings);
+      if (gold.perGram) setFaPerGram(String(gold.perGram));
+      if (main.minimum) setFaMinLabour(String(main.minimum));
+      if (main.minimum && main.minimumUnder) setFaMinUnder(String(main.minimumUnder));
+      if (gold.perGram || main.minimum) from.push(`Labour from ${fac!.name}'s rate card${gold.perGramFrom ? ` (${fromLabel(gold.perGramFrom)})` : ""}${main.minimumFrom ? `, minimum ${fromLabel(main.minimumFrom)}` : ""}`);
     }
     if (finish?.labour?.metalByFactoryRate == null) {
       const purity = finish?.finishedPurity ?? defaultPurity;
@@ -1248,8 +1250,17 @@ function OrderDetailPageBody() {
       setFaRates(Object.fromEntries(savedLines.filter(l => !isGoldLine(l) && l.rate !== goldRate).map(l => [l.metal.trim().toLowerCase(), String(l.rate)])));
     }
     else if (!finish?.labour) {
+      // Every metal besides gold with a rate of its own for this item on the card (its item line, else
+      // its all-items line); a metal with none takes the gold rate (left blank).
       const fac = db.factories.find(x => x.id === (order.assignedFactoryId || issuedFactory?.id));
-      setFaRates(Object.fromEntries(Object.entries(fac?.labour?.perMetal ?? {}).map(([k, v]) => [k.trim().toLowerCase(), String(v)])));
+      const names = [...choicesOf("metals", undefined, db.settings, { builtIn: false }), ...rateCardOf(fac?.labour).map(r => r.metal), ...rows.map(r => r.metal)]
+        .filter(m => !sameName(cardMetal(m, db.settings), GOLD_CARD));
+      const rates: Record<string, string> = {};
+      for (const m of names) {
+        const r = factoryRate(fac?.labour, m, order.jewelleryType, db.settings);
+        if (r.perGram && r.perGramFrom && !sameName(r.perGramFrom.metal, GOLD_CARD)) rates[m.trim().toLowerCase()] = String(r.perGram);
+      }
+      setFaRates(rates);
     } else setFaRates({});
     setFaOrderValue(order.amount ? String(order.amount) : "");
     setFaShipping(order.shippingCharge ? String(order.shippingCharge) : "");
