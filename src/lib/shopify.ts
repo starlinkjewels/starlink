@@ -93,7 +93,7 @@ export const DEFAULT_RULES: Required<Omit<StoreRules, "pricePct" | "defaultType"
     { word: "yellow", metal: "Yellow Gold" }, { word: "platinum", metal: "Platinum" }, { word: "silver", metal: "Silver" },
     { word: "titanium", metal: "Titanium" }, { word: "gold", metal: "Yellow Gold" },
   ],
-  stageTags: true, tagPrefix: "Starlink", notifyCustomer: true,
+  stageTags: true, tagPrefix: "Stage", notifyCustomer: true,
 };
 export const rulesOf = (r?: StoreRules) => ({ ...DEFAULT_RULES, ...(r ?? {}) });
 

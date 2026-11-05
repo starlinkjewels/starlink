@@ -76,7 +76,7 @@ function cleanRules(r: unknown): StoreRules {
     typeRules: pairs(x.typeRules, "type"), metalRules: pairs(x.metalRules, "metal"),
     defaultType: typeof x.defaultType === "string" ? x.defaultType.slice(0, 60) : undefined,
     defaultMetal: typeof x.defaultMetal === "string" ? x.defaultMetal.slice(0, 60) : undefined,
-    stageTags: x.stageTags !== false, tagPrefix: typeof x.tagPrefix === "string" && x.tagPrefix.trim() ? x.tagPrefix.trim().slice(0, 30) : "Starlink",
+    stageTags: x.stageTags !== false, tagPrefix: typeof x.tagPrefix === "string" && x.tagPrefix.trim() ? x.tagPrefix.trim().slice(0, 30) : "Stage",
     notifyCustomer: x.notifyCustomer !== false,
   };
   return Object.fromEntries(Object.entries(out).filter(([, v]) => v !== undefined)) as StoreRules;
