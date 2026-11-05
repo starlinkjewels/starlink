@@ -266,9 +266,15 @@ export function gramsFor(metal: Record<string, number>, k: MetalKey, rules: Pick
   return { g: Math.round((metal[pick] * rules.density[k] / rules.density[pick]) * 1000) / 1000, from: "worked out" };
 }
 
-export function priceDesign(specs: Partial<Pick<Specs, "metal" | "stones" | "ringSize">>, choice: Choice, rules: PriceRules, rates: { karat: KaratRate[]; usdInr: number } | null): Priced {
+export function priceDesign(specs: Partial<Pick<Specs, "metal" | "stones" | "ringSize" | "stoneTotals" | "reasons">> & { status?: string; checkedBy?: unknown }, choice: Choice, rules: PriceRules, rates: { karat: KaratRate[]; usdInr: number } | null): Priced {
   const ccy = choice.ccy;
   const missing: string[] = [];
+  // Never a price without all the stones: the sheet's own stone total more than the rows read, or its stones
+  // waiting for a person's check — "Price on request" until they are read (or checked).
+  const readCt = (specs.stones ?? []).reduce((t, r) => t + (r.total || 0), 0), readPcs = (specs.stones ?? []).reduce((t, r) => t + (r.pcs || 0), 0);
+  const listed = specs.stoneTotals;
+  if (listed && ((listed.ct || 0) > readCt + Math.max(0.011, readCt * 0.02) || (listed.pcs || 0) > readPcs)) missing.push(`all the stones (the sheet lists ${listed.pcs} pcs, ${listed.ct} ct; ${readPcs} pcs, ${Math.round(readCt * 1000) / 1000} ct read)`);
+  if (specs.status === "review" && !specs.checkedBy && (specs.reasons ?? []).some(r => /stone/i.test(r))) missing.push("the stones checked (Catalog → Please check)");
   const lines: Line[] = [];
   const fx = rates?.usdInr ?? 0;
   /** Any amount in the price's currency. */
