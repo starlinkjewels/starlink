@@ -21,7 +21,7 @@ import type { FactoryPayment, MaterialIssuance, Order } from "./db";
 import { diamondFlow, factoryAccount, factoryFineGoldBalance, factoryOtherBalances, otherFlow } from "./pure/accounts";
 import { openingCreditAmt, openingDebitAmt, pureFromPurity, toPureGold } from "./pure/basics";
 import type { OpeningBalanceInfo } from "./db";
-import { groupPaymentsAsMade } from "./manufacturing";
+import { groupPaymentsAsMade, labourLineText, factoryMetalLines } from "./manufacturing";
 import { isReworkIssue } from "./rework";
 import { otherMetalsOf } from "./weights";
 
@@ -175,7 +175,11 @@ export function buildFactoryStatement(inp: StatementInput): { lines: StatementLi
       acc.items.push(`${o.orderNumber}${o.jewelleryType ? ` ${o.jewelleryType}` : ""}${metals.length ? ` (${metals.join(", ")})` : ""}`);
     }
     // Made by metal (Final Approval): each metal's grams at its rate, so the factory's bill can be checked.
-    if (mi.labour?.lines?.length) (acc.making ??= []).push(mi.labour.lines.map(l => `${l.metal} ${(l.grams || 0).toFixed(3)} g × ₹${(l.rate || 0).toLocaleString("en-IN")}`).join(" + "));
+    // Each metal at its own minimum where that applied (minimumByMetal), said on its line.
+    if (mi.labour?.lines?.length) (acc.making ??= []).push(mi.labour.lines.map(l => mi.labour!.minimumByMetal ? labourLineText(l) : `${l.metal} ${(l.grams || 0).toFixed(3)} g × ₹${(l.rate || 0).toLocaleString("en-IN")}`).join(" + "));
+    // Metal the factory supplied itself, each at its own rate.
+    const facMetal = factoryMetalLines(mi.labour);
+    if (facMetal.length) (acc.making ??= []).push(facMetal.map(m => `${m.metal} by factory ${m.grams.toFixed(3)} g × ₹${m.rate.toLocaleString("en-IN")}`).join(" + "));
     acc.goldOut += fine; acc.diaUsed += used; acc.diaRet += ret; acc.billed += charge;
     if (oUsed) acc.oUsed[mi.material] = r3((acc.oUsed[mi.material] || 0) + oUsed);
     if (oRet) acc.oRet[mi.material] = r3((acc.oRet[mi.material] || 0) + oRet);

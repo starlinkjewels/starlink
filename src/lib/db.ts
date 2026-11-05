@@ -2098,12 +2098,24 @@ export interface MaterialIssuance {
     diamondHandlingRate?: number;
     cadCharge?: number;
     otherCharges?: number;
-    metalByFactoryGrams?: number; // metal the factory supplied itself
+    metalByFactoryGrams?: number; // metal the factory supplied itself (one metal — pieces before metalByFactory)
     metalByFactoryRate?: number;  // ₹ per gram for that metal
+    /** Each metal the factory supplied itself, at its own rate (Gold 18K 0.5 g × ₹7,000 + Platinum 1 g × ₹3,200).
+     *  Set: these, and the two fields above are not used. */
+    metalByFactory?: { metal: string; grams: number; rate: number }[];
     /** The making by metal — each metal's grams at its own rate (gold ₹1,000/g, titanium ₹400/g).
-     *  Set: the making is these added up, the minimum applying to the sum; unset (every
-     *  piece before it, and a gold-only piece): perGramRate × the piece's net weight. */
-    lines?: { metal: string; grams: number; rate: number; /** The gold's own line (gold, and metal issued from stock). */ gold?: boolean }[];
+     *  Set: the making is these added up; unset (every piece before it, and a gold-only
+     *  piece): perGramRate × the piece's net weight. With minimumByMetal each line has its
+     *  own minimum (one line a metal); without it (pieces before 2026-11-05) the piece's
+     *  minimumLabour applies to the sum. */
+    lines?: {
+      metal: string; grams: number; rate: number;
+      /** The gold's own line (gold, and metal issued from stock). */ gold?: boolean;
+      /** This metal's minimum making (₹), its weight band (g) and whether it is charged flat — as the piece-level fields. */
+      minimum?: number; minimumUnder?: number; flat?: boolean;
+    }[];
+    /** Each metal's minimum on its own line (lines[].minimum), the making = the lines' makings added up. */
+    minimumByMetal?: boolean;
   };
 }
 

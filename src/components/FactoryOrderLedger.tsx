@@ -2,7 +2,7 @@ import { useMemo, useState, type ReactNode } from "react";
 import { metalLabel } from "@/lib/metals";
 import { Link } from "react-router-dom";
 import { fmtDate, toPureGold, pureFromPurity, type MaterialIssuance, type Order, type Factory, type Settings } from "@/lib/db";
-import { fmtMoneyInr, diamondFlow, otherFlow, minimumLabourApplies } from "@/lib/manufacturing";
+import { fmtMoneyInr, diamondFlow, otherFlow, minimumLabourApplies, lineAtMinimum, lineMaking, labourLineText, factoryMetalLines } from "@/lib/manufacturing";
 import { isOtherMaterial, materialName, materialUnit } from "@/lib/materials";
 import { Download, Coins, Gem, Hammer } from "lucide-react";
 import { type TableFilter, StatStrip } from "@/components/TableToolbar";
@@ -61,7 +61,10 @@ export interface FactoryOrderRow {
   otherShort?: string;
   labourShort?: string;
   /** The making's lines by metal, for a table of their own (the PDF's "Making by metal"). */
-  labourLines?: { metal: string; grams: number; rate: number }[];
+  /** Each metal's making: grams × rate, or its own minimum (atMinimum). */
+  labourLines?: { metal: string; grams: number; rate: number; making: number; atMinimum?: boolean }[];
+  /** Metal the factory supplied itself, each at its own rate (on its bill with the labour). */
+  facMetals?: { metal: string; grams: number; rate: number }[];
   labour: number;    // making charges billed
   paid: number;      // paid against those charges
   open: number;      // issuances still open
@@ -267,12 +270,25 @@ export function buildFactoryOrderRows(
     row.labour += mi.makingCharges?.amountInr || 0;
     // Each metal at its own rate (Final Approval): said, so the factory's bill can be checked line by line.
     if (mi.labour?.lines?.length) {
-      const note = mi.labour.lines.map(l => `${l.metal} ${(l.grams || 0).toFixed(3)} g × ₹${(l.rate || 0).toLocaleString("en-IN")}`).join(" + ")
-        + (minimumLabourApplies(mi.labour, mi.labour.lines.reduce((t, l) => t + (l.grams || 0), 0)) ? ` (minimum ₹${(mi.labour.minimumLabour || 0).toLocaleString("en-IN")} charged)` : "");
+      // Each metal's own minimum (minimumByMetal) is said on its line; before that, one minimum on the piece.
+      const byMetal = !!mi.labour.minimumByMetal;
+      const note = byMetal ? mi.labour.lines.map(labourLineText).join(" + ")
+        : mi.labour.lines.map(l => `${l.metal} ${(l.grams || 0).toFixed(3)} g × ₹${(l.rate || 0).toLocaleString("en-IN")}`).join(" + ")
+          + (minimumLabourApplies(mi.labour, mi.labour.lines.reduce((t, l) => t + (l.grams || 0), 0)) ? ` (minimum ₹${(mi.labour.minimumLabour || 0).toLocaleString("en-IN")} charged)` : "");
       row.labourNote = row.labourNote ? `${row.labourNote}; ${note}` : note;
-      const short = mi.labour.lines.map(l => `${metalSymbol(l.metal)} ${+(l.grams || 0).toFixed(3)}×${l.rate || 0}`).join(" + ");
+      const short = mi.labour.lines.map(l => `${metalSymbol(l.metal)} ${+(l.grams || 0).toFixed(3)}×${l.rate || 0}${byMetal && lineAtMinimum(l) ? ` min ${l.minimum}` : ""}`).join(" + ");
       row.labourShort = row.labourShort ? `${row.labourShort}; ${short}` : short;
-      row.labourLines = [...(row.labourLines ?? []), ...mi.labour.lines];
+      row.labourLines = [...(row.labourLines ?? []), ...mi.labour.lines.map(l => {
+        const atMin = byMetal && lineAtMinimum(l);
+        return { metal: l.metal, grams: l.grams, rate: l.rate, making: atMin ? lineMaking(l) : (l.grams || 0) * (l.rate || 0), atMinimum: atMin };
+      })];
+    }
+    // Metal the factory supplied itself, each at its own rate — on its bill, so said beside the labour.
+    const facMetal = factoryMetalLines(mi.labour);
+    if (facMetal.length) {
+      const note = facMetal.map(m => `${m.metal} by factory ${m.grams.toFixed(3)} g × ₹${m.rate.toLocaleString("en-IN")}`).join(" + ");
+      row.labourNote = row.labourNote ? `${row.labourNote}; ${note}` : note;
+      row.facMetals = [...(row.facMetals ?? []), ...facMetal];
     }
     row.paid += (mi.makingCharges?.payments || []).reduce((s, p) => s + p.amountInr, 0);
   }

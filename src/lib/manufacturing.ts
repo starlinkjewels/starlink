@@ -230,8 +230,15 @@ export function labourValue(labour: NonNullable<MaterialIssuance["labour"]> | un
     (labour.diamondHandlingRate || 0) * (diamondCt || 0) +
     (labour.cadCharge || 0) +
     (labour.otherCharges || 0) +
-    (labour.metalByFactoryGrams || 0) * (labour.metalByFactoryRate || 0);
+    factoryMetalLines(labour).reduce((t, m) => t + m.grams * m.rate, 0);
   return Math.round(v * 100) / 100;
+}
+
+/** The metal the factory supplied itself, metal by metal — the list, else (pieces before it) the one metal. */
+export function factoryMetalLines(labour: NonNullable<MaterialIssuance["labour"]> | undefined): { metal: string; grams: number; rate: number }[] {
+  if (!labour) return [];
+  if (labour.metalByFactory?.length) return labour.metalByFactory.map(m => ({ metal: m.metal, grams: m.grams || 0, rate: m.rate || 0 }));
+  return (labour.metalByFactoryGrams || 0) > 0 ? [{ metal: "Metal", grams: labour.metalByFactoryGrams || 0, rate: labour.metalByFactoryRate || 0 }] : [];
 }
 
 /**
@@ -242,6 +249,8 @@ export function labourValue(labour: NonNullable<MaterialIssuance["labour"]> | un
  */
 export function makingCharge(labour: NonNullable<MaterialIssuance["labour"]> | undefined, netWeight: number): number {
   if (!labour) return 0;
+  // Each metal on its own: its grams × its rate, or its own minimum — added up.
+  if (labour.minimumByMetal) return Math.round((labour.lines ?? []).reduce((t, l) => t + lineMaking(l), 0) * 100) / 100;
   const perGram = byGramMaking(labour, netWeight);
   return Math.round((minimumLabourApplies(labour, netWeight) ? labour.minimumLabour || 0 : perGram) * 100) / 100;
 }
@@ -259,6 +268,7 @@ export function byGramMaking(labour: NonNullable<MaterialIssuance["labour"]>, ne
 /** True when the minimum is what is actually being charged, so the screen can
  *  say so instead of showing a total that does not match the rate times weight. */
 export function minimumLabourApplies(labour: NonNullable<MaterialIssuance["labour"]> | undefined, netWeight: number): boolean {
+  if (labour?.minimumByMetal) return (labour.lines ?? []).some(lineAtMinimum);
   if (!labour?.minimumLabour) return false;
   // Charged as a flat amount for this piece: the minimum, never gram × rate.
   if (labour.minimumFlat) return true;
@@ -269,6 +279,30 @@ export function minimumLabourApplies(labour: NonNullable<MaterialIssuance["labou
   const hasRate = labour.lines?.length ? labour.lines.some(l => (l.rate || 0) > 0) : (labour.perGramRate || 0) > 0;
   if (band > 0 && (netWeight || 0) >= band && hasRate) return false;
   return labour.minimumLabour > byGramMaking(labour, netWeight);
+}
+
+type LabourLine = NonNullable<NonNullable<MaterialIssuance["labour"]>["lines"]>[number];
+
+/** One metal charged at its own minimum (minimumByMetal): flat whatever it weighs, or under its
+ *  weight band when gram × rate comes to less — the piece-level rule, metal by metal. */
+export function lineAtMinimum(l: LabourLine): boolean {
+  const min = l.minimum || 0, grams = l.grams || 0, rate = l.rate || 0;
+  if (!(min > 0) || !(grams > 0)) return false;
+  if (l.flat) return true;
+  const band = l.minimumUnder || 0;
+  if (band > 0 && grams >= band && rate > 0) return false;
+  return min > grams * rate;
+}
+
+/** One metal's making: its minimum when that applies, else its grams × its rate. */
+export function lineMaking(l: LabourLine): number {
+  return lineAtMinimum(l) ? l.minimum || 0 : (l.grams || 0) * (l.rate || 0);
+}
+
+/** A line as the factory's bill reads it: "Titanium 2.100 g × ₹400" and, when charged so, "— minimum ₹1,500". */
+export function labourLineText(l: LabourLine): string {
+  const base = `${l.metal} ${(l.grams || 0).toFixed(3)} g × ₹${(l.rate || 0).toLocaleString("en-IN")}`;
+  return lineAtMinimum(l) ? `${base} — minimum ₹${(l.minimum || 0).toLocaleString("en-IN")}${l.flat ? " (flat)" : ""}` : base;
 }
 
 

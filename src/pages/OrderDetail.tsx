@@ -96,7 +96,7 @@ import { BandDialog } from "@/components/BandDialog";
 import { AsyncButton } from "@/components/AsyncButton";
 import {
   fmtMoneyInr, manufacturingReadiness,
-  factoryPoolBalance, estimatedPureGoldNeeded, orderMaterialRequirements, issuanceUsed, labourValue, minimumLabourApplies, makingCharge, byGramMaking, factoryFineGoldBalance,
+  factoryPoolBalance, estimatedPureGoldNeeded, orderMaterialRequirements, issuanceUsed, labourValue, minimumLabourApplies, makingCharge, byGramMaking, lineAtMinimum, lineMaking, factoryMetalLines, factoryFineGoldBalance,
   deriveStockBalances,
 } from "@/lib/manufacturing";
 import { decreaseStockSelfHealing, increaseStock, transferStock } from "@/lib/stock";
@@ -814,12 +814,21 @@ function OrderDetailPageBody() {
   // Labour per gram for each metal besides gold, by name (lower case) — the factory's
   // rate for that metal at first; blank: the gold rate.
   const [faRates, setFaRates] = useState<Record<string, string>>({});
+  // Each metal besides gold's own minimum, by name (lower case): the amount, the weight it applies
+  // under, and whether it is charged flat — gold's are faMinLabour / faMinUnder / faMinFlat.
+  const [faMins, setFaMins] = useState<Record<string, { min: string; under: string; flat: boolean }>>({});
+  // Approved before minimums by metal (one minimum over the whole piece): its labour as saved, said when reopened.
+  const [faOldPieceMin, setFaOldPieceMin] = useState<number | null>(null);
+  // A platinum or titanium piece: its gold box only once it has gold (or "Gold in this piece" is pressed).
+  const [faAddGold, setFaAddGold] = useState(false);
   const [faPerGram, setFaPerGram] = useState("");
   const [faCad, setFaCad] = useState("");
   const [faDiaHandling, setFaDiaHandling] = useState("");
   const [faOther, setFaOther] = useState("");
-  const [faMetalG, setFaMetalG] = useState("");
-  const [faMetalRate, setFaMetalRate] = useState("");
+  // Metal the factory supplied itself, metal by metal — each its grams and ₹ a gram.
+  const [faFacMetals, setFaFacMetals] = useState<{ metal: string; grams: string; rate: string }[]>([]);
+  // The gold in stock's rate at the piece's purity — a gold row's rate to start from.
+  const [faGoldMetalRate, setFaGoldMetalRate] = useState("");
   // Where the labour and metal rate were filled in from, said under them (first approval only).
   const [faFilledFrom, setFaFilledFrom] = useState<string[]>([]);
   const [faOrderValue, setFaOrderValue] = useState("");
@@ -921,8 +930,11 @@ function OrderDetailPageBody() {
       diamondHandlingRate: rcvDiaHandling ? Number(rcvDiaHandling) : undefined,
       cadCharge: rcvCad ? Number(rcvCad) : undefined,
       otherCharges: rcvOther ? Number(rcvOther) : undefined,
-      metalByFactoryGrams: rcvMetalG ? Number(rcvMetalG) : undefined,
-      metalByFactoryRate: rcvMetalRate ? Number(rcvMetalRate) : undefined,
+      // Metals the factory supplied, as Final Approval listed them — kept; else the one metal typed here.
+      ...(issuance.labour?.metalByFactory?.length ? { metalByFactory: issuance.labour.metalByFactory } : {
+        metalByFactoryGrams: rcvMetalG ? Number(rcvMetalG) : undefined,
+        metalByFactoryRate: rcvMetalRate ? Number(rcvMetalRate) : undefined,
+      }),
       // Made by metal at Final Approval (gold at one rate, titanium at another): kept, the gold at the rate given here.
       ...(issuance.labour?.lines?.length ? { lines: issuance.labour.lines.map(l => {
         if (!(l.gold ?? /^gold( and metal from stock)?$/i.test(l.metal.trim()))) return l;
@@ -930,6 +942,8 @@ function OrderDetailPageBody() {
         const stockPart = Math.max(0, (l.grams || 0) - (issuance.finishedNetWeight || 0));
         return { ...l, ...(rcvPerGram ? { rate: Number(rcvPerGram) } : {}), ...(hasNet ? { grams: Math.round((netW + stockPart) * 1000) / 1000 } : {}) };
       }) } : {}),
+      // Each metal's own minimum, kept on its line as Final Approval set it.
+      ...(issuance.labour?.lines?.length && issuance.labour.minimumByMetal ? { minimumByMetal: true } : {}),
     };
     const diamondCt = order.actualDiamondWeight || order.diamondWeight || 0;
     const otherNet = order.otherMetal ? (order.otherMetalWeight || 0) + moreMetalsGrams(order) : 0;
@@ -1180,6 +1194,17 @@ function OrderDetailPageBody() {
    * The making by metal, when the piece has a metal besides gold: each metal's
    * grams at its own rate. Gold-only pieces: none — gram × rate on the net, as always.
    */
+  /** A metal's minimum as typed: gold's (A1 · A2 · flat) or the metal's own row. */
+  const faMinOf = (metal: string | null) => metal == null
+    ? { min: faMinLabour, under: faMinUnder, flat: faMinFlat }
+    : faMins[metal.trim().toLowerCase()] ?? { min: "", under: "", flat: false };
+  /** Every metal named for the piece besides gold (other metal, the metals after it, metal from stock) — once each, as named. */
+  const faMetalNames = () => {
+    const out: string[] = [];
+    for (const m of [faOtherMetal.trim(), ...faMoreRows().map(r => r.metal), ...faXMetals().filter(x => !x.gold).map(x => x.metal)])
+      if (m && !out.some(o => o.toLowerCase() === m.toLowerCase())) out.push(m);
+    return out;
+  };
   const faLabourLines = (goldG: number, firstOtherG: number) => {
     const first = faOtherMetal.trim(), more = faMoreRows();
     // Metal issued from stock: gold (findings, a karat gold) on the gold line; platinum, palladium … each its own.
@@ -1187,13 +1212,50 @@ function OrderDetailPageBody() {
     const stockGold = stock.filter(x => x.gold).reduce((t, x) => t + x.grams, 0);
     const stockOwn = stock.filter(x => !x.gold);
     if (!first && !more.length && !stockOwn.length) return undefined;
-    const lines = [
-      { metal: stockGold > 0 ? "Gold and metal from stock" : "Gold", grams: goldG + stockGold, rate: Number(faPerGram) || 0, gold: true },
-      ...(first ? [{ metal: first, grams: firstOtherG, rate: faRateOf(first) }] : []),
-      ...more.map(m => ({ metal: m.metal, grams: m.w, rate: faRateOf(m.metal) })),
-      ...stockOwn.map(x => ({ metal: `${x.metal} from stock`, grams: x.grams, rate: faRateOf(x.metal) })),
-    ].filter(l => l.grams > 0).map(l => ({ ...l, grams: Math.round(l.grams * 1000) / 1000 }));
-    return lines.length ? lines : undefined;
+    // One line a metal — a metal typed and also from stock is one metal, its minimum charged once.
+    const by = new Map<string, { metal: string; grams: number; rate: number; gold?: boolean; typed: boolean }>();
+    const add = (key: string, metal: string, grams: number, rate: number, typed: boolean, gold?: boolean) => {
+      const cur = by.get(key);
+      if (cur) { cur.grams += grams; if (typed && !cur.typed) { cur.metal = metal; cur.typed = true; } }
+      else by.set(key, { metal, grams, rate, typed, ...(gold ? { gold } : {}) });
+    };
+    add("__gold", stockGold > 0 ? "Gold and metal from stock" : "Gold", goldG + stockGold, Number(faPerGram) || 0, true, true);
+    if (first) add(first.toLowerCase(), first, firstOtherG, faRateOf(first), true);
+    for (const m of more) add(m.metal.toLowerCase(), m.metal, m.w, faRateOf(m.metal), true);
+    for (const x of stockOwn) add(x.metal.trim().toLowerCase(), `${x.metal} from stock`, x.grams, faRateOf(x.metal), false);
+    const r3 = (n: number) => Math.round(n * 1000) / 1000;
+    return [...by.values()].filter(l => l.grams > 0).map(({ typed: _t, ...l }) => {
+      // Its own minimum: the amount, the weight band it applies under, flat — each metal on its own.
+      const m = faMinOf(l.gold ? null : l.metal), min = Number(m.min) || 0;
+      return {
+        ...l, grams: r3(l.grams),
+        ...(min > 0 ? { minimum: min, ...(Number(m.under) > 0 ? { minimumUnder: r3(Number(m.under)) } : {}), ...(m.flat ? { flat: true } : {}) } : {}),
+      };
+    });
+  };
+  /**
+   * The labour as saved — one rule for the screen and the save. A piece with a metal besides gold:
+   * each metal its own line, its own rate and its own minimum, the making = the lines added up.
+   * A gold-only piece: one rate on its weight, one minimum, as always.
+   */
+  const faLabourOf = (goldG: number, firstOtherG: number): NonNullable<MaterialIssuance["labour"]> => {
+    const base = {
+      perGramRate: faPerGram ? Number(faPerGram) : undefined,
+      diamondHandlingRate: faDiaHandling ? Number(faDiaHandling) : undefined,
+      cadCharge: faCad ? Number(faCad) : undefined,
+      otherCharges: faOther ? Number(faOther) : undefined,
+    };
+    // Each metal the factory supplied, with grams (a row with none is not charged).
+    const facMetals = faFacMetals.map(m => ({ metal: m.metal.trim() || "Metal", grams: Math.round((Number(m.grams) || 0) * 1000) / 1000, rate: Number(m.rate) || 0 })).filter(m => m.grams > 0);
+    if (facMetals.length) Object.assign(base, { metalByFactory: facMetals });
+    const lines = faLabourLines(goldG, firstOtherG);
+    if (lines) return { ...base, minimumByMetal: true, ...(lines.length ? { lines } : {}) };
+    return {
+      ...base,
+      minimumLabour: faMinLabour ? Number(faMinLabour) : undefined,
+      minimumUnderGrams: faMinLabour && Number(faMinUnder) > 0 ? Math.round(Number(faMinUnder) * 1000) / 1000 : undefined,
+      ...(faMinFlat && faMinLabour ? { minimumFlat: true } : {}),
+    };
   };
 
   const faWeigh = (usedDiaCt: number, xG: { metal: number; stone: number }) => {
@@ -1249,8 +1311,6 @@ function OrderDetailPageBody() {
     setFaCad(finish?.labour?.cadCharge != null ? String(finish.labour.cadCharge) : "");
     setFaDiaHandling(finish?.labour?.diamondHandlingRate != null ? String(finish.labour.diamondHandlingRate) : "");
     setFaOther(finish?.labour?.otherCharges != null ? String(finish.labour.otherCharges) : "");
-    setFaMetalG(finish?.labour?.metalByFactoryGrams != null ? String(finish.labour.metalByFactoryGrams) : "");
-    setFaMetalRate(finish?.labour?.metalByFactoryRate != null ? String(finish.labour.metalByFactoryRate) : "");
     // The first approval starts from the factory's own rates for this kind of piece
     // (Factory → Labour rates), and the metal rate from the gold in stock — each
     // still changeable here. A re-edit keeps what was saved.
@@ -1261,17 +1321,27 @@ function OrderDetailPageBody() {
       const gold = factoryRate(fac?.labour, GOLD_CARD, order.jewelleryType, db.settings);
       const main = factoryRate(fac?.labour, order.metal, order.jewelleryType, db.settings);
       if (gold.perGram) setFaPerGram(String(gold.perGram));
-      if (main.minimum) setFaMinLabour(String(main.minimum));
-      if (main.minimum && main.minimumUnder) setFaMinUnder(String(main.minimumUnder));
-      if (gold.perGram || main.minimum) from.push(`Labour from ${fac!.name}'s rate card${gold.perGramFrom ? ` (${fromLabel(gold.perGramFrom)})` : ""}${main.minimumFrom ? `, minimum ${fromLabel(main.minimumFrom)}` : ""}`);
+      // Gold's own minimum on the gold (a platinum or titanium piece's minimum goes on its own metal's row, below).
+      const goldMin = isNonGoldMetal(order.metal) ? gold : main;
+      if (goldMin.minimum) setFaMinLabour(String(goldMin.minimum));
+      if (goldMin.minimum && goldMin.minimumUnder) setFaMinUnder(String(goldMin.minimumUnder));
+      if (gold.perGram || main.minimum || goldMin.minimum) from.push(`Labour from ${fac!.name}'s rate card${gold.perGramFrom ? ` (${fromLabel(gold.perGramFrom)})` : ""}${main.minimumFrom ? `, minimum ${fromLabel(main.minimumFrom)}` : ""}`);
     }
-    if (finish?.labour?.metalByFactoryRate == null) {
-      const purity = finish?.finishedPurity ?? defaultPurity;
-      const fg = purity ? stockFineGoldRate(db, new Date().toISOString(), workCompanyOf(db, order)) : null;
-      if (fg && purity) {
-        setFaMetalRate(String(Math.round(fg.rate * purity / 10) / 100));
-        from.push(`Metal rate: gold in stock at ₹${fg.rate.toLocaleString("en-IN")}/g fine × ${purity}`);
-      }
+    // Metal the factory supplied itself: as saved (a piece before the list: its one metal, named as the piece's);
+    // else a row for the piece's own metal — a gold one at the gold in stock's rate at its purity.
+    const purityNow = finish?.finishedPurity ?? defaultPurity;
+    const fg = purityNow ? stockFineGoldRate(db, new Date().toISOString(), workCompanyOf(db, order)) : null;
+    const goldMetalRate = fg && purityNow ? String(Math.round(fg.rate * purityNow / 10) / 100) : "";
+    setFaGoldMetalRate(goldMetalRate);
+    const ownMetal = !order.metal || /^none/i.test(order.metal) ? "Gold" : order.metal;
+    const savedFac = finish?.labour?.metalByFactory;
+    if (savedFac?.length) setFaFacMetals(savedFac.map(m => ({ metal: m.metal, grams: String(m.grams), rate: String(m.rate) })));
+    else if (finish?.labour?.metalByFactoryGrams != null)
+      setFaFacMetals([{ metal: ownMetal, grams: String(finish.labour.metalByFactoryGrams), rate: finish.labour.metalByFactoryRate != null ? String(finish.labour.metalByFactoryRate) : "" }]);
+    else {
+      const goldPiece = !isNonGoldMetal(ownMetal);
+      setFaFacMetals([{ metal: ownMetal, grams: "", rate: goldPiece ? goldMetalRate : "" }]);
+      if (goldPiece && goldMetalRate && fg) from.push(`Metal rate: gold in stock at ₹${fg.rate.toLocaleString("en-IN")}/g fine × ${purityNow}`);
     }
     setFaFilledFrom(from);
     const dias = db.materialIssuances.filter(i => i.orderId === order.id && i.material === "diamond");
@@ -1310,6 +1380,13 @@ function OrderDetailPageBody() {
     const goldOthers = selfFirst ? others.filter(m => metalHasKarats(m.metal, db.settings)) : [];
     const goldBesideW = goldOthers.reduce((t, m) => t + (m.weight || 0), 0);
     if (goldBesideW > 0 && finish?.finishedNetWeight == null) setFaGoldNet(String(Math.round(goldBesideW * 1000) / 1000));
+    // Gold shown on a platinum or titanium piece only when it has some: saved, or set on the order beside its metal.
+    // A piece with gold anywhere on its order opens with its gold fields: gold set on the order beside its metal,
+    // gold issued to the factory for it, the client's own gold, or gold the order needs.
+    setFaAddGold((finish?.finishedNetWeight ?? 0) > 0 || goldBesideW > 0
+      || others.some(m => metalHasKarats(m.metal, db.settings))
+      || db.materialIssuances.some(i => i.orderId === order.id && i.material === "gold" && i.id !== finish?.id && !isReworkIssue(i) && (i.quantityIssued || 0) > 0)
+      || !!order.clientSupplied?.gold || needsGold);
     // Its purity as the order gave it — never left for the save to guess.
     const goldPurity = goldOthers.find(m => (m.purity || 0) > 0)?.purity;
     if (goldBesideW > 0 && finish?.finishedPurity == null && goldPurity) setFaGoldPurity(String(goldPurity));
@@ -1320,15 +1397,31 @@ function OrderDetailPageBody() {
     setFaMore(rows.slice(1).map(m => ({ metal: m.metal, net: "weight" in m && m.weight != null ? String(m.weight) : "", purity: "purity" in m && m.purity != null ? String(m.purity) : "" })));
     // Each metal's labour rate: as saved; at the first approval, the factory's rate for that metal.
     const savedLines = finish?.labour?.lines;
+    // A line's metal by name (lower case) — "Palladium from stock" is palladium's rate and minimum.
+    const lineKey = (metal: string) => metal.trim().replace(/\s+from stock$/i, "").toLowerCase();
+    const mins: Record<string, { min: string; under: string; flat: boolean }> = {};
+    setFaOldPieceMin(savedLines?.length && !finish?.labour?.minimumByMetal && finish?.labour?.minimumLabour ? finish.makingCharges?.amountInr ?? 0 : null);
     if (savedLines?.length) {
       const goldRate = finish?.labour?.perGramRate ?? 0;
       const isGoldLine = (l: { metal: string; gold?: boolean }) => l.gold ?? /^gold( and metal from stock)?$/i.test(l.metal.trim());
       // A metal saved at the gold rate was left blank (it follows the gold rate): blank again.
-      setFaRates(Object.fromEntries(savedLines.filter(l => !isGoldLine(l) && l.rate !== goldRate).map(l => [l.metal.trim().toLowerCase(), String(l.rate)])));
+      setFaRates(Object.fromEntries(savedLines.filter(l => !isGoldLine(l) && l.rate !== goldRate).map(l => [lineKey(l.metal), String(l.rate)])));
+      if (finish?.labour?.minimumByMetal) {
+        // Each metal's minimum as saved on its line — gold's in its own fields.
+        const asTyped = (l: (typeof savedLines)[number]) => ({ min: l.minimum ? String(l.minimum) : "", under: l.minimumUnder ? String(l.minimumUnder) : "", flat: !!l.flat });
+        const g = savedLines.find(isGoldLine), gm = g ? asTyped(g) : { min: "", under: "", flat: false };
+        setFaMinLabour(gm.min); setFaMinUnder(gm.under); setFaMinFlat(gm.flat);
+        for (const l of savedLines) if (!isGoldLine(l)) mins[lineKey(l.metal)] = asTyped(l);
+      } else if (finish?.labour?.minimumLabour && isNonGoldMetal(order.metal)) {
+        // Approved before minimums by metal: the piece's one minimum belongs to its own metal (a titanium ring's to titanium).
+        mins[lineKey(order.metal)] = { min: String(finish.labour.minimumLabour), under: finish.labour.minimumUnderGrams ? String(finish.labour.minimumUnderGrams) : "", flat: !!finish.labour.minimumFlat };
+        setFaMinLabour(""); setFaMinUnder(""); setFaMinFlat(false);
+      }
     }
     else if (!finish?.labour) {
       // Every metal besides gold with a rate of its own for this item on the card (its item line, else
-      // its all-items line); a metal with none takes the gold rate (left blank).
+      // its all-items line); a metal with none takes the gold rate (left blank). Its minimum the same way —
+      // the piece's own metal (a titanium ring) falling back to gold's when its card has none.
       const fac = db.factories.find(x => x.id === (order.assignedFactoryId || issuedFactory?.id));
       const names = [...choicesOf("metals", undefined, db.settings, { builtIn: false }), ...rateCardOf(fac?.labour).map(r => r.metal), ...rows.map(r => r.metal)]
         .filter(m => !sameName(cardMetal(m, db.settings), GOLD_CARD));
@@ -1336,9 +1429,13 @@ function OrderDetailPageBody() {
       for (const m of names) {
         const r = factoryRate(fac?.labour, m, order.jewelleryType, db.settings);
         if (r.perGram && r.perGramFrom && !sameName(r.perGramFrom.metal, GOLD_CARD)) rates[m.trim().toLowerCase()] = String(r.perGram);
+        const own = sameName(m, order.metal) || sameName(cardMetal(m, db.settings), cardMetal(order.metal, db.settings));
+        if (r.minimum && r.minimumFrom && (own || !sameName(r.minimumFrom.metal, GOLD_CARD)))
+          mins[m.trim().toLowerCase()] = { min: String(r.minimum), under: r.minimumUnder ? String(r.minimumUnder) : "", flat: false };
       }
       setFaRates(rates);
     } else setFaRates({});
+    setFaMins(mins);
     setFaOrderValue(order.amount ? String(order.amount) : "");
     setFaShipping(order.shippingCharge ? String(order.shippingCharge) : "");
     const shortCharge = (order.otherCharges ?? []).find(c => c.id === shortfallChargeId(order.id));
@@ -1365,17 +1462,6 @@ function OrderDetailPageBody() {
     // this adjustment is carried into every figure that follows.
     const diaAdjust = Number(faDiaAdjust) || 0;
     const usedDiaCt = Math.round((usedDiaCtRaw + diaAdjust) * 1000) / 1000;
-    const labour = {
-      perGramRate: faPerGram ? Number(faPerGram) : undefined,
-      minimumLabour: faMinLabour ? Number(faMinLabour) : undefined,
-      minimumUnderGrams: faMinLabour && Number(faMinUnder) > 0 ? Math.round(Number(faMinUnder) * 1000) / 1000 : undefined,
-      ...(faMinFlat && faMinLabour ? { minimumFlat: true } : {}),
-      diamondHandlingRate: faDiaHandling ? Number(faDiaHandling) : undefined,
-      cadCharge: faCad ? Number(faCad) : undefined,
-      otherCharges: faOther ? Number(faOther) : undefined,
-      metalByFactoryGrams: faMetalG ? Number(faMetalG) : undefined,
-      metalByFactoryRate: faMetalRate ? Number(faMetalRate) : undefined,
-    };
     // Labour per gram is charged on the whole piece, not only its gold. A
     // platinum or silver piece has no gold net weight, so charging on gold
     // alone silently dropped the per-gram labour from the factory's bill.
@@ -1403,9 +1489,8 @@ function OrderDetailPageBody() {
     // a two-tone piece is platinum AND gold.
     const hasNet = !isNaN(netW) && netW > 0;
     const labourNet = Math.round(((hasNet ? netW : 0) + faOtherW + moreW + xG.metal) * 1000) / 1000;
-    // Each metal at its own rate (gold, titanium …) when there is more than gold.
-    const lines = faLabourLines(hasNet ? netW : 0, faOtherW);
-    if (lines) (labour as NonNullable<MaterialIssuance["labour"]>).lines = lines;
+    // Each metal at its own rate and minimum (gold, titanium …) when there is more than gold.
+    const labour = faLabourOf(hasNet ? netW : 0, faOtherW);
     const labourVal = labourValue(labour, labourNet, usedDiaCt);
     // A weighed piece with no labour at all is almost always a rate not entered — asked, never saved silently.
     if (labourVal <= 0 && labourNet > 0 && !(await confirmBox(`No labour is charged for this piece — no rate was entered (${labourNet} g). Save it with ₹0 labour?`))) return;
@@ -4219,7 +4304,16 @@ The piece then takes ours — add them from stock or buy them, as for any order.
                         sub: finish?.finishedNetWeight != null
                           ? `${finish.finishedPurity != null ? `@ ${finish.finishedPurity}‰` : (finish.finishedKarat || "")} · ${finish.finishedPurity != null ? pureFromPurity(finish.finishedNetWeight, finish.finishedPurity) : toPureGold(finish.finishedNetWeight, finish.finishedKarat || "24K")} g fine`
                           : undefined },
-                      { label: "Labour", icon: FactoryIcon, value: finish?.makingCharges?.amountInr ? fmtMoneyInr(finish.makingCharges.amountInr) : "—" },
+                      { label: "Labour", icon: FactoryIcon, value: finish?.makingCharges?.amountInr ? fmtMoneyInr(finish.makingCharges.amountInr) : "—",
+                        // Made by metal: each metal's making (its own minimum where that applied).
+                        sub: [
+                          ...(finish?.labour?.lines ?? []).map(l => {
+                            const atMin = !!finish?.labour?.minimumByMetal && lineAtMinimum(l);
+                            return `${l.metal} ${fmtMoneyInr(Math.round((atMin ? lineMaking(l) : (l.grams || 0) * (l.rate || 0)) * 100) / 100)}${atMin ? " min" : ""}`;
+                          }),
+                          // Metal the factory supplied itself.
+                          ...factoryMetalLines(finish?.labour).map(m => `${m.metal} by factory ${fmtMoneyInr(Math.round(m.grams * m.rate * 100) / 100)}`),
+                        ].join(" · ") || undefined },
                       { label: "Factory bill", icon: Tag, value: order.factoryBillNo || "—" },
                     ]} />
                     {/* The figure the factory bills handling on — their scale, not
@@ -4835,17 +4929,6 @@ The piece then takes ours — add them from stock or buy them, as for any order.
         // everything downstream uses — handling charges included.
         const diaAdjust = Number(faDiaAdjust) || 0;
         const usedDiaCt = Math.round((usedDiaCtRaw + diaAdjust) * 1000) / 1000;
-        const faLabour = {
-          perGramRate: faPerGram ? Number(faPerGram) : undefined,
-          minimumLabour: faMinLabour ? Number(faMinLabour) : undefined,
-          minimumUnderGrams: faMinLabour && Number(faMinUnder) > 0 ? Math.round(Number(faMinUnder) * 1000) / 1000 : undefined,
-          ...(faMinFlat && faMinLabour ? { minimumFlat: true } : {}),
-          diamondHandlingRate: faDiaHandling ? Number(faDiaHandling) : undefined,
-          cadCharge: faCad ? Number(faCad) : undefined,
-          otherCharges: faOther ? Number(faOther) : undefined,
-          metalByFactoryGrams: faMetalG ? Number(faMetalG) : undefined,
-          metalByFactoryRate: faMetalRate ? Number(faMetalRate) : undefined,
-        };
         const faX = faXIssues();
         const faXG = faXGrams();
         const faW = faWeigh(usedDiaCt, faXG);
@@ -4856,8 +4939,12 @@ The piece then takes ours — add them from stock or buy them, as for any order.
         const faEffNet = faW ? faW.gold : (Number(faGoldNet) || 0);
         const faMoreG = faMoreRows().reduce((t, m) => t + m.w, 0);
         const faNetW = Math.round((faEffNet + faOtherG + faMoreG + faXG.metal) * 1000) / 1000;
-        const faLines = faLabourLines(faEffNet, faOtherG);
-        if (faLines) (faLabour as NonNullable<MaterialIssuance["labour"]>).lines = faLines;
+        const faLabour = faLabourOf(faEffNet, faOtherG);
+        // By metal (a metal besides gold named): each metal's own rate and minimum, side by side.
+        const faByMetal = !!faLabour.minimumByMetal;
+        // The gold box: always on a gold piece; on a platinum or titanium piece, when it has gold.
+        const faGoldShown = !isNonGoldMetal(order.metal) || faAddGold || (Number(faGoldNet) || 0) > 0;
+        const faLines = faLabour.lines;
         const faLive = labourValue(faLabour, faNetW, usedDiaCt);
         const faMinInUse = minimumLabourApplies(faLabour, faNetW);
         const faFactory = db.factories.find(f => f.id === order.assignedFactoryId);
@@ -4866,7 +4953,7 @@ The piece then takes ours — add them from stock or buy them, as for any order.
             <DialogContent className="max-w-6xl rounded-2xl">
               <DialogHeader>
                 <DialogTitle className="font-display text-xl text-brand-dark">Final Approval — {order.orderNumber}</DialogTitle>
-                <DialogDescription className="text-xs">Enter the real details now: gold used, each diamond used or returned, the labour, and the final order value.</DialogDescription>
+                <DialogDescription className="text-xs">Enter the real details now: {isNonGoldMetal(order.metal) ? `the ${order.metal} (and any other metal) in the piece` : "gold used"}, each diamond used or returned, the labour, and the final order value.</DialogDescription>
                 {/* Whose piece this is: the labour is priced from this factory's rate card and owed to it. */}
                 <div className={`mt-2 flex flex-wrap items-center gap-x-2 gap-y-0.5 rounded-lg border px-3 py-2 text-xs ${faFactory ? "border-border/70 bg-secondary/40" : "border-destructive/30 bg-destructive/5"}`}>
                   <FactoryIcon className="h-3.5 w-3.5 shrink-0 text-brand-dark/70" />
@@ -4896,8 +4983,9 @@ The piece then takes ours — add them from stock or buy them, as for any order.
                   have gold in it, and this was the only place to record it. */}
               {(
                 <div className="mb-4">
+                  {/* A gold piece: its gold. A platinum or titanium piece: its weight, gold only when it has some. */}
                   <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground mb-1.5">
-                    Gold used{needsGold ? "" : " (optional)"}
+                    {isNonGoldMetal(order.metal) ? `Weight — ${order.metal} piece` : `Gold used${needsGold ? "" : " (optional)"}`}
                   </p>
                   {db.materialIssuances.some(i => isReworkIssue(i) && (i.orderId === order.id || i.rework?.orderId === order.id)) && (
                     <p className="mb-2 rounded-lg bg-amber-500/10 px-2.5 py-1.5 text-[11px] text-amber-800">
@@ -4910,20 +4998,31 @@ The piece then takes ours — add them from stock or buy them, as for any order.
                         <Label className="text-[11px]">Gross weight (g) — the whole piece</Label>
                         <Input type="number" min={0} step="0.001" value={faGrossIn} onChange={e => setFaGrossIn(e.target.value)} className="rounded-lg h-9 mt-1" placeholder="from the scale" />
                       </div>
+                      {/* No gold yet on a platinum or titanium piece: added only if it has some. */}
+                      {!faGoldShown && (
+                        <Button type="button" variant="outline" size="sm" className="gap-1" onClick={() => setFaAddGold(true)}><Plus className="h-3.5 w-3.5" />Gold in this piece</Button>
+                      )}
+                      {faGoldShown && (
                       <div>
-                        <Label className="text-[11px]">{isNonGoldMetal(order.metal) ? "Gold in it (g) — if any" : `Net Weight (g)${faAutoNet != null ? " — auto" : ""}`}</Label>
+                        <div className="flex items-baseline justify-between gap-2">
+                          <Label className="text-[11px]">{isNonGoldMetal(order.metal) ? "Gold in it (g)" : `Net Weight (g)${faAutoNet != null ? " — auto" : ""}`}</Label>
+                          {isNonGoldMetal(order.metal) && <button type="button" className="text-[10px] font-medium text-muted-foreground hover:text-destructive hover:underline" onClick={() => { setFaAddGold(false); setFaGoldNet(""); }}>No gold</button>}
+                        </div>
                         {faAutoNet != null ? (
                           <Input type="number" readOnly tabIndex={-1} value={fmtG(faAutoNet)} className="rounded-lg h-9 mt-1 bg-secondary/60 text-muted-foreground cursor-default" aria-label="Net weight (worked out)" />
                         ) : (
                           <Input type="number" min={0} step="0.001" value={faGoldNet} onChange={e => setFaGoldNet(e.target.value)} className="rounded-lg h-9 mt-1"
-                            placeholder={isNonGoldMetal(order.metal) ? "0 — no gold" : "or enter the gross above"} aria-label={isNonGoldMetal(order.metal) ? "Gold in the piece (g)" : undefined} />
+                            placeholder={isNonGoldMetal(order.metal) ? "g of gold" : "or enter the gross above"} aria-label={isNonGoldMetal(order.metal) ? "Gold in the piece (g)" : undefined} />
                         )}
                         {faAutoNet != null && <p className="text-[10px] text-muted-foreground mt-1">{fmtG(faGrossN)} g − diamonds {usedDiaCt} ct ({fmtG(usedDiaCt * CARAT_TO_GRAM)} g){faXG.stone ? ` − other stones ${fmtG(faXG.stone)} g` : ""}{faOtherG ? ` − ${faOtherMetal.trim()} ${fmtG(faOtherG)} g` : ""}{faMoreRows().map(m => m.w ? ` − ${m.metal} ${fmtG(m.w)} g` : "").join("")}{faXG.metal ? ` − other metal ${fmtG(faXG.metal)} g` : ""}</p>}
-                        {faW?.selfMetal && <p className="text-[10px] text-muted-foreground mt-1">A {order.metal} piece: the scale's weight goes to {order.metal} below. Enter gold only if the piece has some.</p>}
-                        {faW?.needSelf && <p className="text-[10px] font-semibold text-destructive mt-1">A {order.metal} piece: choose {order.metal} under Other metal below — the scale's weight goes to it, not to gold.</p>}
-                        {faW?.needOther && <p className="text-[10px] font-semibold text-destructive mt-1">Enter the {faOtherMetal.trim()} weight below — otherwise the rest of the piece counts as gold.</p>}
                       </div>
+                      )}
+                      {faW?.selfMetal && <p className="text-[10px] text-muted-foreground mt-1">A {order.metal} piece: the scale's weight goes to {order.metal} below{faGoldShown ? " — less the gold" : ""}.</p>}
+                      {faW?.selfMetal && faW.gross > 0 && faW.other <= 0 && !faW.short && <p className="text-[10px] font-semibold text-destructive mt-1">{order.metal} comes to 0 g — the gold ({fmtG(faW.gold)} g) is the whole piece. Check the gold weight.</p>}
+                      {faW?.needSelf && <p className="text-[10px] font-semibold text-destructive mt-1">A {order.metal} piece: choose {order.metal} under Other metal below — the scale's weight goes to it, not to gold.</p>}
+                      {faW?.needOther && <p className="text-[10px] font-semibold text-destructive mt-1">Enter the {faOtherMetal.trim()} weight below — otherwise the rest of the piece counts as gold.</p>}
                     </div>
+                    {!faGoldShown ? null : (
                     <div>
                       <Label className="text-[11px]">Purity (‰)</Label>
                       {/* Picked per karat — a factory works to a set purity and
@@ -4948,10 +5047,12 @@ The piece then takes ours — add them from stock or buy them, as for any order.
                                 onChange={e => setFaGoldPurity(e.target.value)} aria-label="Gold purity (‰), typed"
                                 className="rounded-lg h-9 mt-1.5" placeholder="Purity ‰, e.g. 585" />
                             )}
+                            {faEffNet > 0 && !(Number(faGoldPurity) > 0) && <p className="text-[10px] font-semibold text-destructive mt-1">Choose the gold&rsquo;s karat — its fine gold comes off the factory&rsquo;s account.</p>}
                           </>
                         );
                       })()}
                     </div>
+                    )}
                   </div>
                   {faEffNet > 0 && Number(faGoldPurity) > 0 && <p className="text-[11px] text-muted-foreground mt-1">= {fmtG(pureFromPurity(faEffNet, Number(faGoldPurity)))}g fine (24KT) deducted from {faFactory?.name || "the factory"}</p>}
                   {order.clientSupplied?.gold && (() => {
@@ -4987,7 +5088,7 @@ The piece then takes ours — add them from stock or buy them, as for any order.
 
               {/* Other metal — two-tone pieces (platinum bezel on gold, gold + silver, …) */}
               <div className="mb-4">
-                <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground mb-1.5">Other metal (optional)</p>
+                <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground mb-1.5">{isNonGoldMetal(order.metal) ? "Metals in the piece" : "Other metal (optional)"}</p>
                 <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5">
                   <div className="col-span-2 sm:col-span-1">
                     <Label className="text-[11px]">Metal</Label>
@@ -5050,7 +5151,9 @@ The piece then takes ours — add them from stock or buy them, as for any order.
                   <Button type="button" variant="outline" size="sm" className="mt-2 gap-1" onClick={() => setFaMore(rs => [...rs, { metal: "", net: "", purity: "" }])}><Plus className="h-3.5 w-3.5" />Add another metal</Button>
                 )}
                 <p className="text-[11px] text-muted-foreground mt-1">
-                  Two-tone pieces only — added to the gross weight. More than one metal besides gold: Add another metal.
+                  {isNonGoldMetal(order.metal)
+                    ? `${order.metal} takes the scale's weight; any other metal in the piece: Add another metal (each at its own labour rate).`
+                    : "Two-tone pieces only — added to the gross weight. More than one metal besides gold: Add another metal."}
                 </p>
               </div>
 
@@ -5189,30 +5292,84 @@ The piece then takes ours — add them from stock or buy them, as for any order.
 
               <div className="mb-4">
                 <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground mb-1.5">Labour (factory payable, ₹)</p>
-                <div className="grid grid-cols-2 gap-2.5">
-                  <div><Label className="text-[11px]">{faLines ? "Labour / gram — gold" : "Labour / gram"}</Label><Input type="number" min={0} step="0.01" value={faPerGram} onChange={e => setFaPerGram(e.target.value)} className="rounded-lg h-9 mt-1" placeholder="₹ /g" /></div>
-                  {/* Each other metal at its own rate — the factory's for that metal, else the gold rate. */}
-                  {[...new Set([faOtherMetal.trim(), ...faMoreRows().map(m => m.metal), ...faXMetals().filter(x => !x.gold).map(x => x.metal)].filter(Boolean))].map(m => (
-                    <div key={m}><Label className="text-[11px]">Labour / gram — {m}</Label>
-                      <Input type="number" min={0} step="0.01" value={faRates[m.toLowerCase()] ?? ""} aria-label={`${m} labour per gram`}
-                        onChange={e => setFaRates(r => ({ ...r, [m.toLowerCase()]: e.target.value }))} className="rounded-lg h-9 mt-1" placeholder={faPerGram ? `₹${faPerGram} /g — as gold` : "₹ /g"} /></div>
-                  ))}
-                  <div>
-                    <Label className="text-[11px]">Minimum labour</Label>
-                    <Input type="number" min={0} step="0.01" value={faMinLabour} onChange={e => setFaMinLabour(e.target.value)} className="rounded-lg h-9 mt-1" placeholder="₹ for a light piece" />
+                {faByMetal ? (() => {
+                  // Labour by metal: each metal its own rate, minimum and the weight the minimum applies under —
+                  // worked out on its own grams, side by side, and added up in the labour total below.
+                  const goldLine = faLines?.find(l => l.gold);
+                  const rows = [
+                    ...(goldLine || !isNonGoldMetal(order.metal) ? [{ key: "__gold", label: "Gold", gold: true, line: goldLine }] : []),
+                    ...faMetalNames().map(m => ({ key: m.toLowerCase(), label: m, gold: false, line: faLines?.find(l => !l.gold && l.metal.trim().replace(/\s+from stock$/i, "").toLowerCase() === m.toLowerCase()) })),
+                  ];
+                  const setMin = (key: string, patch: Partial<{ min: string; under: string; flat: boolean }>) =>
+                    setFaMins(s => ({ ...s, [key]: { ...(s[key] ?? { min: "", under: "", flat: false }), ...patch } }));
+                  return (
+                    <div className="space-y-2">
+                      {rows.map(r => {
+                        const m = faMinOf(r.gold ? null : r.label);
+                        const rate = r.gold ? faPerGram : (faRates[r.key] ?? "");
+                        const min = Number(m.min) || 0;
+                        const atMin = !!r.line && lineAtMinimum(r.line);
+                        return (
+                          <div key={r.key} className="rounded-lg border border-border/70 bg-white px-2.5 py-2">
+                            <div className="mb-1.5 flex items-baseline justify-between gap-2 text-xs">
+                              <span className="font-semibold text-brand-dark">{r.line ? r.line.metal : r.label} <span className="font-normal text-muted-foreground">· {r.line ? `${fmtG(r.line.grams)} g` : "no weight yet"}</span></span>
+                              <span className={`tabular-nums font-semibold ${atMin ? "text-warning" : "text-foreground"}`}>{r.line ? `${atMin ? "Minimum " : ""}${fmtMoneyInr(lineMaking(r.line))}` : "—"}</span>
+                            </div>
+                            <div className="grid grid-cols-3 gap-2">
+                              <div><Label className="text-[11px]">Labour / g</Label>
+                                <Input type="number" min={0} step="0.01" value={rate} aria-label={`${r.label} labour per gram`}
+                                  onChange={e => r.gold ? setFaPerGram(e.target.value) : setFaRates(x => ({ ...x, [r.key]: e.target.value }))}
+                                  className="rounded-lg h-9 mt-1" placeholder={!r.gold && faPerGram ? `₹${faPerGram} gold's` : "₹ /g"} /></div>
+                              <div><Label className="text-[11px]">Minimum ₹</Label>
+                                <Input type="number" min={0} step="0.01" value={m.min} aria-label={`${r.label} minimum labour`}
+                                  onChange={e => r.gold ? setFaMinLabour(e.target.value) : setMin(r.key, { min: e.target.value })}
+                                  className="rounded-lg h-9 mt-1" placeholder="none" /></div>
+                              <div><Label className="text-[11px]">Min. under (g)</Label>
+                                <Input type="number" min={0} step="0.001" value={m.under} disabled={m.flat} aria-label={`${r.label} minimum for pieces under (g)`}
+                                  onChange={e => r.gold ? setFaMinUnder(e.target.value) : setMin(r.key, { under: e.target.value })}
+                                  className="rounded-lg h-9 mt-1" placeholder="when less" /></div>
+                            </div>
+                            {Number(m.under) > 0 && !(min > 0) && <p className="text-[10px] font-medium text-amber-700 mt-1">Enter {r.label}&rsquo;s minimum too — this is the weight it applies under.</p>}
+                            {min > 0 && (
+                              <label className="mt-1.5 flex cursor-pointer items-start gap-2 text-[11px]">
+                                <input type="checkbox" className="mt-0.5" checked={m.flat} onChange={e => r.gold ? setFaMinFlat(e.target.checked) : setMin(r.key, { flat: e.target.checked })} />
+                                <span><span className="font-medium text-foreground">Charge {r.label}&rsquo;s minimum flat</span> — {fmtMoneyInr(min)} whatever its weight (not × grams).</span>
+                              </label>
+                            )}
+                            {r.line && (
+                              <p className="text-[10px] text-muted-foreground mt-1">
+                                {atMin
+                                  ? <>Charged at its minimum{r.line.flat ? " (flat)" : r.line.minimumUnder ? ` — ${fmtG(r.line.grams)} g, under ${fmtG(r.line.minimumUnder)} g` : ""}, not {fmtMoneyInr(Math.round(r.line.grams * r.line.rate * 100) / 100)} ({fmtG(r.line.grams)} g × {fmtMoneyInr(r.line.rate)}).</>
+                                  : <>{fmtG(r.line.grams)} g × {fmtMoneyInr(r.line.rate)}{min > 0 ? ` — over its minimum ${fmtMoneyInr(min)}${r.line.minimumUnder ? ` (applies under ${fmtG(r.line.minimumUnder)} g)` : ""}` : ""}</>}
+                              </p>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  );
+                })() : (
+                  <div className="grid grid-cols-2 gap-2.5">
+                    <div><Label className="text-[11px]">Labour / gram</Label><Input type="number" min={0} step="0.01" value={faPerGram} onChange={e => setFaPerGram(e.target.value)} className="rounded-lg h-9 mt-1" placeholder="₹ /g" /></div>
+                    <div>
+                      <Label className="text-[11px]">Minimum labour</Label>
+                      <Input type="number" min={0} step="0.01" value={faMinLabour} onChange={e => setFaMinLabour(e.target.value)} className="rounded-lg h-9 mt-1" placeholder="₹ for a light piece" />
+                    </div>
+                    <div>
+                      <Label className="text-[11px]">Minimum for pieces under (g)</Label>
+                      <Input type="number" min={0} step="0.001" value={faMinUnder} onChange={e => setFaMinUnder(e.target.value)} disabled={faMinFlat}
+                        className="rounded-lg h-9 mt-1" placeholder="blank = when gram × rate is less" aria-label="Minimum for pieces under (g)" />
+                      {Number(faMinUnder) > 0 && !(Number(faMinLabour) > 0) && <p className="text-[10px] font-medium text-amber-700 mt-0.5">Enter the minimum labour too — this is the weight it applies under.</p>}
+                    </div>
+                    {/* A small piece the factory bills at its minimum: that amount, flat — not × grams, and
+                        not only when gram × rate comes to less. */}
+                    <label className={`col-span-2 flex items-start gap-2 rounded-lg border px-2.5 py-2 text-xs ${faMinLabour ? "border-border bg-white cursor-pointer" : "border-border/50 bg-secondary/40 text-muted-foreground"}`}>
+                      <input type="checkbox" className="mt-0.5" checked={faMinFlat && !!faMinLabour} disabled={!faMinLabour} onChange={e => setFaMinFlat(e.target.checked)} />
+                      <span><span className="font-medium text-foreground">Charge the minimum as a flat amount</span> — the making is {faMinLabour ? fmtMoneyInr(Number(faMinLabour) || 0) : "the minimum"} for this piece, whatever its weight (not × grams).</span>
+                    </label>
                   </div>
-                  <div>
-                    <Label className="text-[11px]">Minimum for pieces under (g)</Label>
-                    <Input type="number" min={0} step="0.001" value={faMinUnder} onChange={e => setFaMinUnder(e.target.value)} disabled={faMinFlat}
-                      className="rounded-lg h-9 mt-1" placeholder="blank = when gram × rate is less" aria-label="Minimum for pieces under (g)" />
-                    {Number(faMinUnder) > 0 && !(Number(faMinLabour) > 0) && <p className="text-[10px] font-medium text-amber-700 mt-0.5">Enter the minimum labour too — this is the weight it applies under.</p>}
-                  </div>
-                  {/* A small piece the factory bills at its minimum: that amount, flat — not × grams, and
-                      not only when gram × rate comes to less. */}
-                  <label className={`col-span-2 flex items-start gap-2 rounded-lg border px-2.5 py-2 text-xs ${faMinLabour ? "border-border bg-white cursor-pointer" : "border-border/50 bg-secondary/40 text-muted-foreground"}`}>
-                    <input type="checkbox" className="mt-0.5" checked={faMinFlat && !!faMinLabour} disabled={!faMinLabour} onChange={e => setFaMinFlat(e.target.checked)} />
-                    <span><span className="font-medium text-foreground">Charge the minimum as a flat amount</span> — the making is {faMinLabour ? fmtMoneyInr(Number(faMinLabour) || 0) : "the minimum"} for this piece, whatever its weight (not × grams).</span>
-                  </label>
+                )}
+                <div className="grid grid-cols-2 gap-2.5 mt-2.5">
                   <div><Label className="text-[11px]">CAD charge</Label><Input type="number" min={0} step="0.01" value={faCad} onChange={e => setFaCad(e.target.value)} className="rounded-lg h-9 mt-1" placeholder="₹" />
                     {/* A freelancer's approved design is already in the order's cost — not again here. */}
                     {(() => { const c = (db.cadJobs ?? []).filter(j => j.orderId === order.id && j.status === "approved").reduce((s, j) => s + (j.chargeInr ?? 0), 0);
@@ -5220,27 +5377,66 @@ The piece then takes ours — add them from stock or buy them, as for any order.
                   </div>
                   <div><Label className="text-[11px]">Diamond handling / ct</Label><Input type="number" min={0} step="0.01" value={faDiaHandling} onChange={e => setFaDiaHandling(e.target.value)} className="rounded-lg h-9 mt-1" placeholder="₹ /ct" /></div>
                   <div><Label className="text-[11px]">Other charges</Label><Input type="number" min={0} step="0.01" value={faOther} onChange={e => setFaOther(e.target.value)} className="rounded-lg h-9 mt-1" placeholder="₹" /></div>
-                  <div><Label className="text-[11px]">Metal by factory (g)</Label><Input type="number" min={0} step="0.001" value={faMetalG} onChange={e => setFaMetalG(e.target.value)} className="rounded-lg h-9 mt-1" placeholder="g" /></div>
-                  <div><Label className="text-[11px]">Metal rate ₹ / g</Label><Input type="number" min={0} step="0.01" value={faMetalRate} onChange={e => setFaMetalRate(e.target.value)} className="rounded-lg h-9 mt-1" placeholder="₹ /g" /></div>
+                </div>
+                {/* Metal the factory supplied itself — any number of metals, each its grams at its own rate. */}
+                <div className="mt-2.5 rounded-lg border border-border/70 bg-white px-2.5 py-2">
+                  <p className="text-[11px] font-medium text-foreground">Metal supplied by the factory <span className="font-normal text-muted-foreground">— its own metal, charged on its bill</span></p>
+                  {faFacMetals.map((r, i) => {
+                    const amt = Math.round((Number(r.grams) || 0) * (Number(r.rate) || 0) * 100) / 100;
+                    return (
+                      <div key={i} className="mt-1.5 grid grid-cols-[1.3fr_1fr_1fr_auto] items-end gap-2">
+                        <div><Label className="text-[11px]">Metal</Label>
+                          <Select value={r.metal || "__none"} onValueChange={v => setFaFacMetals(rs => rs.map((x, j) => j !== i ? x : {
+                            ...x, metal: v === "__none" ? "" : v,
+                            // A gold chosen with no rate yet: the gold in stock's rate at the piece's purity.
+                            rate: !x.rate.trim() && v !== "__none" && metalHasKarats(v, db.settings) ? faGoldMetalRate : x.rate,
+                          }))}>
+                            <SelectTrigger className="h-9 rounded-lg mt-1" aria-label={`Factory metal ${i + 1}`}><SelectValue placeholder="Choose…" /></SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="__none">Choose…</SelectItem>
+                              {choicesOf("metals", r.metal || undefined, db.settings, { builtIn: false }).map(m => <SelectItem key={m} value={m}>{m}</SelectItem>)}
+                            </SelectContent>
+                          </Select></div>
+                        <div><Label className="text-[11px]">Grams</Label>
+                          <Input type="number" min={0} step="0.001" value={r.grams} aria-label={`${r.metal || "Metal"} by factory (g)`}
+                            onChange={e => setFaFacMetals(rs => rs.map((x, j) => (j === i ? { ...x, grams: e.target.value } : x)))} className="rounded-lg h-9 mt-1" placeholder="g" /></div>
+                        <div><Label className="text-[11px]">₹ / g</Label>
+                          <Input type="number" min={0} step="0.01" value={r.rate} aria-label={`${r.metal || "Metal"} by factory rate`}
+                            onChange={e => setFaFacMetals(rs => rs.map((x, j) => (j === i ? { ...x, rate: e.target.value } : x)))} className="rounded-lg h-9 mt-1" placeholder="₹ /g" /></div>
+                        <Button type="button" variant="ghost" size="icon" className="h-9 w-9" aria-label={`Remove ${r.metal || "metal"} by factory`}
+                          onClick={() => setFaFacMetals(rs => rs.length > 1 ? rs.filter((_, j) => j !== i) : [{ metal: rs[0].metal, grams: "", rate: rs[0].rate }])}><Trash2 className="h-4 w-4" /></Button>
+                        {Number(r.grams) > 0 && (
+                          <p className={`col-span-4 -mt-1 text-[10px] ${Number(r.rate) > 0 ? "text-muted-foreground" : "font-medium text-amber-700"}`}>
+                            {Number(r.rate) > 0 ? `${r.metal || "Metal"} ${fmtG(Number(r.grams))} g × ${fmtMoneyInr(Number(r.rate))} = ${fmtMoneyInr(amt)}` : `Enter ${r.metal || "this metal"}'s rate — without it the factory's metal is charged ₹0.`}
+                          </p>
+                        )}
+                      </div>
+                    );
+                  })}
+                  <Button type="button" variant="outline" size="sm" className="mt-2 gap-1" onClick={() => setFaFacMetals(rs => [...rs, { metal: "", grams: "", rate: "" }])}><Plus className="h-3.5 w-3.5" />Add metal</Button>
                 </div>
                 {/* A light piece is charged the factory's minimum instead of the
                     per-gram rate, so the total will not equal rate × weight — say
                     which one is being charged rather than leave it unexplained. */}
-                {faMinInUse ? (
+                {!faByMetal && faMinInUse ? (
                   <p className="text-[11px] mt-1.5 text-warning">
-                    Making charged at the minimum {fmtMoneyInr(Number(faMinLabour) || 0)}{Number(faMinUnder) > 0 ? ` — the piece is ${faNetW.toFixed(3)} g, under ${Number(faMinUnder).toFixed(3)} g` : ""}, not {fmtMoneyInr(byGramMaking(faLabour, faNetW))} ({faLines ? faLines.map(l => `${l.metal} ${l.grams.toFixed(3)} g × ${fmtMoneyInr(l.rate)}`).join(" + ") : `${faNetW.toFixed(3)} g × ${fmtMoneyInr(Number(faPerGram) || 0)}`}).
+                    Making charged at the minimum {fmtMoneyInr(Number(faMinLabour) || 0)}{Number(faMinUnder) > 0 ? ` — the piece is ${faNetW.toFixed(3)} g, under ${Number(faMinUnder).toFixed(3)} g` : ""}, not {fmtMoneyInr(byGramMaking(faLabour, faNetW))} ({faNetW.toFixed(3)} g × {fmtMoneyInr(Number(faPerGram) || 0)}).
                   </p>
-                ) : faNetW > 0 && faNetW < 2 && !faMinLabour ? (
+                ) : !faByMetal && faNetW > 0 && faNetW < 2 && !faMinLabour ? (
                   <p className="text-[11px] mt-1.5 text-muted-foreground">
                     This piece is {faNetW} g. If the factory charges a minimum on light pieces, enter it above.
                   </p>
                 ) : null}
                 {faFilledFrom.length > 0 && <p className="text-[11px] mt-1.5 text-muted-foreground">{faFilledFrom.join(" · ")} — change any of it for this piece.</p>}
+                {faByMetal && faOldPieceMin != null && (
+                  <p className="text-[11px] mt-1.5 font-medium text-amber-700">
+                    Approved with one minimum for the whole piece — labour saved {fmtMoneyInr(faOldPieceMin)}. Each metal now has its own minimum (the piece&rsquo;s minimum is on {order.metal}); check the labour total below before saving — nothing changes until you save.
+                  </p>
+                )}
                 {(() => {
                   // Each metal charged at the gold rate because neither the card nor this screen gives it one.
-                  const asGold = [...new Set([faOtherMetal.trim(), ...faMoreRows().map(m => m.metal), ...faXMetals().filter(x => !x.gold).map(x => x.metal)].filter(Boolean))]
-                    .filter(m => !metalHasKarats(m, db.settings) && !(faRates[m.toLowerCase()] ?? "").trim());
-                  if (!asGold.length || !faLines) return null;
+                  const asGold = faMetalNames().filter(m => !metalHasKarats(m, db.settings) && !(faRates[m.toLowerCase()] ?? "").trim());
+                  if (!asGold.length || !faByMetal) return null;
                   const goldRate = Number(faPerGram) || 0;
                   return (
                     <p className="text-[11px] mt-1.5 font-medium text-amber-700">
@@ -5255,17 +5451,18 @@ The piece then takes ours — add them from stock or buy them, as for any order.
                 {(() => {
                   const making = makingCharge(faLabour, faNetW);
                   const rows: [string, number][] = [
-                    ...(faMinInUse ? [[`Making — minimum${faMinFlat ? " (flat)" : ""}`, making] as [string, number]]
-                      : faLines ? faLines.map(l => [`Making — ${l.metal} ${l.grams.toFixed(3)} g × ${fmtMoneyInr(l.rate)}`, Math.round(l.grams * l.rate * 100) / 100] as [string, number])
+                    ...(faByMetal ? (faLines ?? []).map(l => [`Making — ${l.metal} ${l.grams.toFixed(3)} g × ${fmtMoneyInr(l.rate)}${lineAtMinimum(l) ? ` → minimum${l.flat ? " (flat)" : ""}` : ""}`, Math.round(lineMaking(l) * 100) / 100] as [string, number])
+                      : faMinInUse ? [[`Making — minimum${faMinFlat ? " (flat)" : ""}`, making] as [string, number]]
                       : [[`Making — ${faNetW.toFixed(3)} g × ${fmtMoneyInr(Number(faPerGram) || 0)}`, making] as [string, number]]),
-                    ...(faMetalG && faMetalRate ? [[`Metal by factory — ${Number(faMetalG)} g × ${fmtMoneyInr(Number(faMetalRate))}`, Math.round(Number(faMetalG) * Number(faMetalRate) * 100) / 100] as [string, number]] : []),
+                    ...(faByMetal && (faLines?.length ?? 0) > 1 ? [["Making — all metals", making] as [string, number]] : []),
+                    ...factoryMetalLines(faLabour).map(m => [`Metal by factory — ${m.metal} ${m.grams} g × ${fmtMoneyInr(m.rate)}`, Math.round(m.grams * m.rate * 100) / 100] as [string, number]),
                     ...(faDiaHandling && usedDiaCt ? [[`Diamond handling — ${usedDiaCt} ct × ${fmtMoneyInr(Number(faDiaHandling))}`, Math.round(Number(faDiaHandling) * usedDiaCt * 100) / 100] as [string, number]] : []),
                     ...(Number(faCad) ? [["CAD charge", Number(faCad)] as [string, number]] : []),
                     ...(Number(faOther) ? [["Other charges", Number(faOther)] as [string, number]] : []),
                   ];
                   return (
                     <div className="mt-2 rounded-lg border border-border/60 bg-secondary/30 px-3 py-2 text-xs space-y-1">
-                      {rows.map(([l, v]) => <div key={l} className="flex justify-between gap-3"><span className="text-muted-foreground">{l}</span><span className="tabular-nums">{fmtMoneyInr(v)}</span></div>)}
+                      {rows.map(([l, v], i) => <div key={`${i}-${l}`} className={`flex justify-between gap-3 ${l === "Making — all metals" ? "border-t border-border/40 pt-1 font-medium" : ""}`}><span className="text-muted-foreground">{l}</span><span className="tabular-nums">{fmtMoneyInr(v)}</span></div>)}
                       <div className="flex justify-between gap-3 border-t border-border/60 pt-1 text-sm"><span className="font-medium">Labour total</span><span className="font-semibold text-brand-dark tabular-nums">{fmtMoneyInr(faLive)}</span></div>
                     </div>
                   );
