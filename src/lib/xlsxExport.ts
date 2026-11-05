@@ -16,6 +16,7 @@ import { orderProfit, recognisedSale, saleDate } from "./orderCost";
 import { orderMaterialLines, type MaterialLine } from "./orderMaterials";
 import { orderPictures } from "./readyStockPhotos";
 import { finishRecordOf, isReworkIssue } from "./rework";
+import { factoryMetalLines, lineAtMinimum, lineMaking } from "./manufacturing";
 import { sheetPicture } from "./photoPreview";
 import { brandName, getBrand } from "./brand";
 
@@ -277,13 +278,20 @@ export async function exportOrderXlsx(db: DB, order: Order, opts: { faDone: bool
       const L = fin.labour ?? {};
       r = section(ws, r, C, "Final Approval — labour & actuals");
       if (fin.factoryId) r = kvRow(ws, r, C, "Factory", db.factories.find(f => f.id === fin.factoryId)?.name ?? "");
-      if (L.lines?.length) for (const l of L.lines) r = kvRow(ws, r, C, `Making — ${l.metal}`, `${l.grams} g × ₹${(l.rate || 0).toLocaleString("en-IN")}/g`);
+      // Each metal: grams × its rate, its own minimum (and the band it applies under), and the making it came to.
+      if (L.lines?.length) for (const l of L.lines) {
+        const min = L.minimumByMetal && (l.minimum || 0) > 0
+          ? ` · minimum ₹${(l.minimum || 0).toLocaleString("en-IN")}${l.flat ? " flat" : l.minimumUnder ? ` under ${l.minimumUnder} g` : ""}` : "";
+        const made = L.minimumByMetal ? ` = ₹${lineMaking(l).toLocaleString("en-IN")}${lineAtMinimum(l) ? " (minimum)" : ""}` : "";
+        r = kvRow(ws, r, C, `Making — ${l.metal}`, `${l.grams} g × ₹${(l.rate || 0).toLocaleString("en-IN")}/g${min}${made}`);
+      }
       else if (L.perGramRate) r = kvRow(ws, r, C, "Labour per gram", L.perGramRate, FMT.inr);
       if (L.minimumLabour) r = kvRow(ws, r, C, L.minimumFlat ? "Minimum labour (flat)" : "Minimum labour", `₹${L.minimumLabour.toLocaleString("en-IN")}${L.minimumUnderGrams ? ` under ${L.minimumUnderGrams} g` : ""}`);
       if (L.diamondHandlingRate) r = kvRow(ws, r, C, "Diamond handling per ct", L.diamondHandlingRate, FMT.inr);
       if (L.cadCharge) r = kvRow(ws, r, C, "CAD charge", L.cadCharge, FMT.inr);
       if (L.otherCharges) r = kvRow(ws, r, C, "Other charges", L.otherCharges, FMT.inr);
-      if (L.metalByFactoryGrams) r = kvRow(ws, r, C, "Metal by factory", `${L.metalByFactoryGrams} g${L.metalByFactoryRate ? ` × ₹${L.metalByFactoryRate.toLocaleString("en-IN")}/g` : ""}`);
+      // Each metal the factory supplied, at its own rate.
+      for (const m of factoryMetalLines(L)) r = kvRow(ws, r, C, L.metalByFactory?.length ? `Metal by factory — ${m.metal}` : "Metal by factory", `${m.grams} g${m.rate ? ` × ₹${m.rate.toLocaleString("en-IN")}/g = ₹${(Math.round(m.grams * m.rate * 100) / 100).toLocaleString("en-IN")}` : ""}`);
       if (opts.withCost || fin.makingCharges?.amountInr) r = kvRow(ws, r, C, "Labour total (factory's bill)", fin.makingCharges?.amountInr ?? null, FMT.inr, true);
       if (order.actualDiamondWeight != null) r = kvRow(ws, r, C, "Diamonds in the piece", `${order.actualDiamondWeight} ct${order.actualDiamondPcs ? ` · ${order.actualDiamondPcs} pcs` : ""}`);
       r += 1;

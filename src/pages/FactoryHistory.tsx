@@ -888,7 +888,7 @@ function FactoryHistoryPageBody() {
     const hasOther = rows.some(r => r.otherIn);
     // Each other metal named, and the making by metal, when any row has them.
     const hasMetalNames = rows.some(r => r.otherNote);
-    const hasMaking = rows.some(r => r.labourNote);
+    const hasMaking = rows.some(r => r.labourLines?.length || r.facMetals?.length);
     // Platinum, gems, findings given from stock: a section of their own (each in its own unit).
     const matRows = rows.flatMap(r => Object.values(r.materials ?? {}).map(m => [r.orderNo, m.name ?? "", m.unit ?? "", q3(m.out) || "0", q3(m.in) || "0", q3(m.out - m.in) || "0"].map(String)));
     const MT = materialTotals(rows);
@@ -981,16 +981,20 @@ function FactoryHistoryPageBody() {
     if (!hasMaking && !matRows.length) { downloadLedgerPdf(pdf); return; }
     // Made by metal (Final Approval): each order's metals at their own rates — a table of its own after the ledger,
     // every line in full (a narrow column would cut them off).
-    const mk = rows.flatMap(r => (r.labourLines ?? []).map(l => [r.orderNo, l.metal, (l.grams || 0).toFixed(3), rs(l.rate || 0), rs((l.grams || 0) * (l.rate || 0))]));
+    const mk = rows.flatMap(r => [
+      ...(r.labourLines ?? []).map(l => [r.orderNo, l.atMinimum ? `${l.metal} (minimum)` : l.metal, (l.grams || 0).toFixed(3), rs(l.rate || 0), rs(l.making)]),
+      // Metal the factory supplied itself, each at its rate.
+      ...(r.facMetals ?? []).map(m => [r.orderNo, `${m.metal} — metal by factory`, m.grams.toFixed(3), rs(m.rate), rs(m.grams * m.rate)]),
+    ]);
     downloadLedgerPdfMulti({
       title: pdf.title, landscape: true, filename: pdf.filename, summary: pdf.summary,
       // The Labour column is the factory's bill: it may be its minimum instead, and carries CAD, handling and other charges.
-      subjectLines: [...pdf.subjectLines, ...(hasMaking ? ["Making by metal: each metal's grams × its rate. Labour (By order) is the factory's bill — its minimum where that applied, with CAD, handling and other charges."] : [])],
+      subjectLines: [...pdf.subjectLines, ...(hasMaking ? ["Making by metal: each metal's grams × its rate, or that metal's own minimum where marked. Labour (By order) is the factory's bill — with CAD, handling and other charges (and the piece's minimum, on pieces approved before minimums by metal)."] : [])],
       sections: [
         { heading: "By order", columns: pdf.columns, rows: pdf.rows, align: pdf.align, totalsRow: pdf.totalsRow },
         ...(hasMaking ? [{ heading: "Making by metal", columns: [{ header: "Order", x: 14 }, { header: "Metal", x: 60 }, { header: "Grams", x: 130 }, { header: "Rs / g", x: 165 }, { header: "Making (Rs)", x: 200 }],
           rows: mk, align: ["left", "left", "right", "right", "right"] as ("left" | "right")[],
-          totalsRow: ["", "Total gram × rate", "", "", rs(rows.reduce((t, r) => t + (r.labourLines ?? []).reduce((u, l) => u + (l.grams || 0) * (l.rate || 0), 0), 0))] }] : []),
+          totalsRow: ["", "Total by metal", "", "", rs(rows.reduce((t, r) => t + (r.labourLines ?? []).reduce((u, l) => u + l.making, 0) + (r.facMetals ?? []).reduce((u, m) => u + m.grams * m.rate, 0), 0))] }] : []),
         ...(matRows.length ? [{ heading: "Other material", columns: [{ header: "Order", x: 14 }, { header: "Material", x: 60 }, { header: "Unit", x: 120 }, { header: "Given", x: 150 }, { header: "Used / back", x: 190 }, { header: "Open", x: 235 }],
           rows: matRows, align: ["left", "left", "left", "right", "right", "right"] as ("left" | "right")[],
           totalsRow: ["", "Still with the factory", "", "", "", MT.open || "0"] }] : []),
