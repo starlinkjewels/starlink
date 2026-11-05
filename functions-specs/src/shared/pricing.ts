@@ -312,6 +312,8 @@ export function priceDesign(specs: Partial<Pick<Specs, "metal" | "stones" | "rin
   for (const r of rows) {
     pcs += r.pcs; ct += r.total;
     if (!r.total) { missing.push(`${r.shape ?? "Stone"} × ${r.pcs}: no weight on the sheet`); continue; }
+    // A weight with neither a count nor a size each: how big each stone is can't be known — never taken as one stone.
+    if (!(r.pcs > 0) && !(r.perStone > 0)) { missing.push(`how many ${r.shape ?? "stones"} (${r.total} ct)`); continue; }
     if (r.shape && GEMS.test(r.shape)) {
       if (!rules.gemPerCt) missing.push("a gemstone price");
       gem += r.total * conv({ amount: rules.gemPerCt, ccy: "USD" });

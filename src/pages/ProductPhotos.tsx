@@ -1,47 +1,21 @@
 import { brandName } from "@/lib/brand";
 import { useCan } from "@/hooks/useCan";
-import { WebVideo } from "@/components/ProductVideo";
 import { PageHeader, TabBar } from "@/components/PageHeader";
-import { exportAllowed } from "@/lib/access";
-import { useEffect, useState } from "react";
-import { motion, AnimatePresence } from "framer-motion";
+import { useMemo, useState } from "react";
+import { useSearchParams } from "react-router-dom";
+import { motion } from "framer-motion";
 import { useAuth } from "@/lib/auth";
-import { currentUserOrders, logEvent, type Order } from "@/lib/db";
+import { currentUserOrders } from "@/lib/db";
 import { useDb } from "@/hooks/useDb";
-import { downloadAsZip } from "@/lib/zipDownload";
 import { VideoPoster } from "@/components/VideoPoster";
-import { toast } from "sonner";
-import { Folder, ChevronRight, Image as ImageIcon, Video, Download, X, Camera, ChevronLeft, Trash2, Pencil, Package, PenTool } from "lucide-react";
-import { MoreMenu, type MoreAction } from "@/components/MoreMenu";
+import { Folder, ChevronRight, Image as ImageIcon, Video, Camera, Trash2, Pencil, Package, PenTool, Share2 } from "lucide-react";
+import { Button } from "@/components/ui/button";
 import { CadJobsTable } from "@/components/designers/CadJobsTable";
+import { OrderProductPage } from "@/components/designs/OrderProductPage";
+import { DesignShareSheet } from "@/components/catalog/DesignShareSheet";
 import { isOpenJob } from "@/lib/designers";
-
-async function downloadOne(fileUrl: string, filename: string) {
-  if (!exportAllowed()) return;
-  try {
-    const res = await fetch(fileUrl);
-    const blob = await res.blob();
-    const obj = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = obj; a.download = filename;
-    document.body.appendChild(a); a.click(); a.remove();
-    logEvent("export", `Downloaded ${filename}`, { file: filename });
-    setTimeout(() => URL.revokeObjectURL(obj), 4000);
-  } catch { window.open(fileUrl, "_blank"); }
-}
-
-/** `thumb`: the small copy the grid shows — `src` (the original) opens and downloads. */
-interface GalleryItem { id: string; type: "image" | "video"; label: string; src: string; thumb?: string; filename: string; }
-
-function buildOrderItems(orders: Order[], design: string): GalleryItem[] {
-  const items: GalleryItem[] = [];
-  orders.forEach(o => {
-    if (o.cadImage) items.push({ id: `${o.id}-cad`, type: "image", label: "CAD Design", src: o.cadImage, filename: `${design}-cad.jpg` });
-    (o.productPhotos ?? []).forEach((p, i) => items.push({ id: `${o.id}-photo-${i}`, type: "image", label: `Photo ${i + 1}`, src: p, filename: `${design}-photo-${i + 1}.jpg` }));
-    if (o.productVideo) items.push({ id: `${o.id}-video`, type: "video", label: "Video", src: o.productVideo, filename: `${design}-video.mp4` });
-  });
-  return items;
-}
+import { orderProducts, sharedProduct } from "@/lib/orderProducts";
+import { findOrderShare, saveOrderShare } from "@/lib/share";
 
 /* Folder card — category level and product-id level. */
 function FolderCard({ label, sub, cover, onClick, onRename, onDelete }: {
@@ -70,142 +44,88 @@ function FolderCard({ label, sub, cover, onClick, onRename, onDelete }: {
   );
 }
 
-function ItemCard({ item, onOpen, onDownload, onDelete, menu }: { item: GalleryItem; onOpen(): void; onDownload(): void; onDelete?(): void; menu?: MoreAction[] }) {
-  return (
-    <motion.div whileTap={{ scale: 0.97 }} className="relative rounded-2xl overflow-hidden border border-border/60 bg-white shadow-sm flex flex-col group">
-      <button onClick={onOpen} className="block w-full aspect-square bg-secondary/30 overflow-hidden relative">
-        {item.type === "image"
-          ? <img src={item.thumb || item.src} alt={item.label} loading="lazy" decoding="async" className="w-full h-full object-cover" />
-          : <VideoPoster src={item.src} poster={item.thumb} alt={item.label} />}
-        <div className="absolute top-2 left-2"><span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[10px] font-medium bg-black/50 text-white backdrop-blur-sm">{item.type === "video" ? <Video className="h-2.5 w-2.5" /> : <ImageIcon className="h-2.5 w-2.5" />}{item.type}</span></div>
-        <button onClick={e => { e.stopPropagation(); onDownload(); }} className="absolute top-2 right-2 h-8 w-8 rounded-lg bg-white/90 border border-border/60 grid place-items-center text-muted-foreground hover:text-primary shadow-sm" aria-label="Download"><Download className="h-3.5 w-3.5" /></button>
-        {onDelete && <button onClick={e => { e.stopPropagation(); onDelete(); }} className="absolute bottom-2 right-2 h-8 w-8 rounded-lg bg-white/90 border border-border/60 grid place-items-center text-destructive hover:bg-destructive/10 shadow-sm opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity" aria-label="Delete"><Trash2 className="h-3.5 w-3.5" /></button>}
-      </button>
-      <div className="px-2.5 pt-2 pb-1.5 flex items-center gap-1">
-        <p className="flex-1 min-w-0 text-[11px] text-foreground font-medium truncate">{item.label}</p>
-        {menu && <MoreMenu size="sm" label={`Actions for ${item.label}`} title={item.label} actions={menu} className="h-7 w-7 border-0 shadow-none" />}
-      </div>
-    </motion.div>
-  );
-}
-
-function Lightbox({ items, startIndex, onClose }: { items: GalleryItem[]; startIndex: number; onClose(): void }) {
-  const [idx, setIdx] = useState(startIndex);
-  const [dir, setDir] = useState(0);
-  const item = items[idx];
-  const hasPrev = idx > 0, hasNext = idx < items.length - 1;
-  const prev = () => { if (hasPrev) { setDir(-1); setIdx(i => i - 1); } };
-  const next = () => { if (hasNext) { setDir(1); setIdx(i => i + 1); } };
-  useEffect(() => {
-    const h = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); if (e.key === "ArrowLeft") prev(); if (e.key === "ArrowRight") next(); };
-    window.addEventListener("keydown", h);
-    return () => window.removeEventListener("keydown", h);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [idx]);
-  if (!item) return null;
-  return (
-    <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-      className="fixed inset-0 z-[60] bg-black/96 flex flex-col"
-      style={{ paddingTop: "env(safe-area-inset-top)", paddingBottom: "env(safe-area-inset-bottom)" }}>
-      <div className="flex items-center justify-between px-4 py-3 shrink-0 gap-3">
-        <p className="text-white/80 text-sm font-medium truncate">{item.label}{items.length > 1 && <span className="ml-2 text-white/40 text-xs">{idx + 1} / {items.length}</span>}</p>
-        <div className="flex items-center gap-2 shrink-0">
-          <button onClick={() => downloadOne(item.src, item.filename)} className="h-10 w-10 rounded-full bg-white/10 active:bg-white/20 flex items-center justify-center text-white"><Download className="h-5 w-5" /></button>
-          <button onClick={onClose} className="h-10 w-10 rounded-full bg-white/10 active:bg-white/20 flex items-center justify-center text-white"><X className="h-5 w-5" /></button>
-        </div>
-      </div>
-      <div className="flex-1 flex items-center min-h-0 relative">
-        {hasPrev && <button onClick={prev} className="absolute left-2 z-10 h-11 w-11 rounded-full bg-white/10 active:bg-white/20 flex items-center justify-center text-white"><ChevronLeft className="h-6 w-6" /></button>}
-        <AnimatePresence mode="wait" custom={dir}>
-          <motion.div key={item.id} custom={dir}
-            initial={{ opacity: 0, x: dir * 60 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: dir * -60 }}
-            transition={{ duration: 0.22, ease: "easeOut" }} className="flex-1 flex items-center justify-center px-14 h-full min-h-0">
-            {item.type === "image"
-              ? <img src={item.src} alt={item.label} className="max-w-full max-h-full object-contain rounded-xl select-none" style={{ maxHeight: "calc(100vh - 140px)" }} onClick={onClose} />
-              : <WebVideo src={item.src} controls autoPlay muted loop playsInline preload="auto" className="max-w-full rounded-xl" style={{ maxHeight: "calc(100vh - 140px)" }} />}
-          </motion.div>
-        </AnimatePresence>
-        {hasNext && <button onClick={next} className="absolute right-2 z-10 h-11 w-11 rounded-full bg-white/10 active:bg-white/20 flex items-center justify-center text-white"><ChevronRight className="h-6 w-6" /></button>}
-      </div>
-    </motion.div>
-  );
-}
-
-/* ══════════════════════════ ORDER-WISE VIEW ══════════════════════════ */
-/* Auto-organised from orders: jewellery category → design number → the CAD,
-   product photos and video captured on each order. Read-only. */
-function OrdersView({ isStaff }: { isStaff: boolean }) {
+/* ══════════════════════════ BY ORDER — PRODUCTS ══════════════════════════ */
+/* The pieces made on orders, as the catalogue shows its designs: jewellery
+   category → design → its product page (photos, CAD and video; the options and
+   price; the details read off the order). What a piece is — never its client,
+   labour, profit or margin. Where you are is in the address (?c=, ?d=), so Back
+   steps out one level. Staff share a piece, or a whole category, as a link. */
+function OrdersView() {
   const { user } = useAuth();
   const db = useDb();
-  const [category, setCategory] = useState<string | null>(null);
-  const [design, setDesign] = useState<string | null>(null);
-  const [lightbox, setLightbox] = useState<number | null>(null);
-  const [downloading, setDownloading] = useState(false);
+  const staff = user!.role === "admin" || user!.role === "employee";
+  const [sp, setSp] = useSearchParams();
+  const category = sp.get("c");
+  const design = sp.get("d");
+  const [sharing, setSharing] = useState(false);
+  const go = (c: string | null, d: string | null) => setSp(prev => {
+    const n = new URLSearchParams(prev);
+    n.set("tab", "orders");
+    if (c) n.set("c", c); else n.delete("c");
+    if (d) n.set("d", d); else n.delete("d");
+    return n;
+  });
+  const byCategory = useMemo(() => orderProducts(db, currentUserOrders(db, user!)), [db, user]);
+  const products = category ? byCategory.get(category) ?? [] : [];
+  const product = design ? products.find(p => p.design === design) : undefined;
+  const here = (c?: string | null) => `?${new URLSearchParams({ tab: "orders", ...(c ? { c } : {}) }).toString()}`;
 
-  const mediaOrders = currentUserOrders(db, user!).filter(o => (o.productPhotos?.length ?? 0) > 0 || !!o.productVideo || !!o.cadImage);
+  if (category && design && product) return <OrderProductPage product={product} back={{ label: category, to: here(category) }} />;
 
-  const categoryMap = new Map<string, Order[]>();
-  mediaOrders.forEach(o => { const c = o.jewelleryType || "Other"; if (!categoryMap.has(c)) categoryMap.set(c, []); categoryMap.get(c)!.push(o); });
-  const categories = [...categoryMap.entries()].map(([name, orders]) => ({ name, orders })).sort((a, b) => a.name.localeCompare(b.name));
-
-  const designMap = new Map<string, Order[]>();
-  if (category) (categoryMap.get(category) ?? []).forEach(o => { const d = (o.designNumber || o.orderNumber || "Unlabelled").trim(); if (!designMap.has(d)) designMap.set(d, []); designMap.get(d)!.push(o); });
-  const designs = [...designMap.entries()].map(([name, orders]) => ({ name, orders })).sort((a, b) => a.name.localeCompare(b.name));
-
-  const designOrders = design ? (designMap.get(design) ?? []) : [];
-  const items = design ? buildOrderItems(designOrders, design) : [];
-
-  const downloadAll = async () => {
-    setDownloading(true);
-    try {
-      const r = await downloadAsZip(items.map(it => ({ url: it.src, filename: it.filename })), `${design || "photos"}`);
-      if (!r.added) toast.error("Nothing could be downloaded — check the connection and try again");
-      else if (r.failed.length) toast.warning(`${r.added} downloaded, ${r.failed.length} could not be fetched`);
-      else toast.success(`${r.added} file${r.added !== 1 ? "s" : ""} downloaded as ${design || "photos"}.zip`);
-    } finally { setDownloading(false); }
-  };
-
+  const shareKey = `category:${category}`;
   return (
     <div className="space-y-4">
-      <nav className="flex items-center gap-1 flex-wrap text-sm min-w-0">
-        <button onClick={() => { setCategory(null); setDesign(null); }} className={`font-medium shrink-0 ${!category ? "text-brand-dark" : "text-primary hover:underline"}`}>All orders</button>
-        {category && <span className="flex items-center gap-1 min-w-0"><ChevronRight className="h-3.5 w-3.5 text-muted-foreground shrink-0" /><button onClick={() => setDesign(null)} className={`font-medium truncate ${!design ? "text-brand-dark" : "text-primary hover:underline"}`}>{category}</button></span>}
-        {design && <span className="flex items-center gap-1 min-w-0"><ChevronRight className="h-3.5 w-3.5 text-muted-foreground shrink-0" /><span className="font-medium text-brand-dark truncate">{design}</span></span>}
-      </nav>
+      <div className="flex items-center justify-between gap-3 flex-wrap">
+        <nav className="flex items-center gap-1 flex-wrap text-sm min-w-0">
+          <button onClick={() => go(null, null)} className={`font-medium shrink-0 ${!category ? "text-brand-dark" : "text-primary hover:underline"}`}>All orders</button>
+          {category && <span className="flex items-center gap-1 min-w-0"><ChevronRight className="h-3.5 w-3.5 text-muted-foreground shrink-0" /><span className="font-medium text-brand-dark truncate">{category}</span></span>}
+        </nav>
+        {staff && category && products.length > 0 && (
+          <Button size="sm" variant="outline" className="gap-1.5" onClick={() => setSharing(true)}><Share2 className="h-4 w-4" />Share {category}</Button>
+        )}
+      </div>
 
-      {!category && (categories.length === 0
+      {!category && (byCategory.size === 0
         ? <div className="card-luxe p-12 text-center text-muted-foreground"><Camera className="h-10 w-10 mx-auto mb-3 opacity-20" /><p>No order photos yet.</p></div>
         : <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-auto-photos gap-3 sm:gap-4">
-            {categories.map(cat => {
-              const designCount = new Set(cat.orders.map(o => (o.designNumber || o.orderNumber || "Unlabelled").trim())).size;
-              const cover = cat.orders.flatMap(o => o.productPhotos ?? [])[0] ?? cat.orders.find(o => o.cadImage)?.cadImage;
-              return <FolderCard key={cat.name} label={cat.name} sub={`${designCount} design${designCount !== 1 ? "s" : ""}`} cover={cover} onClick={() => setCategory(cat.name)} />;
-            })}
+            {[...byCategory.entries()].map(([name, list]) => (
+              <FolderCard key={name} label={name} sub={`${list.length} design${list.length !== 1 ? "s" : ""}`} cover={list.find(p => p.cover)?.cover} onClick={() => go(name, null)} />
+            ))}
           </div>)}
 
-      {category && !design && (
-        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-auto-photos gap-3 sm:gap-4">
-          {designs.map(d => {
-            const cover = d.orders.flatMap(o => o.productPhotos ?? [])[0] ?? d.orders.find(o => o.cadImage)?.cadImage;
-            const clientNames = isStaff ? [...new Set(d.orders.map(o => db.clients.find(c => c.id === o.clientId)?.companyName).filter(Boolean))] : [];
-            return <FolderCard key={d.name} label={d.name} sub={clientNames.length > 0 ? clientNames.join(", ") : undefined} cover={cover} onClick={() => setDesign(d.name)} />;
-          })}
-        </div>
-      )}
+      {category && (products.length === 0
+        ? <div className="card-luxe p-8 text-center text-sm text-muted-foreground">Nothing here any more. <button className="text-primary underline" onClick={() => go(null, null)}>All orders</button></div>
+        : <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-auto-photos gap-3 sm:gap-4">
+            {products.map(p => (
+              <motion.button key={p.design} whileTap={{ scale: 0.97 }} onClick={() => go(category, p.design)} aria-label={`Open ${p.design}`}
+                className="w-full flex flex-col rounded-2xl border border-border/60 active:border-primary/40 bg-white shadow-sm overflow-hidden text-left">
+                <div className="aspect-square w-full bg-secondary/30 overflow-hidden relative">
+                  {p.cover ? <img src={p.cover} alt="" loading="lazy" decoding="async" className="w-full h-full object-cover" />
+                    : p.videos[0] ? <VideoPoster src={p.videos[0]} alt={p.design} />
+                    : <div className="absolute inset-0 grid place-items-center"><ImageIcon className="h-8 w-8 text-muted-foreground/40" /></div>}
+                  {p.videos.length > 0 && p.cover && <span className="absolute top-2 left-2 inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[10px] font-medium bg-black/50 text-white"><Video className="h-2.5 w-2.5" />video</span>}
+                </div>
+                <div className="px-3 pt-2 pb-2.5 min-w-0">
+                  <p className="text-sm font-medium text-foreground truncate">{p.design}</p>
+                  {p.line && <p className="text-[11px] text-muted-foreground truncate">{p.line}</p>}
+                </div>
+              </motion.button>
+            ))}
+          </div>)}
 
-      {category && design && (
-        <div className="space-y-3">
-          <div className="flex items-center justify-between gap-3 flex-wrap">
-            {isStaff && <p className="text-xs text-muted-foreground truncate min-w-0">{designOrders.map(o => o.orderNumber).join(", ")} · {[...new Set(designOrders.map(o => db.clients.find(c => c.id === o.clientId)?.companyName).filter(Boolean))].join(", ")}</p>}
-            {items.length > 0 && <button onClick={downloadAll} disabled={downloading} className="flex items-center gap-1.5 h-9 px-3 rounded-xl border border-border text-xs font-medium hover:bg-secondary disabled:opacity-60 shrink-0"><Download className="h-3.5 w-3.5" /> {downloading ? "Downloading…" : "Download All"}</button>}
-          </div>
-          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-auto-photos gap-3 sm:gap-4">
-            {items.map((item, i) => <ItemCard key={item.id} item={item} onOpen={() => setLightbox(i)} onDownload={() => downloadOne(item.src, item.filename)} />)}
-          </div>
-        </div>
-      )}
+      {category && design && !product && products.length > 0 && <p className="text-xs text-muted-foreground">{design} isn&rsquo;t in {category} any more.</p>}
 
-      <AnimatePresence>{lightbox !== null && <Lightbox items={items} startIndex={lightbox} onClose={() => setLightbox(null)} />}</AnimatePresence>
+      {sharing && category && (
+        <DesignShareSheet title={category} onClose={() => setSharing(false)}
+          description={`Every ${category} piece — each opens as its own product page, with its options and, if you choose, its price. Never its orders, client, labour or costs.`}
+          existing={findOrderShare("orderCategory", shareKey)}
+          onSave={c => {
+            const list = products.slice(0, 150).map(p => sharedProduct(p, 8));
+            // The link's preview and first view: a picture of each piece.
+            const items = list.map(p => p.items[0]).filter(Boolean);
+            return saveOrderShare({ kind: "orderCategory", key: shareKey, title: category, items, products: list, ...c });
+          }} />
+      )}
     </div>
   );
 }
@@ -218,9 +138,11 @@ export function ProductPhotosPage() {
   const { user } = useAuth();
   const db = useDb();
   const can = useCan();
-  const isStaff = user!.role !== "client";
   const seeDesigns = user!.role === "admin" || (user!.role === "employee" && can("designers"));
-  const [tab, setTab] = useState<"designs" | "orders">(seeDesigns ? "designs" : "orders");
+  // By Order opened by its address (a piece, a category, Back from one): that tab.
+  const [sp, setSp] = useSearchParams();
+  const [tab, setTabState] = useState<"designs" | "orders">(seeDesigns && sp.get("tab") !== "orders" && !sp.get("c") ? "designs" : "orders");
+  const setTab = (t: "designs" | "orders") => { setTabState(t); if (t === "designs" && (sp.get("c") || sp.get("d") || sp.get("tab"))) setSp({}, { replace: true }); };
   // An employee sees the designs of the orders within their work, as on Orders.
   const mine = user!.role === "employee" ? new Set(currentUserOrders(db, user!).map(o => o.id)) : null;
   const jobs = seeDesigns ? (db.cadJobs ?? []).filter(j => !mine || mine.has(j.orderId)) : [];
@@ -240,23 +162,27 @@ export function ProductPhotosPage() {
     }
   }
 
+  // A piece open: its product page alone, as a catalogue design's (its Back goes to its category).
+  const pieceOpen = tab === "orders" && !!sp.get("c") && !!sp.get("d");
   return (
     <div className="max-w-6xl mx-auto space-y-5">
-      <PageHeader title="Design Studio" subtitle={seeDesigns ? "CAD designs and product photos" : "Product photos"} />
+      {!pieceOpen && <>
+      <PageHeader title="Design Studio" subtitle={seeDesigns ? "CAD designs and products made on orders" : "Products made on your orders"} />
 
-      {/* Designs given to designers (staff) · photos by order */}
+      {/* Designs given to designers (staff) · the pieces made on orders */}
       <TabBar label="Design Studio" value={tab} onChange={setTab} className="w-fit max-w-full"
         tabs={[
           ...(seeDesigns ? [{ key: "designs" as const, label: "Designs", icon: PenTool, count: jobs.filter(isOpenJob).length || undefined }] : []),
           { key: "orders", label: "By Order", icon: Package },
         ]} />
+      </>}
 
       {tab === "designs" && seeDesigns ? (
         <div className="card-luxe p-3 sm:p-4">
           <CadJobsTable id="design-studio-jobs" jobs={jobs} showDesigner exportName="Designs"
             emptyText="No designs given yet — give an order's design to a designer from its CAD Design card." />
         </div>
-      ) : <OrdersView isStaff={isStaff} />}
+      ) : <OrdersView />}
     </div>
   );
 }

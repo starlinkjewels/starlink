@@ -1097,12 +1097,30 @@ export interface SharePiece {
 /** The company a piece share is from, as its header shows it. */
 export interface ShareBrand { name: string; logo?: string; website?: string; email?: string; phone?: string }
 
+/** A piece made on orders, as a shared link keeps it: what it is, its pictures — never what it cost or whose it was. */
+export interface SharedOrderProduct {
+  title: string;
+  category?: string;
+  /** Its metal's grams by karat and its stones (lib/pure/orderSpecs.ts). */
+  specs: { metal: Record<string, number>; stones: { shape?: string; sieve?: string; size?: string; pcs: number; perStone: number; total: number }[]; stoneTotals?: { pcs: number; ct: number }; ringSize?: string };
+  /** "14K gold · 3.6 g · 1.58 ct" */
+  line?: string;
+  items: ShareItem[];
+  videos?: string[];
+}
+
 export interface Share {
   id: string;
   /** "readyStock": chosen pieces (`pieces`), not a folder. "design": one catalogue design's product page (`designKey`). */
-  kind: "catalog" | "productPhotos" | "readyStock" | "design";
-  /** kind "design": the design (catalogDesigns key); its pictures are in `items`. */
+  kind: "catalog" | "productPhotos" | "readyStock" | "design" | "orderDesign" | "orderCategory";
+  /** kind "design": the design (catalogDesigns key); its pictures are in `items`.
+   *  kind "orderDesign" / "orderCategory": which piece or category (one link each) — "design:<category>/<design>", "category:<category>". */
   designKey?: string;
+  /** kind "orderDesign": the piece made on orders (Design Studio → By Order) — its details kept on the link and priced
+   *  on the server; never its orders, client, labour or costs. */
+  product?: SharedOrderProduct;
+  /** kind "orderCategory": every piece of the category, in order; `items` holds a picture of each (the link's preview). */
+  products?: SharedOrderProduct[];
   /** kind "design" with showPrice: priced as this client (their margin), in this currency. */
   priceFor?: string;
   ccy?: "INR" | "USD";

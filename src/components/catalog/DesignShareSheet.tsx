@@ -14,13 +14,21 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { useAuth } from "@/lib/auth";
 import { useDb } from "@/hooks/useDb";
 import { deleteShare, findDesignShare, saveDesignShare, shareUrl } from "@/lib/share";
+import type { Share } from "@/lib/db";
 import type { Ccy } from "@/lib/pure/pricing";
 import type { Pic } from "./ProductView";
 
-export function DesignShareSheet({ designKey, title, pictures, onClose }: { designKey: string; title: string; pictures: Pic[]; onClose(): void }) {
+/** Price and line as chosen here: what a link is made with. */
+export type ShareChoice = { showPrice: boolean; priceFor?: string; ccy: Ccy; note?: string; createdBy: string };
+
+/** A catalogue design's link — or, given `existing` and `onSave`, another product page's (a piece made on orders, a category). */
+export function DesignShareSheet({ designKey, title, pictures, onClose, existing: given, onSave, description }: {
+  designKey?: string; title: string; pictures?: Pic[]; onClose(): void;
+  existing?: Share; onSave?(c: ShareChoice): Share; description?: string;
+}) {
   const { user } = useAuth();
   const db = useDb();
-  const existing = findDesignShare(designKey);
+  const existing = onSave ? given : designKey ? findDesignShare(designKey) : undefined;
   const [showPrice, setShowPrice] = useState(existing?.showPrice ?? false);
   const [priceFor, setPriceFor] = useState(existing?.priceFor ?? "");
   const [ccy, setCcy] = useState<Ccy>(existing?.ccy ?? "USD");
@@ -28,9 +36,10 @@ export function DesignShareSheet({ designKey, title, pictures, onClose }: { desi
   const [link, setLink] = useState(existing ? shareUrl(existing.id) : "");
 
   const save = () => {
-    const s = saveDesignShare({
-      designKey, title, showPrice, ccy, createdBy: user!.id, note: note.trim() || undefined, ...(showPrice && priceFor ? { priceFor } : {}),
-      items: pictures.slice(0, 40).map(p => ({ type: "image" as const, url: p.url, ...(p.thumb ? { thumb: p.thumb } : {}), name: p.name })),
+    const c: ShareChoice = { showPrice, ccy, createdBy: user!.id, note: note.trim() || undefined, ...(showPrice && priceFor ? { priceFor } : {}) };
+    const s = onSave ? onSave(c) : saveDesignShare({
+      designKey: designKey!, title, ...c,
+      items: (pictures ?? []).slice(0, 40).map(p => ({ type: "image" as const, url: p.url, ...(p.thumb ? { thumb: p.thumb } : {}), name: p.name })),
     });
     const url = shareUrl(s.id);
     setLink(url);
@@ -42,7 +51,7 @@ export function DesignShareSheet({ designKey, title, pictures, onClose }: { desi
   };
 
   return (
-    <ActionSheet open onOpenChange={o => { if (!o) onClose(); }} icon={Share2} title={`Share ${title}`} description="Its pictures, details and options — and its price, if you choose.">
+    <ActionSheet open onOpenChange={o => { if (!o) onClose(); }} icon={Share2} title={`Share ${title}`} description={description ?? "Its pictures, details and options — and its price, if you choose."}>
       <div className="space-y-4">
         <label className="flex items-start justify-between gap-3 rounded-xl border border-border px-4 py-3">
           <span><span className="text-sm font-medium block">Show the price</span><span className="text-xs text-muted-foreground">Worked out live for the options they choose — never the costs or margin</span></span>
