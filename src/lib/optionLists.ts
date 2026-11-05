@@ -30,7 +30,7 @@ export interface ListDef {
 }
 
 export const LIST_DEFS: readonly ListDef[] = [
-  { key: "jewelleryTypes", group: "Orders", title: "Jewellery types", hint: "New order, order edit and Ready Stock",
+  { key: "jewelleryTypes", group: "Orders", title: "Jewellery types", hint: "New order, order edit, Ready Stock and factory labour rates",
     defaults: ["Ring", "Ring + Band", "Pendant", "Necklace", "Bracelet", "Earrings", "Custom"], builtIn: ["Diamond Only"] },
   { key: "metals", group: "Orders", title: "Metals", hint: "Each one with karats or without",
     defaults: ["Yellow Gold", "White Gold (Palladium Alloy)", "White Gold (Silver Alloy)", "Rose Gold", "Platinum", "Silver", "Titanium"],

@@ -7,7 +7,7 @@ import { ActionSheet } from "@/components/ActionSheet";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { FactoryLabourFields, labourDraftOf, labourOf, type LabourDraft } from "@/components/FactoryLabourFields";
+import { FactoryLabourFields, labourDraftOf, labourOf, rememberItems, type LabourDraft } from "@/components/FactoryLabourFields";
 
 const EMPTY: Partial<Factory> = { name: "", contactPerson: "", phone: "", email: "", address: "" };
 
@@ -32,6 +32,7 @@ export function FactoryCreateDialog({ open, onOpenChange, onCreated }: {
         if (!d.factories) d.factories = [];
         const rates = labourOf(labour);
         d.factories.unshift({ ...f, name: f.name!.trim(), email: f.email?.trim() || undefined, id, active: true, createdAt: new Date().toISOString(), ...(rates ? { labour: rates } : {}) } as Factory);
+        rememberItems(d, labour);
       });
       toast.success("Factory added");
       onOpenChange(false);
