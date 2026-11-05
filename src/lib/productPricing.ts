@@ -51,9 +51,12 @@ export type ClientQuote = DesignQuote & { see: "price" | "details" };
 /** A client's price for these options (or, for staff, a client's price as that client sees it). */
 export const clientQuote = async (key: string, choice: Partial<Choice> = {}) =>
   (await httpsCallable<{ key: string; choice: Partial<Choice> }, ClientQuote>(functions, "specsPrice", { timeout: 30_000 })({ key, choice })).data;
-/** A shared design's link: what the link lets anyone see (signed in or not). */
-export const shareQuote = async (id: string, choice: Partial<Choice> = {}) =>
-  (await httpsCallable<{ id: string; choice: Partial<Choice> }, DesignQuote>(functions, "specsShare", { timeout: 30_000 })({ id, choice })).data;
+/** A shared design's link: what the link lets anyone see (signed in or not). A category's link: its `product`-th piece. */
+export const shareQuote = async (id: string, choice: Partial<Choice> = {}, product?: number) =>
+  (await httpsCallable<{ id: string; choice: Partial<Choice>; product?: number }, DesignQuote>(functions, "specsShare", { timeout: 30_000 })({ id, choice, ...(product != null ? { product } : {}) })).data;
+/** A client's own order's piece (Design Studio → By Order): their price, or details only — worked out on the server. */
+export const orderQuote = async (orderId: string, choice: Partial<Choice> = {}) =>
+  (await httpsCallable<{ orderId: string; choice: Partial<Choice> }, ClientQuote>(functions, "specsOrderPrice", { timeout: 30_000 })({ orderId, choice })).data;
 
 export const money = (n: number, ccy: Ccy) =>
   ccy === "INR" ? `₹${Math.round(n).toLocaleString("en-IN")}` : `$${n.toLocaleString("en-US", { minimumFractionDigits: n % 1 ? 2 : 0, maximumFractionDigits: 2 })}`;

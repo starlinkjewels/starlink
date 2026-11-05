@@ -257,7 +257,7 @@ function NewOrderForm() {
     });
   };
 
-  const metalHasKarats = hasKarats(f.metal);
+  const metalHasKarats = hasKarats(f.metal, db.settings);
   // A pure diamond sale, no jewellery piece at all — hides every field that
   // only makes sense for a manufactured piece (size, plating, factory, etc.).
   const isDiamondOnly = f.jewelleryType === "Diamond Only";
@@ -1602,6 +1602,12 @@ function NewOrderForm() {
             <ProductionPlan
               clientGives={cmOn ? { gold: cmGold, diamonds: cmDia } : undefined}
               order={{ kind, companyId: orderCompany, metal: f.metal, metalHasKarats, productKarats: f.productKarats,
+                // Every metal in the piece: its own, then each other metal on the order — the plan shows each.
+                metals: isDiamondOnly ? [] : [
+                  { metal: f.metal, grams: Number(f.estimatedNetWeight) || Number(f.estimatedGrossWeight) || 0, hasKarats: metalHasKarats },
+                  ...f.otherMetals.filter(r => r.metal.trim() && r.metal.trim().toLowerCase() !== f.metal.trim().toLowerCase())
+                    .map(r => ({ metal: r.metal.trim(), grams: Number(r.weight) || 0, purity: Number(r.purity) || undefined, hasKarats: hasKarats(r.metal.trim(), db.settings) })),
+                ],
                 estimatedNetWeight: Number(f.estimatedNetWeight) || 0, estimatedGrossWeight: Number(f.estimatedGrossWeight) || 0,
                 diamondWeight: Number(f.diamondWeight) || 0, quantity: Number(f.quantity) || 1, stoneSpec: { ...f.stoneSpec, stone }, diamondType: isGemSale ? undefined : f.diamondType }}
               factoryId={f.assignedFactoryId} onFactory={v => set("assignedFactoryId", v)}

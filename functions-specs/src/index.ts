@@ -35,6 +35,7 @@ import { PARSER_VERSION, parseSheet, sameDesign, type Specs } from "./shared/spe
 import { arrangeDesign, designOf, isJunk, isSheetFile, learnRules, roleOf, type DesignEntry, type DesignOf, type ItemDesign, type ItemSpecs, type MediaRole, type MediaRules } from "./shared/catalogMedia";
 import { categoryOf, centreSizes, cleanRules, clientSees, defaultChoice, gramsFor, priceDesign, sheetRingUs, takesRingSize, withCentre, type Ccy, type Choice, type MetalKey } from "./shared/pricing";
 import { cleanSettings as cleanRateSettings, karatRates, type PriceBase } from "./shared/liveRates";
+import { orderSpecs, type IssueLike, type OrderLike, type PacketLike } from "./shared/orderSpecs";
 
 // Local tests run against the emulators only — never the live database.
 if (process.env.FUNCTIONS_EMULATOR === "true" && !process.env.FIRESTORE_EMULATOR_HOST) {
@@ -558,24 +559,32 @@ export const specsAdmin = onCall<AdminCall>({ region: REGION, memory: "512MiB", 
 
 const KEY_OK = /^~?[A-Za-z0-9_~-]{1,140}$/;
 type Ask = { key: string; choice?: Partial<Choice>; clientId?: string; ccy?: Ccy; showPrice: boolean };
+/** What is priced: a design's details, its number and the folder names that say what kind of piece it is. */
+type Source = { specs: ItemSpecs; designNo: string; names: string[] };
 
 async function quote(ask: Ask) {
   if (!KEY_OK.test(ask.key)) throw new HttpsError("invalid-argument", "Which design?");
-  const [rulesDoc, design, ratesDoc, rateSet] = await Promise.all([
-    db.collection("priceRules").doc("main").get(), db.collection(DESIGNS).doc(ask.key).get(),
-    db.collection("rates").doc("current").get(), db.collection("rateSettings").doc("main").get(),
-  ]);
+  const design = await db.collection(DESIGNS).doc(ask.key).get();
   if (!design.exists) throw new HttpsError("not-found", "No such design.");
   const specs = design.get("specs") as ItemSpecs | null;
   const ready = !!specs && design.get("status") === "ok";
   if (!ready) return { ready: false as const, designNo: String(design.get("designNo") ?? "") };
-  const rules = cleanRules(rulesDoc.data());
-  const metal = (specs!.metal ?? {}) as Record<string, number>;
   // A ring or a band — by its folders, else its letters, else a ring size on its sheet: ring sizes.
   const names: string[] = [];
   let fid: string | null = ((design.get("folderIds") as string[] | undefined) ?? [])[0] ?? null;
   for (let g = 0; fid && g < 30; g++) { const f = (await db.collection(FOLDERS).doc(fid).get()).data(); if (!f) break; names.push(String(f.name ?? "")); fid = (f.parentId as string) || null; }
-  const category = categoryOf(names, String(design.get("designNo") ?? ""), rules);
+  return quoteOf({ specs: specs!, designNo: String(design.get("designNo") ?? ""), names }, ask);
+}
+
+/** The options, details and — where it may be seen — the price of a design's details, for the options chosen. */
+async function quoteOf(src: Source, ask: Omit<Ask, "key">) {
+  const [rulesDoc, ratesDoc, rateSet] = await Promise.all([
+    db.collection("priceRules").doc("main").get(), db.collection("rates").doc("current").get(), db.collection("rateSettings").doc("main").get(),
+  ]);
+  const specs = src.specs;
+  const rules = cleanRules(rulesDoc.data());
+  const metal = (specs!.metal ?? {}) as Record<string, number>;
+  const category = categoryOf(src.names, src.designNo, rules);
   const ring = takesRingSize(category) || (!category && !!specs!.ringSize);
   const ccy: Ccy = ask.ccy ?? (ask.clientId ? rules.clients[ask.clientId]?.ccy : undefined) ?? (ask.choice?.ccy === "INR" ? "INR" : "USD");
   const options = {
@@ -607,7 +616,7 @@ async function quote(ask: Ask) {
   const current = !!specs!.checkedBy || specs!.v === PARSER_VERSION;
   const priced = ask.showPrice && current && p && !p.missing.length;
   return {
-    ready: true as const, designNo: String(design.get("designNo") ?? ""), options, choice, details,
+    ready: true as const, designNo: src.designNo, options, choice, details,
     // The total for the selection — nothing of how it is made up, not even its GST.
     ...(priced ? { price: p!.price, ccy: p!.ccy, asOf: price?.at ?? null } : { price: null }),
   };
@@ -628,14 +637,68 @@ export const specsPrice = onCall<{ key: string; choice?: Partial<Choice> }>({ re
   return { see, ...q };
 });
 
-/** Anyone with a shared design's link: what the share lets them see (the price only if it was shared with one). */
-export const specsShare = onCall<{ id: string; choice?: Partial<Choice> }>({ region: REGION, memory: "256MiB", maxInstances: 5, timeoutSeconds: 30 }, async req => {
+/** A product's details as kept on a link (an order's piece): numbers and names only, made whole. */
+type SharedProduct = { title?: string; category?: string; specs?: Partial<ItemSpecs> };
+const num = (v: unknown) => (typeof v === "number" && Number.isFinite(v) && v >= 0 ? v : 0);
+function sharedSource(p: SharedProduct | undefined): Source | null {
+  const sp = p?.specs;
+  if (!sp || typeof sp !== "object") return null;
+  const metal: Record<string, number> = {};
+  for (const [k, v] of Object.entries(sp.metal ?? {})) if (typeof k === "string" && num(v) > 0) metal[k] = num(v);
+  const stones = (Array.isArray(sp.stones) ? sp.stones : []).slice(0, 60).map(r => ({
+    shape: String(r?.shape ?? "Round").slice(0, 40), pcs: Math.round(num(r?.pcs)), perStone: num(r?.perStone), total: num(r?.total),
+    ...(r?.sieve ? { sieve: String(r.sieve).slice(0, 20) } : {}), ...(r?.size ? { size: String(r.size).slice(0, 20) } : {}),
+  }));
+  const t = sp.stoneTotals;
+  const specs = {
+    v: 0, status: "ok", stones, metal, dimsMm: [], reasons: [], checkedBy: "order",
+    ...(t ? { stoneTotals: { pcs: Math.round(num(t.pcs)), ct: num(t.ct) } } : {}),
+    ...(sp.ringSize ? { ringSize: String(sp.ringSize).slice(0, 12) } : {}),
+  } as unknown as ItemSpecs;
+  return { specs, designNo: String(p?.title ?? "").slice(0, 80), names: p?.category ? [String(p.category)] : [] };
+}
+
+/** Anyone with a shared design's link: what the share lets them see (the price only if it was shared with one).
+ *  An order's piece (kind "orderDesign") or one of a category's (kind "orderCategory", `product` its place) is
+ *  priced from the details kept on the link. */
+export const specsShare = onCall<{ id: string; choice?: Partial<Choice>; product?: number }>({ region: REGION, memory: "256MiB", maxInstances: 5, timeoutSeconds: 30 }, async req => {
   const id = String(req.data?.id ?? "");
   if (!/^[A-Za-z0-9_-]{1,80}$/.test(id)) throw new HttpsError("invalid-argument", "Which link?");
-  const share = (await db.collection("shares").doc(id).get()).data() as { kind?: string; designKey?: string; showPrice?: boolean; priceFor?: string; ccy?: Ccy; expiresAt?: string } | undefined;
-  if (!share || share.kind !== "design" || !share.designKey) throw new HttpsError("not-found", "This link isn't there any more.");
+  const share = (await db.collection("shares").doc(id).get()).data() as { kind?: string; designKey?: string; showPrice?: boolean; priceFor?: string; ccy?: Ccy; expiresAt?: string; product?: SharedProduct; products?: SharedProduct[] } | undefined;
+  const kinds = ["design", "orderDesign", "orderCategory"];
+  if (!share || !kinds.includes(String(share.kind)) || (share.kind === "design" && !share.designKey)) throw new HttpsError("not-found", "This link isn't there any more.");
   if (share.expiresAt && Date.parse(share.expiresAt) < Date.now()) throw new HttpsError("failed-precondition", "This link has expired.");
-  return quote({ key: share.designKey, choice: req.data?.choice, clientId: share.priceFor || undefined, ccy: share.ccy === "INR" || share.ccy === "USD" ? share.ccy : undefined, showPrice: !!share.showPrice });
+  const ask = { choice: req.data?.choice, clientId: share.priceFor || undefined, ccy: share.ccy === "INR" || share.ccy === "USD" ? share.ccy : undefined, showPrice: !!share.showPrice };
+  if (share.kind === "design") return quote({ key: share.designKey!, ...ask });
+  const n = Number(req.data?.product ?? 0);
+  const p = share.kind === "orderDesign" ? share.product : Number.isInteger(n) && n >= 0 ? share.products?.[n] : undefined;
+  const src = sharedSource(p);
+  if (!src) throw new HttpsError("not-found", "This piece isn't on the link any more.");
+  return quoteOf(src, ask);
+});
+
+/** A signed-in client's own order (Design Studio → By Order), or any order for staff: its piece priced from
+ *  what went into it — the client's own price, or details only. Never another client's order. */
+export const specsOrderPrice = onCall<{ orderId: string; choice?: Partial<Choice> }>({ region: REGION, memory: "256MiB", maxInstances: 5, timeoutSeconds: 30 }, async req => {
+  if (!req.auth?.uid) throw new HttpsError("unauthenticated", "Sign in first.");
+  const id = String(req.data?.orderId ?? "");
+  if (!/^[A-Za-z0-9_-]{1,80}$/.test(id)) throw new HttpsError("invalid-argument", "Which order?");
+  const idx = (await db.collection("userByAuth").doc(req.auth.uid).get()).data() as { role?: string; status?: string; clientId?: string } | undefined;
+  const owner = OWNER_EMAILS.includes(String(req.auth.token?.email ?? "").toLowerCase());
+  if (!owner && idx?.status !== "active") throw new HttpsError("permission-denied", "Your account is not active.");
+  const staff = owner || idx?.role === "admin" || idx?.role === "employee";
+  const order = (await db.collection("orders").doc(id).get()).data() as (OrderLike & { clientId?: string; deletedAt?: string }) | undefined;
+  // A client sees their own orders only — any other is "not there", as if it did not exist.
+  if (!order || order.deletedAt || (!staff && (!idx?.clientId || order.clientId !== idx.clientId))) throw new HttpsError("not-found", "No such order.");
+  const issues = (await db.collection("materialIssuances").where("orderId", "==", id).get()).docs.map(d => d.data() as IssueLike);
+  const ids = [...new Set(issues.flatMap(i => i.diamondPacketIds ?? []))].slice(0, 200);
+  const packets = ids.length ? (await db.getAll(...ids.map(x => db.collection("diamondPackets").doc(x)))).filter(d => d.exists).map(d => ({ id: d.id, ...(d.data() as Omit<PacketLike, "id">) })) : [];
+  const specs = orderSpecs({ ...order, id }, issues, packets) as unknown as ItemSpecs;
+  const clientId = staff ? undefined : idx?.clientId;
+  const rules = cleanRules((await db.collection("priceRules").doc("main").get()).data());
+  const see = staff ? "price" : clientSees(rules, clientId);
+  const q = await quoteOf({ specs, designNo: String(order.designNumber || order.orderNumber || ""), names: order.jewelleryType ? [order.jewelleryType] : [] }, { choice: req.data?.choice, clientId, showPrice: see === "price" });
+  return { see, ...q };
 });
 
 /** A page of catalogue cards: each design's price as the card shows it (defaultChoice) — the total alone, for whoever may see it. */

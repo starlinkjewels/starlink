@@ -9,7 +9,7 @@ const path = require("path");
 const root = path.join(__dirname, "..", "..");
 const to = path.join(__dirname, "..", "src", "shared");
 fs.mkdirSync(to, { recursive: true });
-for (const [from, name] of [["src/lib/pure/specParse.ts", "specParse.ts"], ["src/lib/pure/catalogMedia.ts", "catalogMedia.ts"], ["src/lib/pure/pricing.ts", "pricing.ts"], ["src/lib/pure/liveRates.ts", "liveRates.ts"], ["src/lib/pure/tableRead.ts", "tableRead.ts"]]) {
+for (const [from, name] of [["src/lib/pure/specParse.ts", "specParse.ts"], ["src/lib/pure/catalogMedia.ts", "catalogMedia.ts"], ["src/lib/pure/pricing.ts", "pricing.ts"], ["src/lib/pure/liveRates.ts", "liveRates.ts"], ["src/lib/pure/tableRead.ts", "tableRead.ts"], ["src/lib/pure/orderSpecs.ts", "orderSpecs.ts"]]) {
   const src = fs.readFileSync(path.join(root, from), "utf8");
   const nl = src.includes("\r\n") ? "\r\n" : "\n";
   fs.writeFileSync(path.join(to, name), "// GENERATED from " + from + " by functions-specs/scripts/sync-shared.cjs - do not edit here." + nl + src);

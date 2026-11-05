@@ -17,6 +17,7 @@ import { deriveStockBalances, estimatedPureGoldNeeded, factoryFineGoldBalance, f
 import { materialDefs, materialName, materialUnit, type MaterialKey } from "@/lib/materials";
 import { pickAvailable, pickCostInr, suggestLots, type StockPick } from "@/lib/orderStock";
 import { hasDiamonds } from "@/lib/orderText";
+import { metalFamily } from "@/lib/metals";
 
 export type OrderKind = "piece" | "loose" | "readyStock";
 
@@ -35,6 +36,9 @@ export interface PlanOrder {
   stoneSpec?: { stone?: string; shape?: string; type?: string; mm?: string; size?: string; color?: string; clarity?: string };
   /** Natural, CVD, HPHT… — lots of that type are suggested first. */
   diamondType?: string;
+  /** Every metal in the piece: its own (the order's metal, the estimated net) first, then each other metal on the
+   *  order (its estimated weight and purity) — each shown on its own. Unset: the order's metal alone. */
+  metals?: { metal: string; grams: number; purity?: number; hasKarats: boolean }[];
 }
 
 const r2 = (n: number) => Math.round(n * 100) / 100;
@@ -84,10 +88,28 @@ export function ProductionPlan({ order, factoryId, onFactory, picks, onPicks, pl
   const factory = db.factories.find(f => f.id === factoryId);
   const factoryFine = factory ? factoryFineGoldBalance(db.materialIssuances ?? [], factory.id, factory.openingFineGold, co) : 0;
   const goldPlanned = picks.some(p => p.material === "gold") || !!planned?.lines.some(l => l.kind === "gold");
+  // The piece's metals, each on its own — the order's own metal first (never a fixed "Gold").
+  const metals = piece ? (order.metals ?? (order.metal ? [{ metal: order.metal, grams: order.estimatedNetWeight || order.estimatedGrossWeight, hasKarats: order.metalHasKarats }] : []))
+    .filter(m => m.metal.trim()) : [];
+  // Fine gold for every gold in the piece: the order's own at its karat, another gold part at its purity (‰).
+  const goldParts = metals.filter(m => m.hasKarats).map((m, i) => ({
+    ...m, fine: i === 0 && m.metal === order.metal ? goldNeed : m.purity ? r3(m.grams * m.purity / 1000) : 0,
+  }));
+  const goldFine = r3(goldParts.reduce((t, m) => t + m.fine, 0));
 
   // ── Stock to choose from ──
   const goldBuckets = Object.entries(deriveStockBalances(db.stockMovements ?? [], "gold", co)).filter(([, q]) => q > 0);
   const others = materialDefs(db.settings).filter(m => m.active !== false);
+  /** A metal besides gold in stock (Settings → Materials, in grams): the materials of its family — "Platinum 950" is platinum. */
+  const stockOf = (metal: string) => {
+    const fam = metalFamily(metal).toLowerCase();
+    const mats = others.filter(m => m.unit === "g" && fam && metalFamily(m.name).toLowerCase() === fam);
+    const buckets = mats.flatMap(m => Object.entries(deriveStockBalances(db.stockMovements ?? [], m.id, co)).filter(([, q]) => q > 0).map(([key, q]) => ({ m, key, q: r3(q) })));
+    const ids = new Set<string>(mats.map(m => m.id));
+    const plannedG = r3(picks.filter(p => ids.has(p.material)).reduce((t, p) => t + (p.qty || 0), 0)
+      + (planned?.lines.filter(l => l.materialId && ids.has(l.materialId)).reduce((t, l) => t + l.qty, 0) ?? 0));
+    return { mats, buckets, inStock: r3(buckets.reduce((t, b) => t + b.q, 0)), plannedG };
+  };
   const certified = (db.diamondPackets ?? []).filter(p => p.status === "in_stock" && (!multi || companyOf(p) === co));
   const suggestions = order.kind === "loose" && wantsDiamonds ? suggestLots(db, { ...order.stoneSpec, type: order.diamondType || undefined }, co).slice(0, 6) : [];
   // A gem sale: that gem's stock, grade by grade.
@@ -125,22 +147,58 @@ export function ProductionPlan({ order, factoryId, onFactory, picks, onPicks, pl
         </div>
       )}
 
-      {/* Gold: the factory's own account, against the estimate. */}
-      {piece && order.metalHasKarats && clientGives?.gold && (
-        <p className="rounded-xl border border-amber-500/30 bg-amber-500/[0.04] px-3.5 py-2.5 text-xs text-amber-800">Gold: the client's own — see Material above.</p>
+      {/* The piece's metals, each its own card: a gold from the factory's own gold account, against the estimate;
+          platinum, silver, titanium … from our stock or bought — the factory holds none of it. */}
+      {piece && goldParts.length > 0 && clientGives?.gold && (
+        <p className="rounded-xl border border-amber-500/30 bg-amber-500/[0.04] px-3.5 py-2.5 text-xs text-amber-800">{goldParts.map(m => m.metal).join(", ")}: the client's own — see Material above.</p>
       )}
-      {piece && order.metalHasKarats && ourGold && (
-        <div className="rounded-xl border border-border/70 px-3.5 py-3 text-sm space-y-1">
-          <p className="font-medium text-foreground">Gold</p>
-          <p className="text-xs text-muted-foreground">
-            {goldNeed > 0 ? <>About <span className="font-medium text-foreground">{fmtG(goldNeed)} g fine</span> needed ({fmtG(order.estimatedNetWeight || order.estimatedGrossWeight)} g {order.productKarats}). </> : !order.productKarats && (order.estimatedNetWeight || order.estimatedGrossWeight) ? "Choose the karats to see the fine gold needed. " : "Add the estimated weight above to see what's needed. "}
-            {goldPlanned ? "Planned below." : factory ? <>From {factory.name}&rsquo;s gold account — they hold <span className={`font-medium ${goldNeed > factoryFine ? "text-amber-700" : "text-foreground"}`}>{fmtG(factoryFine)} g fine</span>.</> : "Normally from the factory's own gold account."}
-          </p>
-          {!goldPlanned && factory && goldNeed > factoryFine && (
-            <p className="text-xs text-amber-700 flex items-center gap-1"><AlertTriangle className="h-3.5 w-3.5" />Short by {fmtG(goldNeed - factoryFine)} g fine — send gold from stock or buy it below.</p>
-          )}
-        </div>
-      )}
+      {metals.map((m, i) => {
+        if (m.hasKarats) {
+          if (!ourGold) return null;
+          const g = goldParts.find(x => x.metal === m.metal && x.grams === m.grams)!;
+          const own = i === 0 && m.metal === order.metal;
+          const last = goldParts[goldParts.length - 1] === g;
+          return (
+            <div key={`${m.metal}-${i}`} className="rounded-xl border border-border/70 px-3.5 py-3 text-sm space-y-1">
+              <p className="font-medium text-foreground">{m.metal}{own && order.productKarats ? ` · ${order.productKarats}` : m.purity ? ` · ${m.purity}‰` : ""}</p>
+              <p className="text-xs text-muted-foreground">
+                {g.fine > 0 ? <>About <span className="font-medium text-foreground">{fmtG(g.fine)} g fine</span> needed ({fmtG(m.grams)} g {own ? order.productKarats : `at ${m.purity}‰`}). </>
+                  : own && !order.productKarats && m.grams ? "Choose the karats to see the fine gold needed. "
+                  : !own && m.grams && !m.purity ? `About ${fmtG(m.grams)} g — add its purity above to see the fine gold. `
+                  : "Add the estimated weight above to see what's needed. "}
+                {goldPlanned ? "Planned below." : factory ? <>From {factory.name}&rsquo;s gold account — they hold <span className={`font-medium ${goldFine > factoryFine ? "text-amber-700" : "text-foreground"}`}>{fmtG(factoryFine)} g fine</span>.</> : "Normally from the factory's own gold account."}
+              </p>
+              {last && !goldPlanned && factory && goldFine > factoryFine && (
+                <p className="text-xs text-amber-700 flex items-center gap-1"><AlertTriangle className="h-3.5 w-3.5" />Short by {fmtG(goldFine - factoryFine)} g fine{goldParts.length > 1 ? " for all the gold in it" : ""} — send gold from stock or buy it below.</p>
+              )}
+            </div>
+          );
+        }
+        const st = stockOf(m.metal);
+        const left = r3(Math.max(0, m.grams - st.plannedG));
+        const first = st.buckets[0];
+        return (
+          <div key={`${m.metal}-${i}`} className="rounded-xl border border-border/70 px-3.5 py-3 text-sm space-y-1.5">
+            <div className="flex items-start justify-between gap-2">
+              <p className="font-medium text-foreground">{m.metal}{m.purity ? ` · ${m.purity}‰` : ""}</p>
+              {first && left > 0 && (
+                <Button type="button" size="sm" variant="outline" className="h-8 rounded-lg gap-1 shrink-0"
+                  onClick={() => add({ material: first.m.id as MaterialKey, kind: "bulk", key: first.key, qty: r3(Math.min(first.q, left || first.q)) })}>
+                  <Plus className="h-3.5 w-3.5" />From stock
+                </Button>
+              )}
+            </div>
+            <p className="text-xs text-muted-foreground">
+              {m.grams > 0 ? <>About <span className="font-medium text-foreground">{fmtG(m.grams)} g</span> needed. </> : "Add its estimated weight above to see what's needed. "}
+              {st.plannedG > 0 ? <>{fmtG(st.plannedG)} g planned below{m.grams > 0 && left > 0 ? <> — <span className="text-amber-700 font-medium">{fmtG(left)} g still to plan</span></> : ""}. </>
+                : !st.mats.length ? <>Not in Settings → Materials — buy it below, or add it there to keep it in stock. </>
+                : st.inStock > 0 ? <>{fmtG(st.inStock)} g in stock{m.grams > st.inStock ? <> — <span className="text-amber-700 font-medium">short by {fmtG(m.grams - st.inStock)} g</span>, buy the rest below</> : ""}. </>
+                : <>None in stock — buy it below. </>}
+              The factory holds none of it: it goes from our stock.
+            </p>
+          </div>
+        );
+      })}
 
       {/* A gem sale: what of that gem is in stock — one tap takes it. */}
       {stoneMats.length > 0 && (

@@ -3,7 +3,7 @@
 // that anyone can open via /s/:id without logging in. See firestore.rules.
 import { doc, setDoc, deleteDoc, getDoc } from "firebase/firestore";
 import { db as fsdb } from "./firebase";
-import { loadDb, updateDb, uid, type Share, type ShareItem, type ShareFolder, type CatalogFolder } from "./db";
+import { loadDb, updateDb, uid, type Share, type ShareItem, type ShareFolder, type CatalogFolder, type SharedOrderProduct } from "./db";
 import { fetchCatalogItemsPage } from "./catalogItems";
 
 // A Firestore document is capped at 1 MiB and each item is a URL + short name
@@ -238,6 +238,45 @@ export function saveDesignShare(args: { designKey: string; title: string; items:
   return result;
 }
 export const findDesignShare = (designKey: string) => (loadDb().shares ?? []).find(s => s.kind === "design" && s.designKey === designKey);
+
+/**
+ * A piece made on orders (Design Studio → By Order → a design), or every piece of a
+ * category, as a link: the same product page as a catalogue design's — the piece's
+ * details (its metal's grams, its stones) kept on the link and priced on the server
+ * each time it is opened (functions-specs specsShare). Nothing of its orders, client,
+ * labour or costs is on it. One link per piece and per category: sharing again updates it.
+ */
+export function saveOrderShare(args: {
+  kind: "orderDesign" | "orderCategory"; key: string; title: string; items: ShareItem[];
+  product?: SharedOrderProduct; products?: SharedOrderProduct[];
+  showPrice: boolean; priceFor?: string; ccy: "INR" | "USD"; note?: string; createdBy: string;
+}): Share {
+  const now = new Date().toISOString();
+  // Plain data only (no undefined) — as it is written.
+  const clean = <T,>(x: T): T => JSON.parse(JSON.stringify(x));
+  let result!: Share;
+  updateDb(d => {
+    if (!d.shares) d.shares = [];
+    const cur = d.shares.find(s => s.kind === args.kind && s.designKey === args.key);
+    const fields = {
+      title: args.title, items: clean(args.items.slice(0, SHARE_PAGE_SIZE)), count: args.items.length, showPrice: args.showPrice, ccy: args.ccy,
+      ...(args.product ? { product: clean(args.product) } : {}), ...(args.products ? { products: clean(args.products) } : {}),
+      ...(args.priceFor ? { priceFor: args.priceFor } : {}), ...(args.note ? { note: args.note } : {}), updatedAt: now,
+    };
+    if (cur) {
+      Object.assign(cur, fields);
+      if (!args.priceFor) delete cur.priceFor;
+      if (!args.note) delete cur.note;
+      result = cur;
+    } else {
+      const share: Share = { id: uid("shr_"), kind: args.kind, sourceFolderId: "", designKey: args.key, folders: [], pageCount: 0, createdBy: args.createdBy, createdAt: now, ...fields };
+      d.shares.push(share);
+      result = share;
+    }
+  });
+  return result;
+}
+export const findOrderShare = (kind: "orderDesign" | "orderCategory", key: string) => (loadDb().shares ?? []).find(s => s.kind === kind && s.designKey === key);
 
 export async function deleteShare(id: string, pageCount = 0): Promise<void> {
   for (let n = 0; n < pageCount; n++) await deleteDoc(pageRef(id, n)).catch(() => {});
