@@ -1050,6 +1050,8 @@ function OrderDetailPageBody() {
   // force it through (e.g. material sourced outside this system) so a
   // legacy or edge-case order can never get permanently stuck.
   const readiness = manufacturingReadiness(order, db.materialIssuances);
+  /** What still has to happen before Final Approval: "assign a factory and add the diamonds". */
+  const missingText = readiness.missing.map(m => (m === "factory" ? "assign a factory" : "add the diamonds")).join(" and ");
   // Loose/certified stones sold on their own: nothing is designed, cast or set,
   // so there is no production timeline, no factory and no final approval —
   // the diamond is bought for the order and dispatched.
@@ -1062,7 +1064,7 @@ function OrderDetailPageBody() {
 
   const advanceStep = async (idx: number, overrideReadiness = false, atISO?: string): Promise<boolean> => {
     if (order.timeline[idx].step === "Final Approval" && !overrideReadiness && !readiness.ready) {
-      toast.error(`Issue ${readiness.missing.join(" and ")} to a factory before Final Approval`);
+      toast.error(`First ${missingText} — then Final Approval.`);
       return false;
     }
     // Never let goods leave without a price, and warn before shipping unpaid.
@@ -1110,7 +1112,7 @@ function OrderDetailPageBody() {
   };
 
   const forceAdvanceStep = async (idx: number) => {
-    if (!(await confirmBox(`Mark Final Approval complete without recording ${readiness.missing.join(" and ")} issuance? Only do this if the material was sourced outside this system.`))) return;
+    if (!(await confirmBox(`Mark Final Approval complete without ${readiness.missing.map(m => (m === "factory" ? "a factory" : "the diamonds issued")).join(" or ")}? Nothing is recorded — no weights, no labour. Only do this if the piece was made outside this system.`))) return;
     await advanceStep(idx, true);
   };
 
@@ -1220,6 +1222,14 @@ function OrderDetailPageBody() {
 
   const openFinalApproval = (idx: number) => {
     if (order.melted) { toast.error("This piece was melted — its actual details are kept as they were."); return; }
+    // Its factory first: the labour is priced from that factory's rate card and owed to it.
+    // A piece already approved can still be corrected (its factory was there, or it predates this).
+    const approvedAlready = !!finishRecord() || order.timeline.some(t => t.step === "Final Approval" && t.status === "done");
+    if (!approvedAlready && !diamondOnly && !order.assignedFactoryId) {
+      toast.error(issuedFactory ? `Set the factory first — the material went to ${issuedFactory.name} (Manufacturing → Factory).` : "Assign the factory that made it first (Manufacturing → Factory) — its rates and the labour go to it.");
+      scrollToSection("order-manufacturing");
+      return;
+    }
     const needsGold = orderMaterialRequirements(order).needsGold;
     const finish = finishRecord();
     setFaGoldNet(finish?.finishedNetWeight != null ? String(finish.finishedNetWeight) : (needsGold ? (order.estimatedNetWeight?.toString() ?? order.estimatedGrossWeight?.toString() ?? order.metalWeight?.toString() ?? "") : ""));
@@ -1300,6 +1310,9 @@ function OrderDetailPageBody() {
     const goldOthers = selfFirst ? others.filter(m => metalHasKarats(m.metal, db.settings)) : [];
     const goldBesideW = goldOthers.reduce((t, m) => t + (m.weight || 0), 0);
     if (goldBesideW > 0 && finish?.finishedNetWeight == null) setFaGoldNet(String(Math.round(goldBesideW * 1000) / 1000));
+    // Its purity as the order gave it — never left for the save to guess.
+    const goldPurity = goldOthers.find(m => (m.purity || 0) > 0)?.purity;
+    if (goldBesideW > 0 && finish?.finishedPurity == null && goldPurity) setFaGoldPurity(String(goldPurity));
     const rows = selfFirst ? [{ metal: selfMetal }, ...others.filter(m => !goldOthers.includes(m))] : others;
     setFaOtherMetal(rows[0]?.metal ?? selfMetal);
     setFaOtherNet(!selfFirst && order.otherMetalWeight != null ? String(order.otherMetalWeight) : "");
@@ -1373,6 +1386,8 @@ function OrderDetailPageBody() {
     const w = faWeigh(usedDiaCt, xG);
     const weighed = !!w;
     if (w?.short) { toast.error("The gross weight is less than the stones and other metal in the piece — check it."); return; }
+    // Gold in the piece with no purity: its fine gold (the factory's account) can't be worked out — never guessed.
+    if (((w ? w.gold : netTyped) || 0) > 0 && !(purity > 0)) { toast.error("Choose the gold's purity (karat) — its fine gold comes off the factory's account."); return; }
     if (w?.needSelf) { toast.error(`A ${order.metal} piece: choose ${order.metal} under Other metal, so the scale's weight goes to it — not to gold.`); return; }
     if (w?.needOther) { toast.error("Enter the weight of every metal under Other metal — otherwise the rest of the piece is counted as gold."); return; }
     const moreRows = faMoreRows();
@@ -1392,6 +1407,8 @@ function OrderDetailPageBody() {
     const lines = faLabourLines(hasNet ? netW : 0, faOtherW);
     if (lines) (labour as NonNullable<MaterialIssuance["labour"]>).lines = lines;
     const labourVal = labourValue(labour, labourNet, usedDiaCt);
+    // A weighed piece with no labour at all is almost always a rate not entered — asked, never saved silently.
+    if (labourVal <= 0 && labourNet > 0 && !(await confirmBox(`No labour is charged for this piece — no rate was entered (${labourNet} g). Save it with ₹0 labour?`))) return;
     // The factory that made it: the one set on the order, or — not set, but every
     // issue went to one — that one (as the Factory step suggests). Without either,
     // the labour had nowhere to go and was dropped without a word (a silver or
@@ -2371,7 +2388,7 @@ function OrderDetailPageBody() {
     // Held up before Final Approval: what is missing comes first. The factory
     // picked, or the diamonds added — both live under Manufacturing.
     if (!diamondOnly && !readiness.ready && (t.step === "In Production" || t.step === "Final Approval")) {
-      if (readiness.missing.includes("gold")) {
+      if (readiness.missing.includes("factory")) {
         return issuedFactory
           ? { label: `Set to ${issuedFactory.name}`, icon: FactoryIcon, run: setFactoryFromIssued }
           : { label: "Assign factory", icon: FactoryIcon, run: () => scrollToSection("order-manufacturing") };
@@ -3788,10 +3805,10 @@ It goes back to being our own build, and ${item ? item.name : "its piece"} goes 
                   {canEditStage() && !isDone && isActive && t.step === "Final Approval" && !readiness.ready && (
                     <div className="mt-2 p-2 rounded-lg bg-destructive/5 border border-destructive/20">
                       <p className="text-[11px] text-destructive font-medium">
-                        Issue {readiness.missing.join(" and ")} to a factory before Final Approval
+                        First {missingText} — then Final Approval
                       </p>
-                      {/* "Gold" here means no factory picked — and the material already names one. */}
-                      {issuedFactory && readiness.missing.includes("gold") && (
+                      {/* No factory picked — and the material already names one. */}
+                      {issuedFactory && readiness.missing.includes("factory") && (
                         <button type="button" onClick={setFactoryFromIssued} className="mt-1 block text-[11px] font-medium text-primary hover:underline">
                           Set to {issuedFactory.name} — the material went there
                         </button>
@@ -3896,6 +3913,8 @@ It goes back to being our own build, and ${item ? item.name : "its piece"} goes 
             const moreActions: MoreAction[] = [
               { label: hasEstimate ? "Edit estimate" : "Add estimate", icon: Calculator, show: !faDone, onSelect: openEstimate },
               { label: faDone || hasActuals ? "Edit actual details" : "Record actual details", icon: PackageCheck, show: faDone || faStepIdx < 0,
+                disabled: !faDone && !hasActuals && !diamondOnly && !order.assignedFactoryId,
+                hint: !faDone && !hasActuals && !diamondOnly && !order.assignedFactoryId ? "Assign the factory first" : undefined,
                 onSelect: () => openFinalApproval(faDone ? faStepIdx : -1) },
               { label: "Client's own material…", icon: Coins, show: csOk && cmLive && editable,
                 hint: faDone ? "Final Approval is done — the piece's material is settled" : order.clientSupplied ? `Client gives ${[order.clientSupplied.gold && "gold", order.clientSupplied.diamonds && "diamonds"].filter(Boolean).join(" + ")}` : "If the client gives their gold or diamonds",
@@ -3925,7 +3944,7 @@ It goes back to being our own build, and ${item ? item.name : "its piece"} goes 
             const otherCount = otherIssues.filter(i => materialDef(db.settings, i.material)?.kind !== "stone").length;
             const diaMissing = readiness.missing.includes("diamond");
             const faActive = faStepIdx >= 0 && order.timeline[faStepIdx].status === "in_progress";
-            const blockedText = `${readiness.missing.includes("gold") && !order.assignedFactoryId ? "assign a factory" : ""}${readiness.missing.includes("gold") && !order.assignedFactoryId && diaMissing ? " and " : ""}${diaMissing ? "add the diamond" : ""}`;
+            const blockedText = missingText;
             const finish = faDone ? finishRecord() : undefined;
             const est = (v: number | undefined | null, unit: string) => (v ? `${v} ${unit}` : "—");
 
@@ -4111,6 +4130,42 @@ The piece then takes ours — add them from stock or buy them, as for any order.
                           : otherCount ? `+ ${otherCount} other material${otherCount === 1 ? "" : "s"}`
                           : order.diamondWeight ? `Estimate ${order.diamondWeight} ct` : "\u00a0"}
                       </p>
+                      {(() => {
+                        // Estimate against what reached the factory — said, so a short one is seen before Final Approval.
+                        const rows: { label: string; ok: boolean; note: string }[] = [];
+                        const facId = order.assignedFactoryId;
+                        if (!order.noDiamond && (order.diamondWeight || 0) > 0) {
+                          const short = Math.round(((order.diamondWeight || 0) - diaCt) * 1000) / 1000;
+                          rows.push({ label: `Diamonds ~${order.diamondWeight} ct`, ok: short <= 0.0005, note: short > 0.0005 ? `${diaCt} ct given — ${short} ct short` : `${diaCt} ct given` });
+                        }
+                        if (orderMaterialRequirements(order).needsGold && facId) {
+                          const need = estimatedPureGoldNeeded(order);
+                          const fac = db.factories.find(f => f.id === facId);
+                          const held = factoryFineGoldBalance(db.materialIssuances, facId, fac?.openingFineGold, workCo);
+                          if (need > 0) rows.push({ label: `Gold ~${need} g fine`, ok: held >= need - 0.0005, note: held >= need - 0.0005 ? `${fac?.name ?? "The factory"} holds ${held} g fine` : `${fac?.name ?? "the factory"} holds only ${held} g fine — give it gold` });
+                        }
+                        // Metals besides gold: the piece's own (a titanium piece) and any other on the estimate.
+                        const metalEst = [
+                          ...(isNonGoldMetal(order.metal) && (order.estimatedNetWeight || 0) > 0 ? [{ metal: order.metal, weight: order.estimatedNetWeight || 0 }] : []),
+                          ...otherMetalsOf(order).filter(m => (m.weight || 0) > 0 && !metalHasKarats(m.metal, db.settings) && m.metal.trim().toLowerCase() !== String(order.metal ?? "").trim().toLowerCase()).map(m => ({ metal: m.metal, weight: m.weight || 0 })),
+                        ];
+                        for (const m of metalEst) {
+                          const fam = metalFamily(m.metal).toLowerCase();
+                          const given = Math.round(otherIssues.filter(i => materialUnit(db.settings, i.material) === "g" && metalFamily(materialName(db.settings, i.material)).toLowerCase() === fam)
+                            .reduce((t, i) => t + (i.quantityIssued || 0), 0) * 1000) / 1000;
+                          rows.push({ label: `${m.metal} ~${m.weight} g`, ok: given > 0, note: given > 0 ? `${given} g given from our stock` : "none from our stock — the factory's own metal, or Add material" });
+                        }
+                        return rows.length ? (
+                          <ul className="mt-2 space-y-0.5 border-t border-border/50 pt-1.5 text-[11px]" aria-label="Estimate against what was given">
+                            {rows.map(r => (
+                              <li key={r.label} className="flex items-start gap-1.5">
+                                <span className={r.ok ? "text-success" : "text-amber-600"}>{r.ok ? "✓" : "!"}</span>
+                                <span><span className="font-medium text-brand-dark">{r.label}</span> <span className={r.ok ? "text-muted-foreground" : "text-amber-700"}>· {r.note}</span></span>
+                              </li>
+                            ))}
+                          </ul>
+                        ) : null;
+                      })()}
                     </MfgStep>
                     <MfgStep n={3} title="Final Approval" state={faDone ? "done" : readiness.ready ? "ready" : "blocked"}>
                       {faDone ? (
@@ -4812,6 +4867,15 @@ The piece then takes ours — add them from stock or buy them, as for any order.
               <DialogHeader>
                 <DialogTitle className="font-display text-xl text-brand-dark">Final Approval — {order.orderNumber}</DialogTitle>
                 <DialogDescription className="text-xs">Enter the real details now: gold used, each diamond used or returned, the labour, and the final order value.</DialogDescription>
+                {/* Whose piece this is: the labour is priced from this factory's rate card and owed to it. */}
+                <div className={`mt-2 flex flex-wrap items-center gap-x-2 gap-y-0.5 rounded-lg border px-3 py-2 text-xs ${faFactory ? "border-border/70 bg-secondary/40" : "border-destructive/30 bg-destructive/5"}`}>
+                  <FactoryIcon className="h-3.5 w-3.5 shrink-0 text-brand-dark/70" />
+                  <span className="text-muted-foreground">Factory</span>
+                  <span className="font-semibold text-brand-dark">{faFactory?.name ?? "Not set"}</span>
+                  {faFactory
+                    ? <span className="text-muted-foreground">· {order.metal}{order.jewelleryType ? ` · ${order.jewelleryType}` : ""} — {rateCardOf(faFactory.labour).length ? "labour from its rate card" : "no labour rates on its card yet: type them here, or set them in Factory → Edit details"}</span>
+                    : <span className="text-destructive">— choose it under Manufacturing → Factory; the labour is owed to it</span>}
+                </div>
               </DialogHeader>
               <div className="dlg-cols">
 
@@ -4847,11 +4911,12 @@ The piece then takes ours — add them from stock or buy them, as for any order.
                         <Input type="number" min={0} step="0.001" value={faGrossIn} onChange={e => setFaGrossIn(e.target.value)} className="rounded-lg h-9 mt-1" placeholder="from the scale" />
                       </div>
                       <div>
-                        <Label className="text-[11px]">Net Weight (g){faAutoNet != null ? " — auto" : ""}</Label>
+                        <Label className="text-[11px]">{isNonGoldMetal(order.metal) ? "Gold in it (g) — if any" : `Net Weight (g)${faAutoNet != null ? " — auto" : ""}`}</Label>
                         {faAutoNet != null ? (
                           <Input type="number" readOnly tabIndex={-1} value={fmtG(faAutoNet)} className="rounded-lg h-9 mt-1 bg-secondary/60 text-muted-foreground cursor-default" aria-label="Net weight (worked out)" />
                         ) : (
-                          <Input type="number" min={0} step="0.001" value={faGoldNet} onChange={e => setFaGoldNet(e.target.value)} className="rounded-lg h-9 mt-1" placeholder="or enter the gross above" />
+                          <Input type="number" min={0} step="0.001" value={faGoldNet} onChange={e => setFaGoldNet(e.target.value)} className="rounded-lg h-9 mt-1"
+                            placeholder={isNonGoldMetal(order.metal) ? "0 — no gold" : "or enter the gross above"} aria-label={isNonGoldMetal(order.metal) ? "Gold in the piece (g)" : undefined} />
                         )}
                         {faAutoNet != null && <p className="text-[10px] text-muted-foreground mt-1">{fmtG(faGrossN)} g − diamonds {usedDiaCt} ct ({fmtG(usedDiaCt * CARAT_TO_GRAM)} g){faXG.stone ? ` − other stones ${fmtG(faXG.stone)} g` : ""}{faOtherG ? ` − ${faOtherMetal.trim()} ${fmtG(faOtherG)} g` : ""}{faMoreRows().map(m => m.w ? ` − ${m.metal} ${fmtG(m.w)} g` : "").join("")}{faXG.metal ? ` − other metal ${fmtG(faXG.metal)} g` : ""}</p>}
                         {faW?.selfMetal && <p className="text-[10px] text-muted-foreground mt-1">A {order.metal} piece: the scale's weight goes to {order.metal} below. Enter gold only if the piece has some.</p>}
@@ -5138,8 +5203,9 @@ The piece then takes ours — add them from stock or buy them, as for any order.
                   </div>
                   <div>
                     <Label className="text-[11px]">Minimum for pieces under (g)</Label>
-                    <Input type="number" min={0} step="0.001" value={faMinUnder} onChange={e => setFaMinUnder(e.target.value)} disabled={!faMinLabour || faMinFlat}
-                      className="rounded-lg h-9 mt-1" placeholder="blank = when gram × rate is less" />
+                    <Input type="number" min={0} step="0.001" value={faMinUnder} onChange={e => setFaMinUnder(e.target.value)} disabled={faMinFlat}
+                      className="rounded-lg h-9 mt-1" placeholder="blank = when gram × rate is less" aria-label="Minimum for pieces under (g)" />
+                    {Number(faMinUnder) > 0 && !(Number(faMinLabour) > 0) && <p className="text-[10px] font-medium text-amber-700 mt-0.5">Enter the minimum labour too — this is the weight it applies under.</p>}
                   </div>
                   {/* A small piece the factory bills at its minimum: that amount, flat — not × grams, and
                       not only when gram × rate comes to less. */}
@@ -5170,6 +5236,21 @@ The piece then takes ours — add them from stock or buy them, as for any order.
                   </p>
                 ) : null}
                 {faFilledFrom.length > 0 && <p className="text-[11px] mt-1.5 text-muted-foreground">{faFilledFrom.join(" · ")} — change any of it for this piece.</p>}
+                {(() => {
+                  // Each metal charged at the gold rate because neither the card nor this screen gives it one.
+                  const asGold = [...new Set([faOtherMetal.trim(), ...faMoreRows().map(m => m.metal), ...faXMetals().filter(x => !x.gold).map(x => x.metal)].filter(Boolean))]
+                    .filter(m => !metalHasKarats(m, db.settings) && !(faRates[m.toLowerCase()] ?? "").trim());
+                  if (!asGold.length || !faLines) return null;
+                  const goldRate = Number(faPerGram) || 0;
+                  return (
+                    <p className="text-[11px] mt-1.5 font-medium text-amber-700">
+                      {goldRate > 0
+                        ? <>{asGold.join(", ")} charged at the gold rate ({fmtMoneyInr(goldRate)}/g) — {faFactory?.name ?? "the factory"}&rsquo;s rate card has no rate for {asGold.length === 1 ? "it" : "them"}.</>
+                        : <>No labour rate for {asGold.join(", ")} (nor gold) — its making comes to ₹0.</>}
+                      {" "}Type it above, or set it in Factory → Edit details → Labour rates.
+                    </p>
+                  );
+                })()}
                 {/* How the total is made up — every line the factory bills, so it can be checked against their bill. */}
                 {(() => {
                   const making = makingCharge(faLabour, faNetW);

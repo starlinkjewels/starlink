@@ -87,17 +87,19 @@ export function orderMaterialRequirements(order: Pick<Order, "metal" | "diamondW
 export function manufacturingReadiness(
   order: Pick<Order, "id" | "metal" | "diamondWeight" | "materialSourcing" | "assignedFactoryId">,
   issuances: MaterialIssuance[],
-): { ready: boolean; missing: ("gold" | "diamond")[] } {
+): { ready: boolean; missing: ("factory" | "diamond")[] } {
   // Sold straight out of finished-goods inventory — nothing to issue to a
   // factory, the piece already exists.
   if (order.materialSourcing === "readyStock") return { ready: true, missing: [] };
-  const { needsGold, needsDiamond } = orderMaterialRequirements(order);
+  const { needsDiamond } = orderMaterialRequirements(order);
   const orderIssuances = issuances.filter(i => i.orderId === order.id);
-  const missing: ("gold" | "diamond")[] = [];
-  // Gold is held (reserved) at the assigned factory and drawn down when the
-  // finished piece is received (net weight → pure gold), NOT issued per order —
-  // so "gold ready" simply means a factory has been assigned to make the piece.
-  if (needsGold && !order.assignedFactoryId) missing.push("gold");
+  const missing: ("factory" | "diamond")[] = [];
+  // Every piece a factory makes needs that factory before Final Approval — gold
+  // or platinum, silver, titanium: its rate card prices the labour, the labour is
+  // owed to it, and its gold is what the piece draws down. Only stones sold on
+  // their own are made by no one. (Gold is held at the factory and drawn when the
+  // piece comes back, not issued per order — so for gold this is all it needs.)
+  if (!isDiamondOnlyOrder(order) && !order.assignedFactoryId) missing.push("factory");
   if (needsDiamond && !orderIssuances.some(i => i.material === "diamond")) missing.push("diamond");
   return { ready: missing.length === 0, missing };
 }
