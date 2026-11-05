@@ -93,6 +93,17 @@ export function factoryOtherBalances(issuances: MaterialIssuance[], factoryId: s
   return out;
 }
 
+/** The same, for one material, by its grade or lot (platinum 950 / 900; a ruby lot) — only those held. */
+export function factoryOtherGrades(issuances: MaterialIssuance[], factoryId: string, material: string, companyId?: string): [string, number][] {
+  const out = new Map<string, number>();
+  for (const i of issuances) {
+    if (i.factoryId !== factoryId || i.material !== material || !ofCompany(i, companyId)) continue;
+    const f = otherFlow(i), g = (i.purityOrQuality ?? "").trim();
+    out.set(g, (out.get(g) || 0) + f.out - f.in);
+  }
+  return [...out].map(([g, q]) => [g, Math.round(q * 1000) / 1000] as [string, number]).filter(([, q]) => Math.abs(q) >= 0.0005);
+}
+
 /**
  * The factory's gold expressed in PURE / fine (24KT) grams — the client's
  * "factory gold stock". Gold ARRIVES as fine gold (each issuance's grams ×
@@ -294,7 +305,7 @@ export function factoryPoolBalance(
     // without needing to rewrite quantityIssued itself (re-edit safe).
     else if (i.source === "factoryPool" && i.finishDisposition !== "returned") drawn += i.quantityIssued;
   }
-  return Math.max(0, Math.round((delivered - drawn) * 100) / 100);
+  return Math.max(0, Math.round((delivered - drawn) * 1000) / 1000);
 }
 
 /** Every purity/quality this factory currently holds a positive pool balance

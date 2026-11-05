@@ -76,6 +76,12 @@ export function activeMaterials(s: Pick<Settings, "materials"> | undefined): Mat
   return materialDefs(s).filter(m => m.active !== false);
 }
 
+/** Material keys in the order Settings → Materials lists them — every list of them reads the same way. */
+export function bySettingsOrder(s: Pick<Settings, "materials"> | undefined, keys: string[]): string[] {
+  const at = (k: string) => { const i = materialDefs(s).findIndex(m => m.id === k); return i < 0 ? Number.MAX_SAFE_INTEGER : i; };
+  return [...keys].sort((a, b) => at(a) - at(b));
+}
+
 export function materialDef(s: Pick<Settings, "materials"> | undefined, key: string | undefined): MaterialDef | undefined {
   return isOtherMaterial(key) ? materialDefs(s).find(m => m.id === key) : undefined;
 }

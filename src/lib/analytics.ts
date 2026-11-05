@@ -2,6 +2,7 @@ import { companyOf } from "@/lib/companies";
 import { orderTotal, balanceDue, toPureGold, pureFromPurity, type DB, type Order, type MaterialIssuance } from "./db";
 import { recognisedSale, saleDate, profitReport, inrOn } from "./orderCost";
 import { supplierAccount, factoryAccount } from "./manufacturing";
+import { isReworkIssue } from "./rework";
 
 /**
  * The numbers behind the Reports page — worked out from the records the rest
@@ -411,7 +412,9 @@ export function factoryTable(db: DB, p: Period, companyId?: string): FactoryRow[
   return db.factories.map(f => {
     // One company's work at the factory, when one is chosen.
     const iss = (db.materialIssuances ?? []).filter(i => i.factoryId === f.id && (!companyId || companyOf(i) === companyId));
-    const finishes = iss.filter(i => i.material === "gold" && i.finishedNetWeight != null && inPeriod(p, i.finishedPieces?.[0]?.recordedAt ?? i.issuedAt));
+    // Each piece's finishing record (Final Approval): a gold one has its net; a platinum or silver one only its labour.
+    const finishes = iss.filter(i => i.material === "gold" && !isReworkIssue(i) && (i.finishedNetWeight != null || (!!i.orderId && i.source === "factoryPool" && !!i.labour))
+      && inPeriod(p, i.finishedPieces?.[0]?.recordedAt ?? i.issuedAt));
     const orderIds = new Set(finishes.map(i => i.orderId).filter(Boolean) as string[]);
     const days: number[] = [];
     for (const id of orderIds) {

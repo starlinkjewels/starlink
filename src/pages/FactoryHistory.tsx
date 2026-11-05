@@ -17,8 +17,8 @@ import { useOtherMaterials, StockGradeInput } from "@/components/MaterialFields"
 import { CompanyFilter, CompanyPicker, CompanyBadge, useMultiCo, useDefaultCompany } from "@/components/CompanyFields";
 import { FactoryPoolTransferDialog } from "@/components/FactoryPoolTransfer";
 import { companyOf, coField, workCompanyOf, companyById } from "@/lib/companies";
-import { isOtherMaterial, materialName, materialUnit, type MaterialKey } from "@/lib/materials";
-import { otherFlow, factoryOtherBalances } from "@/lib/pure/accounts";
+import { bySettingsOrder, isOtherMaterial, materialName, materialUnit, type MaterialKey } from "@/lib/materials";
+import { otherFlow, factoryOtherBalances, factoryOtherGrades } from "@/lib/pure/accounts";
 import { useMemo, useState, type ReactNode } from "react";
 import { useParams, Link, useNavigate } from "react-router-dom";
 import { collectionLoaded, updateDb, uid, fmtDate, todayLocal, stampFor, DIAMOND_SHAPES, toPureGold, pureFromPurity, hasOpeningBalance, openingDebitAmt, openingCreditAmt, type MaterialIssuance, type LedgerDir, type Factory } from "@/lib/db";
@@ -52,7 +52,7 @@ import { toast } from "sonner";
 import { downloadCsv, downloadLedgerPdf, downloadLedgerPdfMulti, fmtInrPlain } from "@/lib/ledgerExport";
 import { ExportDialog, inDateRange } from "@/components/ExportDialog";
 import { FullLedgerTable, type MovementRow } from "@/components/FullLedgerTable";
-import { FactoryOrderLedger, buildFactoryOrderRows } from "@/components/FactoryOrderLedger";
+import { FactoryOrderLedger, buildFactoryOrderRows, materialCells, materialTotals } from "@/components/FactoryOrderLedger";
 import { FactoryStatement } from "@/components/FactoryStatement";
 import { buildFactoryStatement } from "@/lib/factoryStatement";
 import {
@@ -150,6 +150,7 @@ function FactoryHistoryPageBody() {
   const setLedgerView = (v: "statement" | "orders") => { setLedgerViewRaw(v); try { localStorage.setItem("factory-ledger-view", v); } catch { /* private mode */ } };
   const statement = buildFactoryStatement({
     issuances, orders: db.orders, advances, factoryId: id!, opening: firstCo ? factory : undefined,
+    materialLabel: k => ({ name: materialName(db.settings, k), unit: materialUnit(db.settings, k) }),
   });
 
   // ── Opening balance (migration) ──
@@ -545,7 +546,7 @@ function FactoryHistoryPageBody() {
     // legitimately committed to an order, conjuring phantom gold into Stock.
     const leftover = !issuance.orderId
       ? factoryPoolBalance(db.materialIssuances, issuance.factoryId, issuance.material, issuance.purityOrQuality, companyOf(issuance))
-      : Math.round(issuanceWastage(issuance) * 100) / 100;
+      : Math.round(issuanceWastage(issuance) * 1000) / 1000;
     // Only stock-sourced, non-certified leftovers return to shared Stock.
     // Certified packets are discrete; purchase-sourced material was never
     // in stock. A factoryPool draw has nothing to return to Stock either —
@@ -577,7 +578,7 @@ function FactoryHistoryPageBody() {
           // quantityIssued either way, or factoryPoolBalance would keep
           // counting a bulk delivery's full amount as still delivered even
           // after it was fully returned.
-          if (returnsToStock || releasesToPool) mi.quantityIssued = Math.round((mi.quantityIssued - leftover) * 100) / 100;
+          if (returnsToStock || releasesToPool) mi.quantityIssued = Math.round((mi.quantityIssued - leftover) * 1000) / 1000;
         }
         // Certified stones are now consumed into the finished piece → mark used.
         if (issuance.diamondKind === "certified" && issuance.diamondPacketIds) {
@@ -590,7 +591,7 @@ function FactoryHistoryPageBody() {
             o.manufacturingLog.push({
               id: uid("mlog_"), type: "material_returned", at: now, employeeId: user!.id, factoryId: id,
               material: issuance.material, amountMaterial: leftover,
-              remarks: `${leftover}${unit} unused ${issuance.material} returned ${returnsToStock ? "to stock" : "to the factory's pool"} on closing issuance`,
+              remarks: `${leftover}${unit} unused ${matWord(issuance.material)} returned ${returnsToStock ? "to stock" : "to the factory's pool"} on closing issuance`,
             });
           }
         }
@@ -888,6 +889,9 @@ function FactoryHistoryPageBody() {
     // Each other metal named, and the making by metal, when any row has them.
     const hasMetalNames = rows.some(r => r.otherNote);
     const hasMaking = rows.some(r => r.labourNote);
+    // Platinum, gems, findings given from stock: a section of their own (each in its own unit).
+    const matRows = rows.flatMap(r => Object.values(r.materials ?? {}).map(m => [r.orderNo, m.name ?? "", m.unit ?? "", q3(m.out) || "0", q3(m.in) || "0", q3(m.out - m.in) || "0"].map(String)));
+    const MT = materialTotals(rows);
     // Estimates print on their row but never count toward a balance — see the
     // same rule in FactoryOrderLedger.
     const T = rows.reduce((t, r) => ({
@@ -940,6 +944,7 @@ function FactoryHistoryPageBody() {
       summary: [
         { label: (factory.openingFineGold || 0) + T.goldOut - T.goldIn < 0 ? "Gold we owe the factory" : "Gold still at factory", value: `${q3(Math.abs((factory.openingFineGold || 0) + T.goldOut - T.goldIn))} g fine` },
         { label: "Diamond not accounted", value: `${q3(T.diaOut - T.diaIn)} ct` },
+        ...(MT.open ? [{ label: "Other material not accounted", value: MT.open }] : []),
         { label: "Labour billed", value: fmtInrPlain(T.labour) },
         // The whole account (opening balance and advances in) when nothing is
         // filtered — the same figure the page shows. Filtered: these rows only.
@@ -973,19 +978,22 @@ function FactoryHistoryPageBody() {
       ],
       filename: `Factory-${factory.name.replace(/\s+/g, "_")}${ordSuffix(orderNo)}-Orders`,
     };
-    if (!hasMaking) { downloadLedgerPdf(pdf); return; }
+    if (!hasMaking && !matRows.length) { downloadLedgerPdf(pdf); return; }
     // Made by metal (Final Approval): each order's metals at their own rates — a table of its own after the ledger,
     // every line in full (a narrow column would cut them off).
     const mk = rows.flatMap(r => (r.labourLines ?? []).map(l => [r.orderNo, l.metal, (l.grams || 0).toFixed(3), rs(l.rate || 0), rs((l.grams || 0) * (l.rate || 0))]));
     downloadLedgerPdfMulti({
       title: pdf.title, landscape: true, filename: pdf.filename, summary: pdf.summary,
       // The Labour column is the factory's bill: it may be its minimum instead, and carries CAD, handling and other charges.
-      subjectLines: [...pdf.subjectLines, "Making by metal: each metal's grams × its rate. Labour (By order) is the factory's bill — its minimum where that applied, with CAD, handling and other charges."],
+      subjectLines: [...pdf.subjectLines, ...(hasMaking ? ["Making by metal: each metal's grams × its rate. Labour (By order) is the factory's bill — its minimum where that applied, with CAD, handling and other charges."] : [])],
       sections: [
         { heading: "By order", columns: pdf.columns, rows: pdf.rows, align: pdf.align, totalsRow: pdf.totalsRow },
-        { heading: "Making by metal", columns: [{ header: "Order", x: 14 }, { header: "Metal", x: 60 }, { header: "Grams", x: 130 }, { header: "Rs / g", x: 165 }, { header: "Making (Rs)", x: 200 }],
-          rows: mk, align: ["left", "left", "right", "right", "right"],
-          totalsRow: ["", "Total gram × rate", "", "", rs(rows.reduce((t, r) => t + (r.labourLines ?? []).reduce((u, l) => u + (l.grams || 0) * (l.rate || 0), 0), 0))] },
+        ...(hasMaking ? [{ heading: "Making by metal", columns: [{ header: "Order", x: 14 }, { header: "Metal", x: 60 }, { header: "Grams", x: 130 }, { header: "Rs / g", x: 165 }, { header: "Making (Rs)", x: 200 }],
+          rows: mk, align: ["left", "left", "right", "right", "right"] as ("left" | "right")[],
+          totalsRow: ["", "Total gram × rate", "", "", rs(rows.reduce((t, r) => t + (r.labourLines ?? []).reduce((u, l) => u + (l.grams || 0) * (l.rate || 0), 0), 0))] }] : []),
+        ...(matRows.length ? [{ heading: "Other material", columns: [{ header: "Order", x: 14 }, { header: "Material", x: 60 }, { header: "Unit", x: 120 }, { header: "Given", x: 150 }, { header: "Used / back", x: 190 }, { header: "Open", x: 235 }],
+          rows: matRows, align: ["left", "left", "left", "right", "right", "right"] as ("left" | "right")[],
+          totalsRow: ["", "Still with the factory", "", "", "", MT.open || "0"] }] : []),
       ],
     });
   };
@@ -996,6 +1004,7 @@ function FactoryHistoryPageBody() {
       `Factory-${factory.name.replace(/\s+/g, "_")}${ordSuffix(orderNo)}-Orders`,
       ["Order", "Date", "Item", "Net weight (g)", "Design number", "Gold given by us (g fine)", "Gold in the piece (g fine)", "Gold balance (g fine)",
        "Diamond issued (ct)", "Diamond accounted (ct)", "Diamond open (ct)", "Silver (g)", "Other metal (g)", "Metals in the piece",
+       "Other material given", "Other material used / back", "Other material open",
        "Labour billed (INR)", "Making by metal", "Labour paid (INR)", "Labour pending (INR)", "Quoted (USD)", "Estimated?", "Status"],
       rows.map(r => [
         r.orderNo, fmtDate(r.date), r.jewellery,
@@ -1003,6 +1012,7 @@ function FactoryHistoryPageBody() {
         q3(r.goldOut), q3(r.goldIn), q3(r.goldOut - r.goldIn),
         q3(r.diaOut), q3(r.diaIn), q3(r.diaOut - r.diaIn),
         q3(r.silverIn), q3(r.otherIn), r.otherNote ?? "",
+        materialCells(r).given, materialCells(r).accounted, materialCells(r).open,
         Math.round(r.labour), r.labourNote ?? "", Math.round(r.paid), Math.round(Math.max(0, r.labour - r.paid)),
         Math.round(r.quotedUsd),
         r.goldEstimated || r.diaEstimated ? "estimate — not yet finally approved" : "",
@@ -1090,7 +1100,7 @@ function FactoryHistoryPageBody() {
         menu={[
           // Set once, when moving from an old system — so out of sight until then.
           { label: "Opening balance", icon: BookOpen, hint: "Not set — what was owed and held before the app", onSelect: openOpening, show: isAdmin && !openingSet },
-          { label: "Move between companies", icon: ArrowRightLeft, hint: "Gold or diamonds, company to company", onSelect: () => setMovingPool(true), show: multiCo && user?.role === "admin" },
+          { label: "Move between companies", icon: ArrowRightLeft, hint: "Gold, diamonds or other material, company to company", onSelect: () => setMovingPool(true), show: multiCo && user?.role === "admin" },
           { label: "Export ledger", icon: Download, hint: "Ledger or movement sheet", onSelect: () => setShowExport(true), show: mayExport },
           { label: "Edit details", icon: Pencil, onSelect: () => setEditingFactory(factory), disabled: !isAdmin,
             hint: isAdmin ? "Name, contact, phone, address" : "Only an admin can change factories" },
@@ -1113,9 +1123,15 @@ function FactoryHistoryPageBody() {
           { label: "Fine gold (24KT)", value: `${factoryFineGoldBalance(db.materialIssuances, id!, factory.openingFineGold, view).toLocaleString()} g`, icon: Coins, sub: "At the factory" },
           { label: "Diamond", value: `${account.diamondOutstanding > 0 ? "+" : ""}${account.diamondOutstanding.toLocaleString()} ct`, icon: Gem,
             tone: account.diamondOutstanding < 0 ? "out" : undefined, sub: "Net, given less used" },
-          ...Object.entries(factoryOtherBalances(db.materialIssuances, id!, view)).map(([k, q]) => ({
-            label: materialName(db.settings, k), value: `${q.toLocaleString()} ${materialUnit(db.settings, k)}`, icon: Package,
-            tone: q < 0 ? "out" as const : undefined, sub: "At the factory" })),
+          // Each other material (platinum, a gem, findings) — and, as stock keeps it, by its grade or lot.
+          ...(() => { const held = factoryOtherBalances(db.materialIssuances, id!, view); return bySettingsOrder(db.settings, Object.keys(held)).map(k => [k, held[k]] as const); })().map(([k, q]) => {
+            const u = materialUnit(db.settings, k);
+            const grades = factoryOtherGrades(db.materialIssuances, id!, k, view).filter(([g]) => g);
+            const by = grades.map(([g, n]) => `${g}: ${n.toLocaleString()} ${u}`);
+            return { label: materialName(db.settings, k), value: `${q.toLocaleString()} ${u}`, icon: Package,
+              tone: q < 0 ? "out" as const : undefined,
+              sub: by.length ? (by.length > 2 ? `${by.slice(0, 2).join(" · ")} · +${by.length - 2} more` : by.join(" · ")) : "At the factory" };
+          }),
         ]} />
       <ExportDialog open={showExport} onClose={() => setShowExport(false)} title={`${factory.name} ledger`}
         extraFilter={{ label: "Order number", placeholder: "e.g. SLJ-2026-1042 (optional)", hint: "Leave blank for the whole factory." }}
@@ -1195,7 +1211,9 @@ function FactoryHistoryPageBody() {
       </div>
       {ledgerView === "statement" && (
         <FactoryStatement lines={statement.lines} check={statement.check} factoryName={factory.name}
-          orderNo={oid => db.orders.find(o => o.id === oid)?.orderNumber} />
+          orderNo={oid => db.orders.find(o => o.id === oid)?.orderNumber}
+          materialLabel={k => ({ name: materialName(db.settings, k), unit: materialUnit(db.settings, k) })}
+          order={k => (db.settings.materials ?? []).findIndex(m => m.id === k)} />
       )}
       {ledgerView === "orders" && <FactoryOrderLedger
         rows={orderRows}

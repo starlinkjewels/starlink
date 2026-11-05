@@ -11,7 +11,7 @@ import { updateDb, loadDb, uid, toPureGold, todayLocal, stampFor, type MaterialI
 import { fmtG } from "@/lib/weights";
 import { useDb } from "@/hooks/useDb";
 import { decreaseStockSelfHealing } from "@/lib/stock";
-import { fmtMoneyInr, factoryFineGoldBalance, deriveStockBalances, lockerBalance } from "@/lib/manufacturing";
+import { fmtMoneyInr, factoryFineGoldBalance, factoryOtherBalances, deriveStockBalances, lockerBalance } from "@/lib/manufacturing";
 import { fmtCcy, ccySymbol } from "@/lib/currency";
 import { AsyncButton } from "@/components/AsyncButton";
 import { ActionSheet } from "@/components/ActionSheet";
@@ -269,7 +269,10 @@ function AssignGold({ open, onOpenChange }: PanelProps) {
               </div>
             )}
             <Field label="Factory" className={multiCo ? "col-span-2 @md:col-span-1" : "col-span-2"}
-              hint={factoryId && <>Currently holds <span className="font-semibold text-amber-700">{factoryFineGoldBalance(db.materialIssuances, factoryId, db.factories.find(f => f.id === factoryId)?.openingFineGold, companyId)}g fine (24KT)</span></>}>{id => (
+              // What the factory holds of what is being given: its fine gold, or that material (platinum, a gem).
+              hint={factoryId && (what === "other" && materialId
+                ? <>Currently holds <span className="font-semibold text-brand-dark">{fmtQty(factoryOtherBalances(db.materialIssuances, factoryId, companyId)[material] ?? 0, materialUnit(db.settings, material))} {materialName(db.settings, material)}</span></>
+                : <>Currently holds <span className="font-semibold text-amber-700">{factoryFineGoldBalance(db.materialIssuances, factoryId, db.factories.find(f => f.id === factoryId)?.openingFineGold, companyId)}g fine (24KT)</span></>)}>{id => (
               <Select value={factoryId} onValueChange={addNew("factory", setFactoryId)}>
                 <SelectTrigger id={id} className="h-10 rounded-xl"><SelectValue placeholder="Choose factory" /></SelectTrigger>
                 <SelectContent>{factories.map(f => <SelectItem key={f.id} value={f.id}>{f.name}</SelectItem>)}<AddNewItem kind="factory" /></SelectContent>

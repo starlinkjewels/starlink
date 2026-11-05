@@ -17,11 +17,15 @@ const rs = (n: number) => (Math.abs(n) < 0.5 ? "" : Math.round(n).toLocaleString
  * the balances carried down (lib/factoryStatement.ts). What the client checks
  * line for line against the factory's own statement.
  */
-export function FactoryStatement({ lines, check, factoryName, orderNo }: {
+export function FactoryStatement({ lines, check, factoryName, orderNo, materialLabel, order }: {
   lines: StatementLine[];
-  check: { ok: boolean; gold: number; dia: number; owed: number; cardGold: number; cardDia: number; cardOwed: number };
+  check: { ok: boolean; gold: number; dia: number; owed: number; cardGold: number; cardDia: number; cardOwed: number; otherOk?: boolean };
   factoryName: string;
   orderNo: (id: string) => string | undefined;
+  /** An other material's name and unit, for its columns. */
+  materialLabel?: (key: string) => { name: string; unit: string };
+  /** Where a material comes in Settings → Materials — balances list them in that order. */
+  order?: (key: string) => number;
 }) {
   const [q, setQ] = useState("");
   const [from, setFrom] = useState("");
@@ -37,7 +41,7 @@ export function FactoryStatement({ lines, check, factoryName, orderNo }: {
     const bf: StatementLine[] = last ? [{
       ...last, id: "bf", kind: "opening", particular: "Brought forward", voucher: "", orderIds: [], date: fromD,
       goldIn: Math.max(0, last.goldBal), goldOut: Math.max(0, -last.goldBal), diaIn: Math.max(0, last.diaBal), diaOut: Math.max(0, -last.diaBal),
-      billed: Math.max(0, last.owed), paid: Math.max(0, -last.owed),
+      billed: Math.max(0, last.owed), paid: Math.max(0, -last.owed), other: { ...last.otherBal },
     }] : [];
     const t = q.trim().toLowerCase();
     const shown = t ? inRange.filter(l => l.voucher.toLowerCase().includes(t) || l.particular.toLowerCase().includes(t)) : inRange;
@@ -45,6 +49,13 @@ export function FactoryStatement({ lines, check, factoryName, orderNo }: {
   }, [lines, q, from, to]);
 
   const n = (s: ReactNode, cls = "") => <span className={`tabular-nums whitespace-nowrap ${cls}`}>{s}</span>;
+  // Other materials (platinum, gems, findings): what moved on the line, and what the factory holds after it.
+  const anyOther = lines.some(l => Object.keys(l.other ?? {}).length || Object.keys(l.otherBal ?? {}).length);
+  const lab = (k: string) => materialLabel?.(k) ?? { name: k, unit: "" };
+  const qtyOf = (k: string, q: number) => `${(Math.round(q * 1000) / 1000).toLocaleString()} ${lab(k).unit}`.trim();
+  const moved = (l: StatementLine) => Object.entries(l.other ?? {}).filter(([, q]) => Math.abs(q) >= 0.0005)
+    .map(([k, q]) => `${q > 0 ? "+" : "−"}${qtyOf(k, Math.abs(q))} ${lab(k).name}`).join(", ");
+  const held = (l: StatementLine) => Object.entries(l.otherBal ?? {}).sort(([a], [b]) => (order?.(a) ?? 0) - (order?.(b) ?? 0)).map(([k, q]) => `${lab(k).name} ${qtyOf(k, q)}`).join(" · ");
   const columns: DataColumn<StatementLine>[] = [
     { key: "line", header: "Particulars", always: true, sortValue: l => l.date, csv: l => l.particular,
       // On a phone card the date and voucher go under the line (their columns are off the card);
@@ -67,6 +78,12 @@ export function FactoryStatement({ lines, check, factoryName, orderNo }: {
     { key: "diaOut", header: "Diam. out (ct)", align: "right", kind: "number", csv: l => c2(l.diaOut), cell: l => n(c2(l.diaOut)) },
     { key: "diaBal", header: "Diam. balance", align: "right", kind: "number", csv: l => c2(l.diaBal) || "0",
       cell: l => n(c2(l.diaBal) || "0", "font-semibold text-blue-700") },
+    ...(anyOther ? [
+      { key: "other", header: "Other material", csv: (l: StatementLine) => moved(l),
+        cell: (l: StatementLine) => n(moved(l), "text-xs") },
+      { key: "otherBal", header: "Other balance", csv: (l: StatementLine) => held(l),
+        cell: (l: StatementLine) => n(held(l) || "—", "text-xs font-semibold text-brand-dark") },
+    ] as DataColumn<StatementLine>[] : []),
     { key: "billed", header: "Labour billed (₹)", align: "right", kind: "number", csv: l => rs(l.billed), cell: l => n(rs(l.billed)) },
     { key: "paid", header: "Paid (₹)", align: "right", kind: "number", csv: l => rs(l.paid), cell: l => n(rs(l.paid), "text-success") },
     { key: "owed", header: "We owe (₹)", align: "right", kind: "number", csv: l => rs(l.owed) || "0",
@@ -80,7 +97,7 @@ export function FactoryStatement({ lines, check, factoryName, orderNo }: {
     <div className="card-luxe overflow-hidden">
       <div className="px-5 py-4 border-b border-border/60">
         <SectionTitle title="Statement" sub={`${factoryName} · one line per voucher, oldest first`} info={<>
-          As the factory keeps it: gold in fine (24K) grams, diamonds in carats, labour in rupees — what came in, what
+          As the factory keeps it: gold in fine (24K) grams, diamonds in carats, other materials (platinum, gems) in their own units, labour in rupees — what came in, what
           went out on each bill, and the balance carried down. The voucher is the factory&rsquo;s bill number where one was
           entered at Final Approval (or on a repair), else our order number. A date range starts from a
           &ldquo;Brought forward&rdquo; line, so the balances stay the account&rsquo;s.
@@ -91,8 +108,8 @@ export function FactoryStatement({ lines, check, factoryName, orderNo }: {
         <div className={`flex items-start gap-2 rounded-xl px-3 py-2 text-xs ${check.ok ? "bg-success/8 text-success" : "bg-destructive/8 text-destructive"}`}>
           {check.ok ? <CheckCircle2 className="h-4 w-4 shrink-0 mt-px" /> : <AlertTriangle className="h-4 w-4 shrink-0 mt-px" />}
           <span>{check.ok
-            ? <>Balances match the factory account — gold {check.gold.toFixed(3)} g fine · diamonds {check.dia.toFixed(3)} ct · {check.owed >= 0 ? `we owe ${fmtMoneyInr(check.owed)}` : `they hold ${fmtMoneyInr(-check.owed)} of ours`}</>
-            : <>Doesn&rsquo;t add up to the factory account: gold {check.gold.toFixed(3)} vs {check.cardGold.toFixed(3)} g · diamonds {check.dia.toFixed(3)} vs {check.cardDia.toFixed(3)} ct · ₹{Math.round(check.owed)} vs ₹{Math.round(check.cardOwed)}</>}</span>
+            ? <>Balances match the factory account — gold {check.gold.toFixed(3)} g fine · diamonds {check.dia.toFixed(3)} ct{anyOther && lines.length && held(lines[lines.length - 1]) ? ` · ${held(lines[lines.length - 1])}` : ""} · {check.owed >= 0 ? `we owe ${fmtMoneyInr(check.owed)}` : `they hold ${fmtMoneyInr(-check.owed)} of ours`}</>
+            : <>Doesn&rsquo;t add up to the factory account: gold {check.gold.toFixed(3)} vs {check.cardGold.toFixed(3)} g · diamonds {check.dia.toFixed(3)} vs {check.cardDia.toFixed(3)} ct · ₹{Math.round(check.owed)} vs ₹{Math.round(check.cardOwed)}{check.otherOk === false ? " · other materials differ" : ""}</>}</span>
         </div>
         <DataTable
           id="factory-statement"
@@ -109,6 +126,7 @@ export function FactoryStatement({ lines, check, factoryName, orderNo }: {
           totals={last ? {
             goldBal: () => n(last.goldBal.toFixed(3), "font-semibold"),
             diaBal: () => n(c2(last.diaBal) || "0", "font-semibold"),
+            ...(anyOther ? { otherBal: () => n(held(last) || "—", "text-xs font-semibold") } : {}),
             owed: () => n(rs(last.owed) || "0", "font-semibold"),
           } : undefined}
           emptyText={q || from || to ? "No line matches that." : "Nothing given to or billed by this factory yet."}

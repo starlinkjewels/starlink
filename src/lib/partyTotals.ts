@@ -10,20 +10,23 @@
  * (totalsCovered) — otherwise it loads the records and works them out here.
  */
 import { collectionsLoaded, summaryOf, summariesLive, type DB, type Factory, type Supplier, type Locker } from "./db";
-import { factoryAccount, factoryFineGoldBalance, factoryPoolBuckets, supplierAccount, lockerBalance } from "./manufacturing";
+import { factoryAccount, factoryFineGoldBalance, factoryOtherBalances, factoryPoolBuckets, supplierAccount, lockerBalance } from "./manufacturing";
 import { TOTALS_COLS, type TotalsKind } from "./pageData";
 
 /** The summary version that also carries a factory's pool stock. */
 const POOL_VERSION = 2;
 /** The first version whose factory figures keep other materials (Settings →
- *  Materials) out of the diamond carats. A factory total from before it is
- *  not trusted: the page works the figures out from the records instead. */
-const FACTORY_VERSION = 3;
+ *  Materials) out of the diamond carats (3) and carry what the factory holds of
+ *  them (5: other). A factory total from before it is not trusted: the page
+ *  works the figures out from the records instead. */
+const FACTORY_VERSION = 5;
 /** The first version whose locker balance keeps its cents — a dollar or
  *  dirham account. An older one is not trusted: worked out from the records. */
 const LOCKER_VERSION = 4;
 
-export type FactoryFigures = ReturnType<typeof factoryAccount> & { fineGold: number; goldPool: number; diaPool: number };
+export type FactoryFigures = ReturnType<typeof factoryAccount> & { fineGold: number; goldPool: number; diaPool: number;
+  /** Other materials at the factory (platinum, gems, findings), by material key — only those it holds. */
+  other: Record<string, number> };
 export type SupplierFigures = ReturnType<typeof supplierAccount>;
 
 const num = (v: unknown) => (typeof v === "number" && Number.isFinite(v) ? v : 0);
@@ -53,6 +56,7 @@ export function factoryFigures(db: DB, f: Factory): FactoryFigures {
       diamondIssued: num(s.diamondIssued), diamondUsed: num(s.diamondUsed), diamondOutstanding: num(s.diamondOutstanding),
       chargesTotal: num(s.chargesTotal), chargesPaid: num(s.chargesPaid), chargesPending: num(s.chargesPending), chargesOverpaid: num(s.chargesOverpaid),
       fineGold: num(s.fineGold), goldPool: num(s.goldPool), diaPool: num(s.diaPool),
+      other: Object.fromEntries(Object.entries((s.other ?? {}) as Record<string, unknown>).map(([k, q]) => [k, num(q)]).filter(([, q]) => q !== 0)),
     };
   }
   const issuances = db.materialIssuances.filter(i => i.factoryId === f.id);
@@ -61,6 +65,7 @@ export function factoryFigures(db: DB, f: Factory): FactoryFigures {
     fineGold: factoryFineGoldBalance(db.materialIssuances, f.id, f.openingFineGold),
     goldPool: factoryPoolBuckets(issuances, f.id, "gold").reduce((t, b) => t + b.balance, 0),
     diaPool: factoryPoolBuckets(issuances, f.id, "diamond").reduce((t, b) => t + b.balance, 0),
+    other: factoryOtherBalances(issuances, f.id),
   };
 }
 

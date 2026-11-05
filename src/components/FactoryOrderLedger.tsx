@@ -89,7 +89,7 @@ export interface FactoryOrderRow {
    *  anyone to a second ledger to find out when something was paid. */
   entries: { id: string; date: string; text: string; qty?: string; amount?: number; kind: "out" | "in" | "pay" }[];
   /** Other materials on the job (Settings → Materials), each in its own unit: given and accounted for. */
-  materials?: Record<string, { out: number; in: number }>;
+  materials?: Record<string, { out: number; in: number; name?: string; unit?: string }>;
   /** A repair of the order's piece: a row of its own, under the factory's repair bill. */
   repair?: boolean;
 }
@@ -246,7 +246,7 @@ export function buildFactoryOrderRows(
       // In its own unit and under its own name — never added to the gold or diamond columns.
       const f = otherFlow(mi);
       const name = materialName(settings, mi.material), u = materialUnit(settings, mi.material);
-      const m = (row.materials ??= {})[mi.material] ??= { out: 0, in: 0 };
+      const m = (row.materials ??= {})[mi.material] ??= { out: 0, in: 0, name, unit: u };
       m.out += f.out; m.in += f.in;
       row.entries.push({ id: mi.id + "-xin", date: mi.issuedAt, kind: "out", text: `${name} given${mi.orderId ? "" : " (bulk delivery)"} — ${mi.purityOrQuality}`, qty: `${mi.quantityIssued} ${u}` });
       const ret = Math.min(mi.finishReturnedQty || 0, f.in);
@@ -350,6 +350,25 @@ export function buildFactoryOrderRows(
   return [...byOrder.values()].sort((a, b) => +new Date(b.date) - +new Date(a.date));
 }
 
+/** A row's other materials (platinum, gems, findings), each in its own unit: given, accounted for (in the piece
+ *  or returned), and still open — "Palladium 2 g", for the By order columns and its downloads. */
+export function materialCells(r: Pick<FactoryOrderRow, "materials">): { given: string; accounted: string; open: string } {
+  const q = (n: number, u = "") => `${(Math.round(n * 1000) / 1000).toLocaleString()} ${u}`.trim();
+  const list = Object.values(r.materials ?? {});
+  const join = (f: (m: (typeof list)[number]) => number) => list.filter(m => Math.abs(f(m)) >= 0.0005).map(m => `${m.name ?? ""} ${q(f(m), m.unit)}`.trim()).join(" · ");
+  return { given: join(m => m.out), accounted: join(m => m.in), open: join(m => m.out - m.in) };
+}
+
+/** Other materials added up over rows, by material: given, accounted for, open. */
+export function materialTotals(rows: Pick<FactoryOrderRow, "materials">[]): { given: string; accounted: string; open: string } {
+  const sum: NonNullable<FactoryOrderRow["materials"]> = {};
+  for (const r of rows) for (const [k, m] of Object.entries(r.materials ?? {})) {
+    const t = sum[k] ??= { out: 0, in: 0, name: m.name, unit: m.unit };
+    t.out += m.out; t.in += m.in;
+  }
+  return materialCells({ materials: sum });
+}
+
 export function FactoryOrderLedger({
   rows, factoryName, openingFineGold = 0, onExport, account,
 }: {
@@ -409,6 +428,9 @@ export function FactoryOrderLedger({
   // when a factory has them.
   const hasSilver = rows.some(r => r.silverIn);
   const hasOther = rows.some(r => r.otherIn);
+  // Platinum, gems, findings given from stock (Settings → Materials): their own columns, in their own units.
+  const hasMat = rows.some(r => Object.keys(r.materials ?? {}).length);
+  const MT = materialTotals(filtered);
   const hasQuote = rows.some(r => r.quotedUsd > 0);
   const active = !!q.trim() || !!from || !!to || only !== "all";
 
@@ -480,6 +502,14 @@ export function FactoryOrderLedger({
       cell: (r: FactoryOrderRow) => n(g3(r.silverIn)) }] : []),
     ...(hasOther ? [{ key: "other", header: "Other (g)", align: "right" as const, kind: "number" as const, sortValue: (r: FactoryOrderRow) => r.otherIn, csv: (r: FactoryOrderRow) => (r.otherNote ? `${g3(r.otherIn)} (${r.otherNote})` : g3(r.otherIn)),
       cell: (r: FactoryOrderRow) => r.otherNote ? <span title={r.otherNote}>{n(g3(r.otherIn))}<span className="block text-[10px] text-muted-foreground font-normal max-w-[12rem] truncate">{r.otherNote}</span></span> : n(g3(r.otherIn)) }] : []),
+    ...(hasMat ? [
+      { key: "matOut", header: "Other material given", csv: (r: FactoryOrderRow) => materialCells(r).given,
+        cell: (r: FactoryOrderRow) => n(materialCells(r).given, "text-xs") },
+      { key: "matIn", header: "Other material used / back", csv: (r: FactoryOrderRow) => materialCells(r).accounted,
+        cell: (r: FactoryOrderRow) => n(materialCells(r).accounted, "text-xs") },
+      { key: "matOpen", header: "Other material open", csv: (r: FactoryOrderRow) => materialCells(r).open,
+        cell: (r: FactoryOrderRow) => n(materialCells(r).open || "—", `text-xs font-semibold ${materialCells(r).open ? "text-blue-700" : "text-muted-foreground"}`) },
+    ] as DataColumn<FactoryOrderRow>[] : []),
     { key: "labour", header: "Labour billed (₹)", align: "right", kind: "number", sortValue: r => r.labour, csv: r => Math.round(r.labour),
       // Made by metal: each metal's grams at its rate, under the total.
       cell: r => r.labourNote ? <span title={r.labourNote}>{n(rs(r.labour))}<span className="block text-[10px] text-muted-foreground font-normal max-w-[16rem] truncate">{r.labourNote}</span></span> : n(rs(r.labour)) },
@@ -562,6 +592,7 @@ export function FactoryOrderLedger({
             diaBal: () => n((T.diaOut - T.diaIn).toFixed(2)),
             silver: () => n(g3(T.silverIn)),
             other: () => n(g3(T.otherIn)),
+            ...(hasMat ? { matOut: () => n(MT.given, "text-xs"), matIn: () => n(MT.accounted, "text-xs"), matOpen: () => n(MT.open || "—", "text-xs") } : {}),
             labour: () => n(rs(T.labour)),
             paid: () => n(rs(T.paid)),
             pending: () => n(rs(Math.max(0, T.labour - T.paid))),
