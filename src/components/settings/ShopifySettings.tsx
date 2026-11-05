@@ -1,3 +1,4 @@
+import { brandShort } from "@/lib/brand";
 // Settings → Shopify: the stores connected to our order board — connect one
 // (its own app's keys), map what its products say onto our orders (with a
 // preview on a real order), and see each store's health. The keys stay on the
@@ -65,7 +66,7 @@ function ConnectSheet({ open, onClose, onDone }: { open: boolean; onClose: () =>
       <div className="space-y-6">
         <ol className="space-y-2 text-sm rounded-xl border border-border bg-secondary/30 p-4 list-decimal pl-8">
           <li>In the store's Shopify admin: <b>Settings → Apps and sales channels → Develop apps → Build apps in Dev Dashboard</b> (the store owner, or staff with “Develop apps”).</li>
-          <li><b>Create app</b>, name it (e.g. “Starlink orders”). In <b>Versions</b> tick these access scopes: <code className="text-xs">{NEEDED_SCOPES.join(", ")}</code>. Under protected customer data allow <b>name and address</b> (for the ship-to). Release the version.</li>
+          <li><b>Create app</b>, name it (e.g. “{brandShort()} orders”). In <b>Versions</b> tick these access scopes: <code className="text-xs">{NEEDED_SCOPES.join(", ")}</code>. Under protected customer data allow <b>name and address</b> (for the ship-to). Release the version.</li>
           <li><b>Install</b> the app on this store (the Home / Installs card).</li>
           <li>Open the app's <b>Settings</b> and copy its <b>Client ID</b> and <b>Client secret</b> here. The secret is kept encrypted on our server and never shown again.</li>
         </ol>

@@ -91,7 +91,7 @@ export interface StoreRules {
   metalRules?: { word: string; metal: string }[];
   defaultType?: string;
   defaultMetal?: string;
-  /** Our stage as a tag on the Shopify order ("Starlink: In Production"). */
+  /** Our stage as a tag on the Shopify order ("Stage: In Production"). */
   stageTags?: boolean;
   tagPrefix?: string;
   /** Shopify tells the customer when we fulfil. */
@@ -122,7 +122,7 @@ export const DEFAULT_RULES: Required<Omit<StoreRules, "pricePct" | "defaultType"
   defaultType: undefined,
   defaultMetal: undefined,
   stageTags: true,
-  tagPrefix: "Starlink",
+  tagPrefix: "Stage",
   notifyCustomer: true,
 };
 
@@ -253,8 +253,8 @@ export function newOrderSteps(timelineStages: unknown, certified = false): strin
 
 /* ─────────────── Back to Shopify ─────────────── */
 
-/** Our stage as a Shopify tag — "Starlink: In Production". */
-export const stageTag = (prefix: string, status: string) => `${prefix || "Starlink"}: ${status}`;
+/** Our stage as a Shopify tag — "Stage: In Production". */
+export const stageTag = (prefix: string, status: string) => `${prefix || "Stage"}: ${status}`;
 /** Every tag our stages can be, so the old one is taken off when the stage moves. */
 export const STAGE_STATUSES = ["Waiting", "Approved", "In Production", "Ready", "Dispatched", "Delivered", "Rejected"];
 

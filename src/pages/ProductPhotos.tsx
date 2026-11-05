@@ -1,51 +1,20 @@
+import { brandName } from "@/lib/brand";
 import { useCan } from "@/hooks/useCan";
 import { WebVideo } from "@/components/ProductVideo";
-import { requestPlayable } from "@/lib/webVideo";
 import { PageHeader, TabBar } from "@/components/PageHeader";
 import { exportAllowed } from "@/lib/access";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { useAuth } from "@/lib/auth";
-import { updateDb, uid, currentUserOrders, logEvent, type CatalogFolder, type ProductPhotoItem, type Order } from "@/lib/db";
+import { currentUserOrders, logEvent, type Order } from "@/lib/db";
 import { useDb } from "@/hooks/useDb";
-import { uploadDataUrl, uploadFile, deleteByUrl } from "@/lib/storage";
-import { compressImage as compressImg, canUploadOriginal, PRODUCT_PHOTO_MAX, PRODUCT_PHOTO_QUALITY } from "@/lib/images";
 import { downloadAsZip } from "@/lib/zipDownload";
-import { makePreview } from "@/lib/photoPreview";
 import { VideoPoster } from "@/components/VideoPoster";
-import { ShareFolderButton } from "@/components/ShareFolderButton";
 import { toast } from "sonner";
-import { Folder, ChevronRight, Image as ImageIcon, Video, Play, Download, X, Camera, ChevronLeft, FolderPlus, FolderUp, ImagePlus, Trash2, Pencil, Loader2, Check, Package, FolderInput, PenTool } from "lucide-react";
-import { confirmBox } from "@/lib/confirm";
+import { Folder, ChevronRight, Image as ImageIcon, Video, Download, X, Camera, ChevronLeft, Trash2, Pencil, Package, PenTool } from "lucide-react";
 import { MoreMenu, type MoreAction } from "@/components/MoreMenu";
-import { ActionSheet } from "@/components/ActionSheet";
-import { AsyncButton } from "@/components/AsyncButton";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { needsAccess } from "@/lib/actionHints";
-import { folderPath } from "@/lib/catalogItemEdit";
 import { CadJobsTable } from "@/components/designers/CadJobsTable";
 import { isOpenJob } from "@/lib/designers";
-
-const MAX_VIDEO_MB = 60;
-
-// A photo the client downloads is uploaded exactly as it was picked — see
-// src/lib/images.ts. This page used to cap at 1400px and the order page at 900,
-// so the same shot came out a different size depending on where it went in.
-// Only a camera-sized original is scaled at all.
-const putPhoto = (file: File, folder: string) =>
-  canUploadOriginal(file)
-    ? uploadFile(file, folder)
-    : compressImg(file, PRODUCT_PHOTO_MAX, PRODUCT_PHOTO_QUALITY).then(d => uploadDataUrl(d, folder));
-/** The original, then its small copy for the grid beside it (lib/photoPreview.ts) —
- *  `thumb` left off when that can't be made; the upload stands either way. */
-const putMedia = async (file: File, folder: string): Promise<{ url: string; thumb?: string }> => {
-  const url = file.type.startsWith("video/") ? await uploadFile(file, folder) : await putPhoto(file, folder);
-  const thumb = await makePreview(file, folder);
-  return thumb ? { url, thumb } : { url };
-};
 
 async function downloadOne(fileUrl: string, filename: string) {
   if (!exportAllowed()) return;
@@ -117,55 +86,6 @@ function ItemCard({ item, onOpen, onDownload, onDelete, menu }: { item: GalleryI
         {menu && <MoreMenu size="sm" label={`Actions for ${item.label}`} title={item.label} actions={menu} className="h-7 w-7 border-0 shadow-none" />}
       </div>
     </motion.div>
-  );
-}
-
-/**
- * Rename a library item, or move it to another folder — one field on the
- * item, in the side panel. The file itself stays where it is in storage.
- */
-function PhotoItemSheet({ item, mode, folders, onClose }: {
-  item: ProductPhotoItem; mode: "rename" | "move"; folders: CatalogFolder[]; onClose(): void;
-}) {
-  const [name, setName] = useState(item.name);
-  const [folderId, setFolderId] = useState(item.folderId ?? "");
-  const options = folders.map(f => ({ id: f.id, label: folderPath(folders, f.id) })).sort((a, b) => a.label.localeCompare(b.label));
-  const save = () => {
-    if (mode === "rename") {
-      const v = name.trim().slice(0, 60);
-      if (!v) { toast.error("Enter a name"); return; }
-      if (v !== item.name) { updateDb(d => { const x = d.productPhotoItems.find(i => i.id === item.id); if (x) x.name = v; }); toast.success(`Renamed to ${v}`); }
-    } else if (folderId && folderId !== item.folderId) {
-      updateDb(d => { const x = d.productPhotoItems.find(i => i.id === item.id); if (x) x.folderId = folderId; });
-      toast.success(`Moved to ${folderPath(folders, folderId)}`);
-    }
-    onClose();
-  };
-  return (
-    <ActionSheet open onOpenChange={o => { if (!o) onClose(); }} icon={mode === "rename" ? Pencil : FolderInput}
-      title={mode === "rename" ? "Rename" : "Move to another folder"}
-      description={mode === "rename" ? "Also its download file name." : `Now in ${item.folderId ? folderPath(folders, item.folderId) : "the library"}. Links already sent keep the old place.`}
-      footer={
-        <div className="flex justify-end gap-2">
-          <Button variant="outline" onClick={onClose} className="rounded-xl">Cancel</Button>
-          <AsyncButton onClick={save} className="btn-hero rounded-xl px-6">{mode === "rename" ? "Save" : "Move"}</AsyncButton>
-        </div>
-      }>
-      {mode === "rename" ? (
-        <div className="space-y-1.5">
-          <Label htmlFor="pp_item_name" className="text-xs">Name</Label>
-          <Input id="pp_item_name" value={name} autoFocus maxLength={60} onChange={e => setName(e.target.value)} onKeyDown={e => { if (e.key === "Enter") save(); }} className="h-10 rounded-xl" />
-        </div>
-      ) : (
-        <div className="space-y-1.5">
-          <Label className="text-xs">Folder</Label>
-          <Select value={folderId} onValueChange={setFolderId}>
-            <SelectTrigger className="h-10 rounded-xl" aria-label="Folder"><SelectValue placeholder="Choose a folder" /></SelectTrigger>
-            <SelectContent>{options.map(o => <SelectItem key={o.id} value={o.id}>{o.label}{o.id === item.folderId ? " (here now)" : ""}</SelectItem>)}</SelectContent>
-          </Select>
-        </div>
-      )}
-    </ActionSheet>
   );
 }
 
@@ -290,318 +210,9 @@ function OrdersView({ isStaff }: { isStaff: boolean }) {
   );
 }
 
-/* ══════════════════════════ MANUAL LIBRARY VIEW ══════════════════════════ */
-/* Staff-built: create category folders → product folders → upload images/videos. */
-function LibraryView({ isStaff }: { isStaff: boolean }) {
-  const { user } = useAuth();
-  const can = useCan();
-  const canAdd = isStaff && can("productPhotos", "add");
-  const canEdit = isStaff && can("productPhotos", "edit");
-  const canDelete = isStaff && can("productPhotos", "delete");
-  const canShare = isStaff && can("productPhotos", "export");
-  const db = useDb();
-  const [currentFolderId, setCurrentFolderId] = useState<string | null>(null);
-  const [showNewFolder, setShowNewFolder] = useState(false);
-  const [newFolderName, setNewFolderName] = useState("");
-  const [renamingId, setRenamingId] = useState<string | null>(null);
-  const [renameVal, setRenameVal] = useState("");
-  const [uploading, setUploading] = useState(false);
-  const [folderProgress, setFolderProgress] = useState<{ done: number; total: number } | null>(null);
-  const [videoUploading, setVideoUploading] = useState(false);
-  const [lightbox, setLightbox] = useState<number | null>(null);
-  const [downloading, setDownloading] = useState(false);
-  const imgRef = useRef<HTMLInputElement>(null);
-  const vidRef = useRef<HTMLInputElement>(null);
-  const folderRef = useRef<HTMLInputElement>(null);
-
-  const folders = db.productPhotoFolders ?? [];
-  const allItems = db.productPhotoItems ?? [];
-  const subfolders = folders.filter(f => (f.parentId ?? null) === currentFolderId).sort((a, b) => a.name.localeCompare(b.name));
-  const folderItems = allItems.filter(i => i.folderId === currentFolderId).sort((a, b) => +new Date(b.createdAt) - +new Date(a.createdAt));
-
-  const path: CatalogFolder[] = [];
-  { let cur = currentFolderId; while (cur) { const f = folders.find(x => x.id === cur); if (!f) break; path.unshift(f); cur = f.parentId ?? null; } }
-
-  const gallery: GalleryItem[] = folderItems.map(it => ({ id: it.id, type: it.type, label: it.name, src: it.url, thumb: it.thumb, filename: `${it.name || "media"}.${it.type === "video" ? "mp4" : "jpg"}` }));
-  const coverFor = (folderId: string) => { const c = allItems.find(i => i.folderId === folderId && i.type === "image"); return c?.thumb || c?.url; };
-  const childCount = (folderId: string) => folders.filter(f => (f.parentId ?? null) === folderId).length;
-  const mediaCount = (folderId: string) => allItems.filter(i => i.folderId === folderId).length;
-
-  const createFolder = () => {
-    const name = newFolderName.trim();
-    if (!name) return;
-    updateDb(d => { if (!d.productPhotoFolders) d.productPhotoFolders = []; d.productPhotoFolders.push({ id: uid("ppf_"), name, parentId: currentFolderId ?? null, createdBy: user!.id, createdAt: new Date().toISOString() }); });
-    setNewFolderName(""); setShowNewFolder(false); toast.success("Folder created");
-  };
-  const renameFolder = (id: string) => { const val = renameVal.trim(); if (!val) { setRenamingId(null); return; } updateDb(d => { const f = d.productPhotoFolders.find(x => x.id === id); if (f) f.name = val; }); setRenamingId(null); };
-
-  const descendantIds = (rootId: string): string[] => { const out = [rootId]; const stack = [rootId]; while (stack.length) { const cur = stack.pop()!; for (const f of folders) if ((f.parentId ?? null) === cur) { out.push(f.id); stack.push(f.id); } } return out; };
-  const deleteFolder = async (id: string) => {
-    const f = folders.find(x => x.id === id);
-    const ids = descendantIds(id);
-    // Say what goes with it: the folders inside, and the files themselves.
-    const subs = ids.length - 1, files = allItems.filter(i => ids.includes(i.folderId)).length;
-    const what = [subs ? `${subs} folder${subs !== 1 ? "s" : ""}` : "", files ? `${files} photo/video file${files !== 1 ? "s" : ""}` : ""].filter(Boolean).join(" and ");
-    if (!(await confirmBox(`Delete folder "${f?.name}" and everything inside it?\n\n${what ? `${what} inside go with it — the files are deleted from storage, and share links to them stop working.` : "It is empty."} This cannot be undone.`))) return;
-    const removed = allItems.filter(i => ids.includes(i.folderId));
-    updateDb(d => { d.productPhotoFolders = d.productPhotoFolders.filter(x => !ids.includes(x.id)); d.productPhotoItems = d.productPhotoItems.filter(i => !ids.includes(i.folderId)); });
-    // Each file's small copy goes with it (never left behind on its own).
-    for (const it of removed) { await deleteByUrl(it.url); await deleteByUrl(it.thumb); }
-    toast.success("Folder deleted");
-  };
-
-  const uploadImages = async (files: FileList) => {
-    if (!currentFolderId) return;
-    const imgs = Array.from(files).filter(f => f.type.startsWith("image/"));
-    if (!imgs.length) { toast.error("Please choose image files"); return; }
-    setUploading(true);
-    try {
-      const urls = await Promise.all(imgs.map(f => putMedia(f, `productPhotos/${currentFolderId}`)));
-      updateDb(d => { urls.forEach((u, i) => d.productPhotoItems.unshift({ id: uid("ppi_"), folderId: currentFolderId, name: imgs[i].name.replace(/\.[^.]+$/, "").slice(0, 60) || "Image", type: "image", ...u, createdBy: user!.id, createdAt: new Date().toISOString() } as ProductPhotoItem)); });
-      toast.success(`${urls.length} image${urls.length !== 1 ? "s" : ""} uploaded`);
-    } catch { toast.error("Failed to upload images"); }
-    setUploading(false);
-  };
-  const uploadVideo = async (file: File) => {
-    if (!currentFolderId) return;
-    if (!file.type.startsWith("video/")) { toast.error("Please choose a video file"); return; }
-    if (file.size > MAX_VIDEO_MB * 1024 * 1024) { toast.error(`Video too large — keep it under ${MAX_VIDEO_MB} MB`); return; }
-    setVideoUploading(true);
-    try {
-      const up = await putMedia(file, `productPhotos/${currentFolderId}`);
-      requestPlayable(up.url);
-      updateDb(d => d.productPhotoItems.unshift({ id: uid("ppi_"), folderId: currentFolderId, name: file.name.replace(/\.[^.]+$/, "").slice(0, 60) || "Video", type: "video", ...up, createdBy: user!.id, createdAt: new Date().toISOString() } as ProductPhotoItem));
-      toast.success("Video uploaded");
-    } catch { toast.error("Failed to upload the video"); }
-    setVideoUploading(false);
-  };
-  /**
-   * Upload a whole folder from the PC, keeping its sub-folders. The picked
-   * folder is recreated here (reusing one of the same name under the same
-   * parent), and every image/video lands in the sub-folder it sat in. Files are
-   * never dropped into the folder you were looking at.
-   */
-  const uploadFolderFiles = async (files: FileList) => {
-    const relOf = (f: File) => (f as File & { webkitRelativePath?: string }).webkitRelativePath || "";
-    const picked = Array.from(files);
-    const media = picked.filter(f => f.type.startsWith("image/") || f.type.startsWith("video/"));
-    if (!media.length) { toast.error("That folder has no images or videos"); return; }
-
-    const firstRel = picked.map(relOf).find(r => r.includes("/")) || "";
-    const rootName = firstRel.split("/")[0] || `Uploaded ${new Date().toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" }).replace(/\bSept\b/, "Sep")}`;
-    const byPath = new Map<string, string>();
-    updateDb(d => {
-      if (!d.productPhotoFolders) d.productPhotoFolders = [];
-      const folderFor = (name: string, parent: string | null): string => {
-        const existing = d.productPhotoFolders.find(x => x.name === name && (x.parentId ?? null) === parent);
-        if (existing) return existing.id;
-        const id = uid("ppf_");
-        d.productPhotoFolders.push({ id, name, parentId: parent, createdBy: user!.id, createdAt: new Date().toISOString() });
-        return id;
-      };
-      const home = currentFolderId ?? null;
-      byPath.set("", folderFor(rootName, home));
-      for (const f of media) {
-        const parts = relOf(f).split("/").filter(Boolean).slice(0, -1);
-        let parent: string | null = home;
-        let acc = "";
-        for (const seg of parts) {
-          acc = acc ? `${acc}/${seg}` : seg;
-          let id = byPath.get(acc);
-          if (!id) { id = folderFor(seg, parent); byPath.set(acc, id); }
-          parent = id;
-        }
-      }
-    });
-
-    const made: ProductPhotoItem[] = [];
-    const failed: string[] = [];
-    let done = 0;
-    setFolderProgress({ done: 0, total: media.length });
-    const uploadOne = async (f: File) => {
-      const dir = relOf(f).split("/").filter(Boolean).slice(0, -1).join("/");
-      const folderId = byPath.get(dir) ?? byPath.get("")!;
-      const isVideo = f.type.startsWith("video/");
-      if (isVideo && f.size > MAX_VIDEO_MB * 1024 * 1024) { failed.push(f.name); return; }
-      try {
-        const up = await putMedia(f, `productPhotos/${folderId}`);
-        if (isVideo) requestPlayable(up.url);
-        made.push({
-          id: uid("ppi_"), folderId,
-          name: f.name.replace(/\.[^.]+$/, "").slice(0, 60) || (isVideo ? "Video" : "Image"),
-          type: isVideo ? "video" : "image", ...up,
-          createdBy: user!.id, createdAt: new Date().toISOString(),
-        } as ProductPhotoItem);
-      } catch { failed.push(f.name); }
-    };
-    try {
-      // Four at a time, and ONE save at the end — a folder of hundreds of files
-      // must not fire hundreds of separate writes.
-      let next = 0;
-      const worker = async () => {
-        while (next < media.length) {
-          await uploadOne(media[next++]);
-          setFolderProgress({ done: ++done, total: media.length });
-        }
-      };
-      await Promise.all(Array.from({ length: Math.min(4, media.length) }, worker));
-      if (made.length) updateDb(d => { d.productPhotoItems.unshift(...made); });
-      const folderCount = new Set(byPath.values()).size || 1;
-      if (made.length) toast.success(`${made.length} file${made.length !== 1 ? "s" : ""} uploaded into ${folderCount} folder${folderCount !== 1 ? "s" : ""}`);
-      if (failed.length) toast.error(`${failed.length} file${failed.length !== 1 ? "s" : ""} couldn't be uploaded (a video over ${MAX_VIDEO_MB} MB, or an upload error)`);
-      if (picked.length > media.length) toast.message(`${picked.length - media.length} non-media file${picked.length - media.length !== 1 ? "s were" : " was"} skipped`);
-    } finally { setFolderProgress(null); }
-  };
-
-
-  // The file goes with it, so it asks first.
-  const deleteItem = async (id: string) => {
-    const it = allItems.find(x => x.id === id);
-    if (!it) return;
-    if (!(await confirmBox(`Delete "${it.name}"?\n\nThe ${it.type} file is deleted from storage — gone from this folder, from downloads, and from any share link that shows it. This cannot be undone.`))) return;
-    updateDb(d => { d.productPhotoItems = d.productPhotoItems.filter(x => x.id !== id); });
-    await deleteByUrl(it.url);
-    await deleteByUrl(it.thumb);
-    toast.success(`${it.type === "video" ? "Video" : "Photo"} deleted`);
-  };
-  const [itemSheet, setItemSheet] = useState<{ item: ProductPhotoItem; mode: "rename" | "move" } | null>(null);
-  // Staff: what can be done to one item — greyed with the reason when their access doesn't reach it.
-  const itemMenu = (id: string): MoreAction[] | undefined => {
-    const it = allItems.find(x => x.id === id);
-    if (!it || !isStaff) return undefined;
-    return [
-      { label: "Rename", icon: Pencil, hint: canEdit ? undefined : needsAccess("productPhotos", "edit"), disabled: !canEdit, onSelect: () => setItemSheet({ item: it, mode: "rename" }) },
-      { label: "Move to another folder", icon: FolderInput, hint: !canEdit ? needsAccess("productPhotos", "edit") : folders.length > 1 ? undefined : "There is no other folder yet",
-        disabled: !canEdit || folders.length < 2, onSelect: () => setItemSheet({ item: it, mode: "move" }) },
-      { label: "Delete", icon: Trash2, danger: true, hint: canDelete ? undefined : needsAccess("productPhotos", "delete"), disabled: !canDelete, onSelect: () => deleteItem(it.id) },
-    ];
-  };
-  const downloadAll = async () => {
-    const name = (currentFolderId ? folders.find((f: CatalogFolder) => f.id === currentFolderId)?.name : "") || "photos";
-    setDownloading(true);
-    try {
-      const r = await downloadAsZip(gallery.map(it => ({ url: it.src, filename: it.filename })), name);
-      if (!r.added) toast.error("Nothing could be downloaded — check the connection and try again");
-      else if (r.failed.length) toast.warning(`${r.added} downloaded, ${r.failed.length} could not be fetched`);
-      else toast.success(`${r.added} file${r.added !== 1 ? "s" : ""} downloaded as ${name}.zip`);
-    } finally { setDownloading(false); }
-  };
-
-  const goTo = (id: string | null) => { setCurrentFolderId(id); setShowNewFolder(false); setRenamingId(null); };
-  const atRoot = currentFolderId === null;
-
-  return (
-    <div className="space-y-4">
-      <div className="flex items-start justify-between gap-3 flex-wrap">
-        <nav className="flex items-center gap-1 flex-wrap text-sm min-w-0">
-          <button onClick={() => goTo(null)} className={`font-medium shrink-0 ${atRoot ? "text-brand-dark" : "text-primary hover:underline"}`}>Library</button>
-          {path.map((f, i) => (
-            <span key={f.id} className="flex items-center gap-1 min-w-0">
-              <ChevronRight className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
-              <button onClick={() => goTo(f.id)} className={`font-medium truncate ${i === path.length - 1 ? "text-brand-dark" : "text-primary hover:underline"}`}>{f.name}</button>
-            </span>
-          ))}
-        </nav>
-
-        {(canAdd || canShare) && (
-          <div className="flex items-center gap-2 shrink-0 flex-wrap">
-            {canAdd && (<>
-            <button onClick={() => { setShowNewFolder(v => !v); setNewFolderName(""); }} className="flex items-center gap-1.5 h-9 px-3 rounded-xl border border-border bg-white hover:bg-secondary text-xs font-medium text-brand-dark"><FolderPlus className="h-4 w-4" /> {atRoot ? "New Category" : "New Folder"}</button>
-            {/* Whole folder from the PC — works at the top level too, where it
-                becomes a new category. */}
-            <input
-              ref={folderRef}
-              type="file"
-              // @ts-expect-error — non-standard but supported by Chrome/Edge/Safari
-              webkitdirectory=""
-              directory=""
-              multiple
-              className="hidden"
-              onChange={async e => { if (e.target.files?.length) await uploadFolderFiles(e.target.files); e.target.value = ""; }}
-            />
-            <button onClick={() => folderRef.current?.click()} disabled={!!folderProgress} title="Pick a folder on your computer — its sub-folders are recreated here" className="flex items-center gap-1.5 h-9 px-3 rounded-xl border border-border bg-white hover:bg-secondary text-xs font-medium text-brand-dark disabled:opacity-60">
-              {folderProgress ? <Loader2 className="h-4 w-4 animate-spin" /> : <FolderUp className="h-4 w-4" />}
-              {folderProgress ? `Uploading ${folderProgress.done}/${folderProgress.total}…` : "Upload Folder"}
-            </button>
-            </>)}
-            {!atRoot && currentFolderId && (
-              <>
-                {canAdd && (<>
-                <input ref={imgRef} type="file" accept="image/*" multiple className="hidden" onChange={async e => { if (e.target.files?.length) await uploadImages(e.target.files); e.target.value = ""; }} />
-                <button onClick={() => imgRef.current?.click()} disabled={uploading} className="flex items-center gap-1.5 h-9 px-3 rounded-xl btn-hero text-xs font-medium disabled:opacity-60">{uploading ? <Loader2 className="h-4 w-4 animate-spin" /> : <ImagePlus className="h-4 w-4" />} {uploading ? "Uploading…" : "Add Images"}</button>
-                <input ref={vidRef} type="file" accept="video/*" className="hidden" onChange={async e => { const f = e.target.files?.[0]; if (f) await uploadVideo(f); e.target.value = ""; }} />
-                <button onClick={() => vidRef.current?.click()} disabled={videoUploading} className="flex items-center gap-1.5 h-9 px-3 rounded-xl border border-border bg-white hover:bg-secondary text-xs font-medium text-brand-dark disabled:opacity-60">{videoUploading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Video className="h-4 w-4" />} {videoUploading ? "Uploading…" : "Add Video"}</button>
-                </>)}
-                {canShare && <ShareFolderButton kind="productPhotos" folderId={currentFolderId} folderName={path[path.length - 1]?.name ?? "Folder"} compact />}
-              </>
-            )}
-          </div>
-        )}
-      </div>
-
-      {canAdd && showNewFolder && (
-        <div className="card-luxe p-3 flex items-center gap-2">
-          <FolderPlus className="h-4 w-4 text-fuchsia-500 shrink-0" />
-          <input autoFocus value={newFolderName} onChange={e => setNewFolderName(e.target.value)}
-            onKeyDown={e => { if (e.key === "Enter") createFolder(); if (e.key === "Escape") setShowNewFolder(false); }}
-            placeholder={atRoot ? "Category name (e.g. Rings, Necklaces)" : "Folder name (e.g. product ID / design number)"}
-            className="flex-1 h-10 rounded-xl border border-border bg-white px-3 text-sm focus:outline-none focus:ring-2 focus:ring-primary/30" />
-          <button onClick={createFolder} className="h-10 px-4 rounded-xl btn-hero text-sm font-medium">Create</button>
-          <button onClick={() => setShowNewFolder(false)} className="h-10 w-10 rounded-xl border border-border grid place-items-center text-muted-foreground"><X className="h-4 w-4" /></button>
-        </div>
-      )}
-
-      {gallery.length > 0 && (
-        <div className="flex justify-end">
-          <button onClick={downloadAll} disabled={downloading} className="flex items-center gap-1.5 h-9 px-3 rounded-xl border border-border text-xs font-medium hover:bg-secondary disabled:opacity-60"><Download className="h-3.5 w-3.5" /> {downloading ? "Downloading…" : "Download All"}</button>
-        </div>
-      )}
-
-      {subfolders.length > 0 && (
-        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-auto-photos gap-3 sm:gap-4">
-          {subfolders.map(f => {
-            const kids = childCount(f.id), media = mediaCount(f.id);
-            const sub = [kids > 0 ? `${kids} folder${kids !== 1 ? "s" : ""}` : "", media > 0 ? `${media} item${media !== 1 ? "s" : ""}` : ""].filter(Boolean).join(" · ") || "Empty";
-            return renamingId === f.id ? (
-              <div key={f.id} className="rounded-2xl border border-primary/40 bg-white shadow-sm p-3 flex flex-col justify-center gap-2 aspect-[4/5]">
-                <input autoFocus value={renameVal} onChange={e => setRenameVal(e.target.value)} onKeyDown={e => { if (e.key === "Enter") renameFolder(f.id); if (e.key === "Escape") setRenamingId(null); }} className="h-9 rounded-lg border border-border px-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/30" />
-                <div className="flex gap-2"><button onClick={() => renameFolder(f.id)} className="flex-1 h-8 rounded-lg btn-hero text-xs font-medium flex items-center justify-center gap-1"><Check className="h-3.5 w-3.5" /> Save</button><button onClick={() => setRenamingId(null)} className="h-8 w-8 rounded-lg border border-border grid place-items-center text-muted-foreground"><X className="h-3.5 w-3.5" /></button></div>
-              </div>
-            ) : (
-              <FolderCard key={f.id} label={f.name} sub={sub} cover={coverFor(f.id)} onClick={() => goTo(f.id)}
-                onRename={canEdit ? () => { setRenamingId(f.id); setRenameVal(f.name); } : undefined}
-                onDelete={canDelete ? () => deleteFolder(f.id) : undefined} />
-            );
-          })}
-        </div>
-      )}
-
-      {gallery.length > 0 && (
-        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-auto-photos gap-3 sm:gap-4">
-          {gallery.map((item, i) => <ItemCard key={item.id} item={item} onOpen={() => setLightbox(i)} onDownload={() => downloadOne(item.src, item.filename)} onDelete={canDelete ? () => deleteItem(item.id) : undefined} menu={itemMenu(item.id)} />)}
-        </div>
-      )}
-
-      {subfolders.length === 0 && gallery.length === 0 && (
-        <div className="card-luxe p-12 text-center text-muted-foreground">
-          <Camera className="h-10 w-10 mx-auto mb-3 opacity-20" />
-          {canAdd
-            ? atRoot
-              ? <p>No categories yet — tap <span className="font-medium text-foreground">New Category</span> (e.g. Rings).</p>
-              : <p>Empty — add a product folder, images or a video.</p>
-            : <p>No product photos here yet.</p>}
-        </div>
-      )}
-
-      <AnimatePresence>{lightbox !== null && <Lightbox items={gallery} startIndex={lightbox} onClose={() => setLightbox(null)} />}</AnimatePresence>
-      {itemSheet && <PhotoItemSheet item={itemSheet.item} mode={itemSheet.mode} folders={folders} onClose={() => setItemSheet(null)} />}
-    </div>
-  );
-}
-
 /**
  * Design Studio — the CAD designs given to designers (staff), and the product
- * photos: by order, and the library (clients with access see those two).
+ * photos by order (clients with access see those).
  */
 export function ProductPhotosPage() {
   const { user } = useAuth();
@@ -609,7 +220,7 @@ export function ProductPhotosPage() {
   const can = useCan();
   const isStaff = user!.role !== "client";
   const seeDesigns = user!.role === "admin" || (user!.role === "employee" && can("designers"));
-  const [tab, setTab] = useState<"designs" | "orders" | "library">(seeDesigns ? "designs" : "orders");
+  const [tab, setTab] = useState<"designs" | "orders">(seeDesigns ? "designs" : "orders");
   // An employee sees the designs of the orders within their work, as on Orders.
   const mine = user!.role === "employee" ? new Set(currentUserOrders(db, user!).map(o => o.id)) : null;
   const jobs = seeDesigns ? (db.cadJobs ?? []).filter(j => !mine || mine.has(j.orderId)) : [];
@@ -622,7 +233,7 @@ export function ProductPhotosPage() {
           <div className="card-luxe p-10 text-center text-muted-foreground">
             <Camera className="h-10 w-10 mx-auto mb-3 opacity-30" />
             <p className="font-medium text-foreground">Design Studio isn't available for your account yet</p>
-            <p className="text-sm mt-1">Contact Shree Suktam Diamond to get access.</p>
+            <p className="text-sm mt-1">Contact {brandName()} to get access.</p>
           </div>
         </div>
       );
@@ -633,11 +244,11 @@ export function ProductPhotosPage() {
     <div className="max-w-6xl mx-auto space-y-5">
       <PageHeader title="Design Studio" subtitle={seeDesigns ? "CAD designs and product photos" : "Product photos"} />
 
-      {/* Designs given to designers (staff) · photos by order · the hand-organised library */}
+      {/* Designs given to designers (staff) · photos by order */}
       <TabBar label="Design Studio" value={tab} onChange={setTab} className="w-fit max-w-full"
         tabs={[
           ...(seeDesigns ? [{ key: "designs" as const, label: "Designs", icon: PenTool, count: jobs.filter(isOpenJob).length || undefined }] : []),
-          { key: "orders", label: "By Order", icon: Package }, { key: "library", label: "Library", icon: Folder },
+          { key: "orders", label: "By Order", icon: Package },
         ]} />
 
       {tab === "designs" && seeDesigns ? (
@@ -645,7 +256,7 @@ export function ProductPhotosPage() {
           <CadJobsTable id="design-studio-jobs" jobs={jobs} showDesigner exportName="Designs"
             emptyText="No designs given yet — give an order's design to a designer from its CAD Design card." />
         </div>
-      ) : tab === "orders" ? <OrdersView isStaff={isStaff} /> : <LibraryView isStaff={isStaff} />}
+      ) : <OrdersView isStaff={isStaff} />}
     </div>
   );
 }

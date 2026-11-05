@@ -1,3 +1,4 @@
+import { brandShort } from "@/lib/brand";
 // Settings → Etsy: the Etsy shops connected to our order board — connect one
 // (its own Etsy app, approved by the shop owner on Etsy), map what its listings
 // say onto our orders (the same rules as a Shopify store, with a preview on a
@@ -100,7 +101,7 @@ function ConnectSheet({ open, onClose, again }: { open: boolean; onClose: () => 
       ) : (
         <div className="space-y-6">
           <ol className="space-y-2 text-sm rounded-xl border border-border bg-secondary/30 p-4 list-decimal pl-8">
-            <li>Signed in to Etsy as the <b>shop owner</b>, go to <a className="text-primary underline" href="https://www.etsy.com/developers/your-apps" target="_blank" rel="noreferrer">etsy.com/developers/your-apps</a> → <b>Create a new app</b>. Choose a <b>Seller app</b> (for your own shop — Etsy approves it quickly); name it e.g. “Starlink orders”.</li>
+            <li>Signed in to Etsy as the <b>shop owner</b>, go to <a className="text-primary underline" href="https://www.etsy.com/developers/your-apps" target="_blank" rel="noreferrer">etsy.com/developers/your-apps</a> → <b>Create a new app</b>. Choose a <b>Seller app</b> (for your own shop — Etsy approves it quickly); name it e.g. “{brandShort()} orders”.</li>
             <li>In the app, add this <b>Callback URL</b> (Redirect URI) — exactly as it is:
               <div className="mt-2"><CopyRow label="Callback URL" value={urls?.callbackUrl} /></div></li>
             <li>Copy the app's <b>Keystring</b> and <b>Shared secret</b> here. The secret is kept encrypted on our server and never shown again.</li>

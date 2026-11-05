@@ -186,13 +186,16 @@ export function ProductView(p: {
                 </div>
               )}
 
-              {/* The price — a card on a laptop; on a phone, also the bar at the bottom. */}
-              <div className="card-luxe p-4 sm:p-5 space-y-3">
-                {pr.ask && pr.amount == null ? <p className="text-sm">{pr.ask}</p> : (
+              {/* The price — a card on a laptop. On a phone the bar at the bottom shows it (once): the card keeps
+                  only what the bar has no room for — its note, and the staff's breakdown. */}
+              <div className={`card-luxe p-4 sm:p-5 space-y-3 ${p.priceExtra || (pr.amount != null && pr.note) ? "" : "hidden lg:block"}`}>
+                {pr.ask && pr.amount == null ? <p className="text-sm hidden lg:block">{pr.ask}</p> : (
                   <div>
-                    <p className="text-xs text-muted-foreground">{pr.label ?? "Price"}</p>
-                    <p className="text-3xl font-semibold tabular-nums flex items-center gap-2">{priceLine}{pr.busy && pr.amount != null && <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />}</p>
-                    {pr.amount != null && pr.note && <p className="text-[11px] text-muted-foreground mt-1">{pr.note}</p>}
+                    <div className="hidden lg:block">
+                      <p className="text-xs text-muted-foreground">{pr.label ?? "Price"}</p>
+                      <p className="text-3xl font-semibold tabular-nums flex items-center gap-2">{priceLine}{pr.busy && pr.amount != null && <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />}</p>
+                    </div>
+                    {pr.amount != null && pr.note && <p className="text-[11px] text-muted-foreground lg:mt-1">{pr.note}</p>}
                   </div>
                 )}
                 {p.priceExtra}

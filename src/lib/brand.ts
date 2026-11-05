@@ -78,6 +78,11 @@ export function useBrand(): Brand {
 
 /** The company name to show: the brand's, else this build's. */
 export const brandName = (b: Brand = current) => b.name?.trim() || BUILTIN.name;
+/** The name without the trade word: "Starlink", "Shree Suktam" — never another business's. */
+export const brandShort = (b: Brand = current) =>
+  brandName(b).split(/\s+/).filter(w => !/^(jewels?|jewell?ery|jewelry|diamonds?|gems?|&)$/i.test(w)).join(" ") || brandName(b);
+/** What a downloaded file starts with: "Starlink", "ShreeSuktam". */
+export const brandFilePrefix = (b: Brand = current) => brandShort(b).replace(/[^A-Za-z0-9]+/g, "") || "Export";
 
 /** Put a brand colour on the page — the whole palette, light and dark. "" takes it off. */
 export function applyBrandColor(hex: string | undefined, root: HTMLElement = document.documentElement): void {

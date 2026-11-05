@@ -34,7 +34,8 @@ export function DesignShareView({ share }: { share: Share }) {
   const pick = q?.ready && q.choice ? { ...q.choice, ...choice } as Choice : null;
   const name = brandName(brand);
   return (
-    <div className="min-h-screen bg-[#F7F9FC]">
+    // The app shell locks html/body/#root (height 100%, overflow hidden): the page scrolls in its own box, as the gallery does.
+    <div className="fixed inset-0 overflow-y-auto overscroll-contain bg-[#F7F9FC]">
       <header className="bg-white border-b border-border/60">
         <div className="max-w-6xl mx-auto px-4 h-14 flex items-center gap-2"><BrandLogo className="h-8 w-auto" /></div>
       </header>
