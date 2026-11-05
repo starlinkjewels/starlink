@@ -31,7 +31,7 @@ import { onTaskDispatched } from "firebase-functions/v2/tasks";
 import { HttpsError, onCall } from "firebase-functions/v2/https";
 import { OWNER_EMAILS, REGION } from "./region";
 import { OCR_VERSION, readExcel, readPicture, type OcrText } from "./ocr";
-import { PARSER_VERSION, parseBoth, sameDesign, type Specs } from "./shared/specParse";
+import { PARSER_VERSION, parseSheet, sameDesign, type Specs } from "./shared/specParse";
 import { arrangeDesign, designOf, isJunk, isSheetFile, learnRules, roleOf, type DesignEntry, type DesignOf, type ItemDesign, type ItemSpecs, type MediaRole, type MediaRules } from "./shared/catalogMedia";
 import { categoryOf, centreSizes, cleanRules, clientSees, defaultChoice, gramsFor, priceDesign, sheetRingUs, takesRingSize, withCentre, type Ccy, type Choice, type MetalKey } from "./shared/pricing";
 import { cleanSettings as cleanRateSettings, karatRates, type PriceBase } from "./shared/liveRates";
@@ -351,8 +351,8 @@ async function wordsOf(buf: Buffer, kind: "picture" | "excel"): Promise<{ text: 
 }
 
 function meaning(t: OcrText, ctx: { folderName?: string; fileName?: string }): Specs {
-  // Both readings as one: the stones from whichever read them, the gold from both (shared/specParse.ts).
-  return parseBoth(t.page, t.table, ctx);
+  // Everything read off the sheet as one reading — its tables by their words' places first (shared/specParse.ts parseSheet).
+  return parseSheet(t, ctx);
 }
 
 /** A reading kept on its file — in a transaction: not if the file was replaced, deleted or checked by a person meanwhile. */

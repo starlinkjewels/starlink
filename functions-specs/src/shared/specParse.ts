@@ -11,9 +11,17 @@
 // every reading is checked (rows add up to the total, gold weights rise from
 // silver to platinum). Anything that doesn't fit is said, for a person to check.
 //
-// Plain functions, no imports.
+// Since version 6 the stones come first from the table reader (tableRead.ts) — each table's
+// columns found by their headings and their words' places, any designer's layout — with
+// these word rules beside it; the reading whose rows add up to the sheet's own totals is kept.
+//
+// Plain functions; the table reader beside it is the only import.
+import { readStoneLines, readStoneTables, tablesText, type TTable } from "./tableRead";
 
-export const PARSER_VERSION = 5;
+export const PARSER_VERSION = 6;
+
+/** What the server read off a sheet (functions-specs/src/ocr.ts): its words, and since OCR 2 its tables and lines with places. */
+export interface SheetText { page: string; table?: string; grids?: TTable[]; lines?: TTable; /** the picture's width (the lines are on an enlarged copy) */ w?: number }
 
 export interface StoneRow { shape?: string; sieve?: string; size?: string; pcs: number; perStone: number; total: number }
 export interface Specs {
@@ -116,9 +124,21 @@ export function parseSpecs(text: string, ctx: Ctx = {}): Specs {
  * the page blurred).
  */
 export function parseBoth(page: string, table: string | undefined, ctx: Ctx = {}): Specs {
-  const a = extract(page, ctx);
-  if (!table) return finish(a);
-  const b = extract(table, ctx);
+  return parseSheet({ page, table }, ctx);
+}
+
+/**
+ * A sheet as one reading from everything read off it: the stones from whichever reading's rows make
+ * their own total (the table reader's first when they agree — it knows each column; else the word
+ * rules' readings of the page and the enlarged table; else the page's lines read row by row), the
+ * gold from all of them (the one with more karats first, the others filling gaps when they fit), the
+ * rest from the page.
+ */
+export function parseSheet(t: SheetText, ctx: Ctx = {}): Specs {
+  const a = extract(t.page, ctx);
+  const b = t.table ? extract(t.table, ctx) : undefined;
+  const c = t.grids?.length ? extract(tablesText(t.grids), ctx) : undefined;
+  if (!b && !c && !t.lines) return finish(a);
   const near = (x: number, y: number) => Math.abs(x - y) <= Math.max(0.011, y * 0.02);
   const fits = (p: Parts, o: Parts) => {
     if (!p.rows.length) return 0;
@@ -130,22 +150,60 @@ export function parseBoth(page: string, table: string | undefined, ctx: Ctx = {}
     const other = (o.stoneTotals && o.stoneTotals.pcs === pcs && near(o.stoneTotals.ct, ct)) || (o.diaCts && near(n(o.diaCts), ct));
     return (own ? 1000 : 0) + (other ? 300 : 0) + p.rows.length;
   };
-  // The stones' rows with their own totals (never a total borrowed from the other reading).
-  const S = fits(b, a) > fits(a, b) ? b : a;
-  // The gold: the reading with more karats; a karat only the other read is added when it fits
+  const words = [a, ...(b ? [b] : []), ...(c ? [c] : [])];
+  // The sheet's grand total ("Total Dia. Cts 0.54"), from whichever reading saw it — a witness for every reading.
+  const diaCts = a.diaCts ?? b?.diaCts ?? c?.diaCts;
+  const cands: { p: Parts; grid: boolean }[] = [{ p: a, grid: false }, ...(b ? [{ p: b, grid: false }] : [])];
+  let listed = 0;
+  if (t.grids?.length) {
+    // The page's lines on the tables' scale (they were read off a copy enlarged to lines.x1 wide).
+    const k = t.lines && t.w && t.lines.x1 ? t.w / t.lines.x1 : 1;
+    const above = (t.lines?.rows ?? []).map(r => ({ w: r.w.map(w => ({ ...w, x0: w.x0 * k, x1: w.x1 * k, ...(w.y0 !== undefined ? { y0: w.y0 * k } : {}), ...(w.y1 !== undefined ? { y1: w.y1 * k } : {}) })) }));
+    const g = readStoneTables(t.grids, above);
+    listed = g.listed;
+    if (g.rows.length) cands.push({ p: { ...a, rows: g.rows, notes: g.notes, stoneTotals: g.totals, diaCts }, grid: true });
+  }
+  if (t.lines?.rows.length) {
+    // The page's lines read row by row — only when their rows make a total printed on the sheet: free text
+    // holds sizes, gold and notes too, and a reading of it that nothing confirms is never taken.
+    const l = readStoneLines(t.lines.rows);
+    const lp: Parts = { ...a, rows: l.rows, notes: l.notes, stoneTotals: l.totals, diaCts };
+    if (l.rows.length && (l.totals || diaCts) && (() => {
+      const pcs = l.rows.reduce((u, r) => u + r.pcs, 0), ct = r3(l.rows.reduce((u, r) => u + r.total, 0));
+      return (!!l.totals && l.totals.pcs === pcs && near(l.totals.ct, ct)) || (!!diaCts && near(n(diaCts), ct));
+    })()) cands.push({ p: lp, grid: false });
+  }
+  // The stones' rows with their own totals (never a total borrowed from another reading); the others' totals a second witness.
+  const others = (x: Parts) => cands.map(o => o.p).filter(o => o !== x);
+  // A reading that truly matches a printed total beats one with no total to disagree with.
+  const matches = (p: Parts) => {
+    if (!p.rows.length) return false;
+    const pcs = p.rows.reduce((u, r) => u + r.pcs, 0), ct = r3(p.rows.reduce((u, r) => u + r.total, 0));
+    return (!!p.stoneTotals && p.stoneTotals.pcs === pcs && near(p.stoneTotals.ct, ct)) || (!!p.diaCts && near(n(p.diaCts), ct));
+  };
+  // Rows that make their own weight (a weight per stone × pieces = the row's): a row with no weight never outweighs one with.
+  const weighed = (p: Parts) => p.rows.filter(r => r.total > 0 && r.perStone > 0 && Math.abs(r.pcs * r.perStone - r.total) <= Math.max(0.011, r.total * 0.03)).length;
+  const score = (x: { p: Parts; grid: boolean }) => Math.max(0, ...others(x.p).map(o => fits(x.p, o)), fits(x.p, { ...x.p, stoneTotals: undefined, diaCts: undefined }))
+    + (matches(x.p) ? 2000 : 0) + weighed(x.p) * 5 - x.p.rows.filter(r => !r.total).length * 5 + (x.grid ? 0.5 : 0);
+  const S = cands.reduce((best, x) => (score(x) > score(best) ? x : best)).p;
+  // The gold: the reading with more karats; a karat only another read is added when it fits
   // the rest (rising from silver to platinum, in the usual weight ratios) — never a stray number.
   const goldScore = (p: Parts) => (metalFits(p.metal) ? 100 : 0) + Object.keys(p.metal).length;
-  const M = goldScore(b) > goldScore(a) ? b : a, MO = M === a ? b : a;
+  const M = words.reduce((best, x) => (goldScore(x) > goldScore(best) ? x : best));
   const metal = { ...M.metal };
-  for (const [k, g] of Object.entries(MO.metal)) if (metal[k] === undefined && metalFits({ ...metal, [k]: g })) metal[k] = g;
-  return finish({
+  for (const o of words) if (o !== M) for (const [k, g] of Object.entries(o.metal)) if (metal[k] === undefined && metalFits({ ...metal, [k]: g })) metal[k] = g;
+  const first = <T,>(f: (p: Parts) => T | undefined) => words.map(f).find(v => v !== undefined && !(Array.isArray(v) && !v.length));
+  const out = finish({
     ...a,
-    printed: a.printed ?? b.printed,
-    anchors: Math.max(a.anchors, b.anchors), hasGold: a.hasGold || b.hasGold, stoneCols: a.stoneCols || b.stoneCols, noStone: a.noStone || b.noStone,
-    metal, tone: a.tone ?? b.tone, code: a.code ?? b.code,
-    rows: S.rows, notes: S.notes, stoneTotals: S.stoneTotals, diaCts: S.diaCts,
-    dims: a.dims.length ? a.dims : b.dims, ring: a.ring ?? b.ring, subCategory: a.subCategory ?? b.subCategory, castingPcs: a.castingPcs ?? b.castingPcs,
+    printed: first(p => p.printed),
+    anchors: Math.max(...words.map(p => p.anchors)), hasGold: words.some(p => p.hasGold), stoneCols: words.some(p => p.stoneCols) || cands.some(x => x.grid), noStone: words.some(p => p.noStone),
+    metal, tone: first(p => p.tone), code: first(p => p.code),
+    rows: S.rows, notes: S.notes, stoneTotals: S.stoneTotals, diaCts: S.diaCts ?? diaCts,
+    dims: first(p => (p.dims.length ? p.dims : undefined)) ?? [], ring: first(p => p.ring), subCategory: first(p => p.subCategory), castingPcs: first(p => p.castingPcs),
   });
+  // Stones listed with neither pieces nor weight (an Oval · 5.78 × 7.81 table): a person says what they are.
+  if (listed) { out.reasons.push(`${listed} stone${listed === 1 ? " is" : "s are"} listed without pieces or weight`); if (out.status === "ok") out.status = "review"; }
+  return out;
 }
 
 function extract(text: string, ctx: Ctx): Parts {
@@ -168,9 +226,9 @@ function extract(text: string, ctx: Ctx): Parts {
   const metal: Record<string, number> = {};
   for (let i = 0; i < U.length; i++) {
     let k: number | undefined, j = i;
-    const m1 = /^(\d{1,2})K(T)?$/.exec(U[i]);
+    const m1 = /^(\d{1,2})K(T)?[:\-.]*$/.exec(U[i]);
     if (m1) k = Number(m1[1]);
-    else if (/^\d{1,2}$/.test(U[i]) && /^KT?$/.test(U[i + 1] ?? "")) { k = Number(U[i]); j = i + 1; }
+    else if (/^\d{1,2}$/.test(U[i]) && /^KT?[:\-.]*$/.test(U[i + 1] ?? "")) { k = Number(U[i]); j = i + 1; }
     else if (/^(SILVER|SLV|925)$/.test(U[i])) k = -1;
     else if (/^(PLT|PT|PT950|PLATINUM|PLAT)$/.test(U[i])) k = -2;
     if (k === undefined) continue;
@@ -310,6 +368,9 @@ function finish(p: Parts): Specs {
   const dia = diaCts ? (Math.abs(n(diaCts) - sumCt) > 0.011 && /^1\d*\.\d+$/.test(diaCts) && Math.abs(n(diaCts.slice(1)) - sumCt) <= 0.011 ? n(diaCts.slice(1)) : n(diaCts)) : undefined;
   if (dia !== undefined && rows.length && Math.abs(dia - sumCt) > Math.max(0.011, sumCt * 0.02)) reasons.push(`Total diamond carats ${dia}, rows add up to ${sumCt}`);
   if (stoneTotals && !rows.length) reasons.push("A stone total was read but not its rows");
+  // Each row makes its own weight: pieces × weight per stone (the sheet's own rounding allowed).
+  const odd = rows.find(r => r.perStone > 0 && r.total > 0 && Math.abs(r.pcs * r.perStone - r.total) > Math.max(0.011, r.total * 0.08) + r.pcs * 0.0005);
+  if (odd) reasons.push(`A stone row doesn't add up: ${odd.pcs} × ${odd.perStone} ct ≠ ${odd.total} ct`);
   reasons.push(...metalProblems(metal));
 
   const table = anchors >= 2 || rows.length > 0 || Object.keys(metal).length > 0;

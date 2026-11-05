@@ -10,25 +10,27 @@
 //      TOTAL, 14K …) found in pass 1, cut out with room below for its last rows,
 //      and enlarged again — small print reads far better that way.
 // Both texts are kept; the parser picks the better reading.
-import path from "path";
+//   3. (since OCR 2) every table on the sheet found by its lines and read word by
+//      word with each word's place (tables.ts) — `grids`, for the table reader —
+//      and the page's own lines of words (`lines`), for a sheet whose table has no lines.
+// An Excel sheet gives its cells as they are (one table per worksheet).
 import sharp from "sharp";
 import ExcelJS from "exceljs";
-import { createWorker, PSM, type Worker } from "tesseract.js";
+import { PSM } from "tesseract.js";
+import { engine, stopEngine } from "./engine";
+import { pictureTables } from "./tables";
+import type { TTable } from "./shared/tableRead";
 
 /** Bumped when the reading itself changes (not the parser) — texts read before are read again. */
-export const OCR_VERSION = 1;
+export const OCR_VERSION = 2;
 
-export interface OcrText { page: string; table?: string; w: number; h: number; ms: number }
-
-// One engine per server instance (a task at a time), started on the first picture.
-let worker: Promise<Worker> | null = null;
-function engine(): Promise<Worker> {
-  if (!worker) {
-    const langPath = path.join(path.dirname(require.resolve("@tesseract.js-data/eng/package.json")), "4.0.0_best_int");
-    worker = createWorker("eng", 1, { langPath, gzip: true, cacheMethod: "none" }).catch(e => { worker = null; throw e; });
-  }
-  return worker;
+export interface OcrText { page: string; table?: string; w: number; h: number; ms: number;
+  /** The sheet's tables, each word with its place (OCR 2). */
+  grids?: TTable[];
+  /** The page's own lines of words, in order (OCR 2) — for a table with no lines. */
+  lines?: TTable;
 }
+export { engine, stopEngine };
 
 const ANCHOR = /^(SHAPE|SIEVE|PTS|QTY\.?|PCS|PCs|TOTAL|Total|WEIGHT|Weight|METAL|Metal|Casting|Sub\.?Ctg|DIA|GM|\d{1,2}K[Tt]?|Silver)$/;
 
@@ -44,6 +46,11 @@ export async function readPicture(buf: Buffer): Promise<OcrText> {
   const out: OcrText = { page: a.data.text, w: md.width ?? 0, h: md.height ?? 0, ms: 0 };
 
   const words = (a.data.blocks ?? []).flatMap(b => b.paragraphs.flatMap(p => p.lines.flatMap(l => l.words)));
+  // The page's lines of words, as the engine found them (a table with no lines reads row by row from these).
+  const plines = (a.data.blocks ?? []).flatMap(b => b.paragraphs.flatMap(p => p.lines))
+    .map(l => ({ w: l.words.filter(x => x.text.trim()).map(x => ({ t: x.text.trim(), x0: x.bbox.x0, x1: x.bbox.x1, y0: x.bbox.y0, y1: x.bbox.y1 })) }))
+    .filter(l => l.w.length);
+  if (plines.length) out.lines = { x0: 0, x1: pm.width ?? 0, rows: plines.slice(0, 400) };
   const anch = words.filter(x => ANCHOR.test(x.text.trim()) && x.confidence > 30);
   if (anch.length >= 2 && pm.width && pm.height) {
     let x0 = Math.min(...anch.map(x => x.bbox.x0)), x1 = Math.max(...anch.map(x => x.bbox.x1));
@@ -59,6 +66,8 @@ export async function readPicture(buf: Buffer): Promise<OcrText> {
       out.table = (await w.recognize(crop)).data.text;
     }
   }
+  // Every ruled table, read with its words' places.
+  try { const g = await pictureTables(buf); if (g.length) out.grids = g; } catch { /* the words above still read */ }
   out.ms = Date.now() - t0;
   return out;
 }
@@ -69,10 +78,14 @@ export async function readExcel(buf: Buffer): Promise<OcrText> {
   const wb = new ExcelJS.Workbook();
   await wb.xlsx.load(buf as unknown as ArrayBuffer);
   const lines: string[] = [];
+  const grids: TTable[] = [];
   wb.eachSheet(ws => {
-    ws.eachRow({ includeEmpty: false }, row => {
+    // Each worksheet a table: its cells where they are (a column 100 wide, a row 20 high) and every column's line.
+    const grid: TTable = { x0: 0, x1: (ws.columnCount + 1) * 100, rows: [], vl: Array.from({ length: ws.columnCount + 2 }, (_, i) => ({ x: i * 100 + 95, y0: 0, y1: (ws.rowCount + 2) * 20 })) };
+    ws.eachRow({ includeEmpty: false }, (row, rn) => {
       const cells: string[] = [];
-      row.eachCell({ includeEmpty: false }, c => {
+      const words: { t: string; x0: number; x1: number; y0: number; y1: number }[] = [];
+      row.eachCell({ includeEmpty: false }, (c, cn) => {
         const v = c.value as unknown;
         let s = "";
         if (v == null) s = "";
@@ -84,14 +97,12 @@ export async function readExcel(buf: Buffer): Promise<OcrText> {
         if (typeof v === "number" || (typeof v === "object" && typeof (v as { result?: unknown }).result === "number")) {
           const num = Number(s); if (Number.isFinite(num)) s = String(Math.round(num * 1000) / 1000);
         }
-        if (s.trim()) cells.push(s.trim());
+        if (s.trim()) { cells.push(s.trim()); words.push({ t: s.trim(), x0: cn * 100, x1: cn * 100 + 90, y0: rn * 20, y1: rn * 20 + 15 }); }
       });
-      if (cells.length) lines.push(cells.join("  "));
+      if (cells.length) { lines.push(cells.join("  ")); grid.rows.push({ w: words }); }
     });
+    if (grid.rows.length) grids.push(grid);
   });
-  return { page: lines.join("\n"), w: 0, h: 0, ms: Date.now() - t0 };
+  return { page: lines.join("\n"), w: 0, h: 0, ms: Date.now() - t0, ...(grids.length ? { grids } : {}) };
 }
 
-export async function stopEngine(): Promise<void> {
-  if (worker) { const w = await worker.catch(() => null); worker = null; await w?.terminate(); }
-}
