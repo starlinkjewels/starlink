@@ -1,5 +1,6 @@
 import { studioOn } from "@/lib/studio";
 import { factoryFigures } from "@/lib/partyTotals";
+import { bySettingsOrder, materialName, materialUnit } from "@/lib/materials";
 import { FactoryCreateDialog } from "@/components/create/FactoryCreateDialog";
 import { useState, type MouseEvent } from "react";
 import { Link, useNavigate } from "react-router-dom";
@@ -142,6 +143,10 @@ export function FactoriesPage() {
   };
   const grams = (n: number) => `${n.toLocaleString()} g`;
   const carats = (n: number) => `${n.toLocaleString()} ct`;
+  // Platinum, gems, findings … at the factory (Settings → Materials): "Platinum 5 g · Ruby 2.1 ct".
+  const otherHeld = (fac: Factory) => { const o = accountOf(fac).other ?? {};
+    return bySettingsOrder(db.settings, Object.keys(o)).map(k => `${materialName(db.settings, k)} ${o[k].toLocaleString()} ${materialUnit(db.settings, k)}`); };
+  const anyOther = db.factories.some(fac => otherHeld(fac).length > 0);
   const columns: DataColumn<Factory>[] = [
     { key: "factory", header: "Factory", always: true, sortValue: fac => fac.name, csv: fac => fac.name,
       cell: fac => <CellMain
@@ -153,6 +158,8 @@ export function FactoriesPage() {
       cell: fac => { const g = accountOf(fac).fineGold; return <span className={`tabular-nums whitespace-nowrap font-semibold ${g < 0 ? "text-destructive" : "text-amber-700"}`}>{grams(g)}</span>; } },
     { key: "diamond", header: "Diamond", align: "right", kind: "number", sortValue: fac => accountOf(fac).diamondOutstanding,
       cell: fac => { const d = accountOf(fac).diamondOutstanding; return <span className={`tabular-nums whitespace-nowrap font-semibold ${d < 0 ? "text-destructive" : "text-brand-dark"}`}>{carats(d)}</span>; } },
+    ...(anyOther ? [{ key: "other", header: "Other material", csv: (fac: Factory) => otherHeld(fac).join(" · "),
+      cell: (fac: Factory) => { const o = otherHeld(fac); return o.length ? <span className="text-xs text-brand-dark">{o.join(" · ")}</span> : <span className="text-muted-foreground">—</span>; } } as DataColumn<Factory>] : []),
     { key: "charged", header: "Charged", align: "right", kind: "number", sortValue: fac => accountOf(fac).chargesTotal,
       cell: fac => <CellAmount>{fmtMoneyInr(accountOf(fac).chargesTotal)}</CellAmount> },
     { key: "paid", header: "Paid", align: "right", kind: "number", sortValue: fac => accountOf(fac).chargesPaid,
@@ -180,6 +187,7 @@ export function FactoriesPage() {
       { label: "Address", value: noteText(fac.address) },
       { label: "Added", value: fmtDate(fac.createdAt) },
       (a.goldPool > 0 || a.diaPool > 0) && { label: "Pool stock", value: `${grams(a.goldPool)} gold · ${carats(a.diaPool)} diamond` },
+      otherHeld(fac).length > 0 && { label: "Other material", value: otherHeld(fac).join(" · ") },
       a.diamondIssued > 0 && { label: "Diamond issued", value: `${carats(a.diamondIssued)} · ${carats(a.diamondUsed)} accounted for` },
       hasOpeningBalance(fac) && { label: "Opening balance", value: `${fmtMoneyInr(fac.openingBalance || 0)} ${fac.openingDir === "debit" ? "debit (they owed us)" : "credit (charges we owed)"}${fac.openingDate ? ` · as of ${fmtDate(fac.openingDate)}` : ""}` },
       !!fac.openingFineGold && { label: "Opening fine gold", value: `${grams(fac.openingFineGold)}${fac.openingFineGoldDate ? ` · as of ${fmtDate(fac.openingFineGoldDate)}` : ""}` },
@@ -302,6 +310,9 @@ export function FactoriesPage() {
                 </div>
               </div>
 
+              {otherHeld(fac).length > 0 && (
+                <p className="mt-2 text-[11px] text-brand-dark flex items-start gap-1"><Package className="h-3 w-3 mt-0.5 shrink-0" /><span className="min-w-0">{otherHeld(fac).join(" · ")}</span></p>
+              )}
               {(goldPool > 0 || diaPool > 0) && (
                 <p className="mt-2 text-[11px] text-orange-600 flex items-center gap-1"><Package className="h-3 w-3" />Pool stock: {goldPool.toLocaleString()} g gold · {diaPool.toLocaleString()} ct dia</p>
               )}

@@ -27,11 +27,11 @@ import { ClientMaterialSheet } from "@/components/ClientMaterialSheet";
 import { ClientSuppliedSheet } from "@/components/ClientSuppliedSheet";
 import { inrPerUnit } from "@/lib/currency";
 import { GOLD_CARD, cardMetal, factoryRate, fromLabel, rateCardOf, sameName } from "@/lib/factoryRates";
-import { isNonGoldMetal, metalHasKarats, metalLabel } from "@/lib/metals";
+import { isNonGoldMetal, metalFamily, metalHasKarats, metalLabel } from "@/lib/metals";
 import { AddNewItem, useAddNew } from "@/components/create/QuickCreate";
 import { SectionTitle } from "@/components/SectionTitle";
 import { WeightCheck } from "@/components/WeightCheck";
-import { weightProblem, pieceWeights, isSelfMetal, fmtG, otherMetalsOf, moreMetalsGrams } from "@/lib/weights";
+import { weightProblem, pieceWeights, isSelfMetal, fmtG, otherMetalsOf, moreMetalsGrams, isOwnMetalStock } from "@/lib/weights";
 import { useCan, useMayExport } from "@/hooks/useCan";
 import { MoreMenu, type MoreAction } from "@/components/MoreMenu";
 import { OrderDesignBlock } from "@/components/designers/OrderDesignBlock";
@@ -77,14 +77,14 @@ import { Input } from "@/components/ui/input";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Share2, ArrowLeft, CheckCircle2, Users, Circle, Loader2, Printer, DollarSign, Plus, TrendingUp, AlertCircle, Wallet, ImagePlus, Truck, ExternalLink, Eye, Scale, Calculator, Minimize2, Maximize2, RotateCcw, Factory as FactoryIcon, Coins, Gem, X, Box, Camera, Video, Download, Trash2, Pencil, PackageCheck, Gift, Tag, Flame, Undo2, XCircle, ShoppingCart, Copy, FileText, FileSpreadsheet, type LucideIcon } from "lucide-react";
+import { Share2, ArrowLeft, CheckCircle2, Users, Circle, Loader2, Printer, DollarSign, Plus, TrendingUp, AlertCircle, Wallet, ImagePlus, Truck, ExternalLink, Eye, Scale, Calculator, Minimize2, Maximize2, RotateCcw, Factory as FactoryIcon, Coins, Gem, X, Box, Camera, Video, Download, Trash2, Pencil, PackageCheck, Gift, Tag, Flame, Undo2, XCircle, ShoppingCart, Copy, FileText, FileSpreadsheet, Package, type LucideIcon } from "lucide-react";
 import { copyBlocker, copyHref } from "@/lib/orderCopy";
 import { MeltDialog } from "@/components/MeltDialog";
 import { OtherMaterialSelect, StockGradeInput, useOtherMaterials } from "@/components/MaterialFields";
 import { coField, companyOf, companyOfOrder, workCompanyOf, companyById, companiesOf, hasCompanies } from "@/lib/companies";
 import { CompanyBadge } from "@/components/CompanyFields";
 import { OrderLabels } from "@/components/autopilot/OrderLabels";
-import { isOtherMaterial, materialDef, materialName, materialUnit, fmtQty, purchaseQty, type MaterialKey, type MaterialUnit } from "@/lib/materials";
+import { activeMaterials, isOtherMaterial, materialDef, materialName, materialUnit, fmtQty, purchaseQty, type MaterialKey, type MaterialUnit } from "@/lib/materials";
 import { ActionSheet } from "@/components/ActionSheet";
 import { DataTable, CellMain, CellAmount, CellTag, type DataColumn } from "@/components/DataTable";
 import { StatStrip } from "@/components/TableToolbar";
@@ -339,6 +339,12 @@ function OrderDetailPageBody() {
   const [rwDiaCt, setRwDiaCt] = useState("");
   const [rwDiaShape, setRwDiaShape] = useState("Round");
   const [rwDiaPcs, setRwDiaPcs] = useState("");
+  // Another material in the repair (platinum, a gem, a finding — Settings → Materials): added from our stock, or taken out back to it.
+  const UNIT_WORD: Record<string, string> = { g: "Grams", ct: "Carats", pcs: "Pieces" };
+  const [rwXDir, setRwXDir] = useState<"none" | "add" | "remove">("none");
+  const [rwXMat, setRwXMat] = useState("");
+  const [rwXGrade, setRwXGrade] = useState("");
+  const [rwXQty, setRwXQty] = useState("");
   const [rwCharge, setRwCharge] = useState("");
   const [rwNote, setRwNote] = useState("");
   /** The factory's own number for the repair bill — the voucher on its statement line. */
@@ -609,7 +615,11 @@ function OrderDetailPageBody() {
     const diaCt = rwDiaDir !== "none" ? Number(rwDiaCt) || 0 : 0;
     const diaPcs = rwDiaDir !== "none" && Number(rwDiaPcs) > 0 ? Math.round(Number(rwDiaPcs)) : undefined;
     const charge = Number(rwCharge) || 0;
-    if (goldG <= 0 && diaCt <= 0 && charge <= 0) { toast.error("Enter a gold/diamond change or a rework charge"); return; }
+    const xQty = rwXDir !== "none" && isOtherMaterial(rwXMat) ? Math.round((Number(rwXQty) || 0) * 1000) / 1000 : 0;
+    const xMat = rwXMat as MaterialKey, xGrade = rwXGrade.trim() || "—";
+    const xName = xQty > 0 ? materialName(db.settings, xMat) : "", xUnit = xQty > 0 ? materialUnit(db.settings, xMat) : "";
+    if (goldG <= 0 && diaCt <= 0 && xQty <= 0 && charge <= 0) { toast.error("Enter a gold, diamond or other material change, or a rework charge"); return; }
+    if (rwXDir !== "none" && Number(rwXQty) > 0 && !isOtherMaterial(rwXMat)) { toast.error("Choose the other material"); return; }
     // Stones added come out of a lot in stock — checked before anything moves.
     if (diaCt > 0 && rwDiaDir === "add" && !lotBalances(db.stockMovements, workCo).some(l => l.key === rwDiaShape && l.ct > 0)) { toast.error("Choose the lot the stones come from"); return; }
     setRwSaving(true);
@@ -626,6 +636,12 @@ function OrderDetailPageBody() {
         await decreaseStockSelfHealing({ material: "diamond", companyId: workCo, purityOrQuality: rwDiaShape, quantity: diaCt, pieces: diaPcs, type: "order_direct_use", refType: "order", refId: order.id, createdBy: user!.id, note: `Rework +${diaCt}ct ${rwDiaShape} for ${order.orderNumber}` }, db.stockMovements);
       } else if (diaCt > 0 && rwDiaDir === "remove") {
         await increaseStock({ material: "diamond", companyId: workCo, purityOrQuality: rwDiaShape, quantity: diaCt, pieces: diaPcs, refType: "manual", createdBy: user!.id, note: `Rework −${diaCt}ct ${rwDiaShape} from ${order.orderNumber} → stock` });
+      }
+      // The other material: added out of our stock; taken out, back into it (as diamonds are).
+      if (xQty > 0 && rwXDir === "add") {
+        await decreaseStockSelfHealing({ material: xMat, companyId: workCo, purityOrQuality: xGrade, quantity: xQty, type: "order_direct_use", refType: "order", refId: order.id, createdBy: user!.id, note: `Rework +${xQty}${xUnit} ${xName} for ${order.orderNumber}` }, db.stockMovements);
+      } else if (xQty > 0 && rwXDir === "remove") {
+        await increaseStock({ material: xMat, companyId: workCo, purityOrQuality: xGrade, quantity: xQty, refType: "manual", createdBy: user!.id, note: `Rework −${xQty}${xUnit} ${xName} from ${order.orderNumber} → stock` });
       }
 
       updateDb(d => {
@@ -679,6 +695,20 @@ function OrderDetailPageBody() {
           o.materialIssuanceIds.push(iid);
           if (charge > 0) chargeAttached = true;
         }
+        // Other material ADD → factory-neutral leg (issued-in + used-in-piece), as a diamond.
+        if (xQty > 0 && rwXDir === "add") {
+          const iid = uid("mi_");
+          d.materialIssuances.unshift({
+            id: iid, factoryId, orderId: o.id, material: xMat, ...coField(workCo), purityOrQuality: xGrade,
+            quantityIssued: xQty, source: "stock", finishReturnedQty: 0,
+            finishedPieces: [{ id: uid("fp_"), quantityUsed: xQty, piecesCount: 1, recordedAt: now, recordedBy: user!.id }],
+            issuedAt: now, issuedBy: user!.id, status: "closed", rework,
+            makingCharges: { amountInr: chargeAttached ? 0 : charge, payments: [] },
+            notes: `${noteBase} (added ${xQty}${xUnit} ${xName}${xGrade !== "—" ? ` ${xGrade}` : ""})`,
+          } as MaterialIssuance);
+          o.materialIssuanceIds.push(iid);
+          if (charge > 0) chargeAttached = true;
+        }
         // Charge with no material added (only removals / labour-only) → carry it on
         // a charge-only issuance so it still lands on the factory account statement.
         if (charge > 0 && !chargeAttached) {
@@ -695,16 +725,18 @@ function OrderDetailPageBody() {
         const parts: string[] = [];
         if (goldG > 0) parts.push(rwGoldDir === "add" ? `+${goldG}g ${rwGoldKarat} gold` : `−${goldG}g ${rwGoldKarat} gold (kept at the factory)`);
         if (diaCt > 0) parts.push(`${rwDiaDir === "add" ? "+" : "−"}${diaCt}ct ${rwDiaShape}`);
+        if (xQty > 0) parts.push(`${rwXDir === "add" ? "+" : "−"}${xQty}${xUnit} ${xName}${xGrade !== "—" ? ` ${xGrade}` : ""}${rwXDir === "remove" ? " (back to stock)" : ""}`);
         if (charge > 0) parts.push(`labour ${fmtMoneyInr(charge)}`);
         o.manufacturingLog.push({
           id: uid("mlog_"), type: "making_charge_added", at: now, employeeId: user!.id, factoryId,
-          material: goldG > 0 ? "gold" : "diamond", amountInr: charge || undefined,
+          material: goldG > 0 ? "gold" : diaCt > 0 ? "diamond" : xQty > 0 ? xMat : "gold", amountInr: charge || undefined,
           remarks: `Rework at ${factory?.name || "factory"}${rework.billNo ? ` · bill ${rework.billNo}` : ""} — ${parts.join(", ")}${rwNote.trim() ? ` · ${rwNote.trim()}` : ""}`,
         });
       });
       toast.success("Rework recorded — stock, factory & ledger updated");
       setShowRework(false);
       setRwGoldDir("none"); setRwGoldG(""); setRwDiaDir("none"); setRwDiaCt(""); setRwDiaPcs(""); setRwCharge(""); setRwNote(""); setRwBillNo("");
+      setRwXDir("none"); setRwXMat(""); setRwXGrade(""); setRwXQty("");
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Rework failed");
     } finally { setRwSaving(false); }
@@ -1090,12 +1122,39 @@ function OrderDetailPageBody() {
   /** Other materials issued for this order (Settings → Materials) — Final Approval says what came back. */
   const faXIssues = () => db.materialIssuances.filter(i => i.orderId === order.id && isOtherMaterial(i.material) && i.source !== "melt");
   const faXReturnedOf = (i: MaterialIssuance) => Math.min(Math.max(Number(faXReturned[i.id]) || 0, 0), i.quantityIssued);
+  /**
+   * The metals issued from stock for this piece (Settings → Materials, counted in grams), by the metal
+   * of the rate card each is charged as: a material named for a metal (Platinum, "Platinum 950",
+   * Palladium) is that metal; one that is gold, or names no metal there, is on the gold line as before.
+   */
+  const faXMetals = () => {
+    const metalsHere = [...choicesOf("metals", undefined, db.settings, { builtIn: false }), ...rateCardOf(db.factories.find(x => x.id === (order.assignedFactoryId || issuedFactory?.id))?.labour).map(r => r.metal)]
+      .filter(m => !sameName(cardMetal(m, db.settings), GOLD_CARD));
+    const by = new Map<string, { metal: string; grams: number; gold: boolean }>();
+    for (const i of faXIssues()) {
+      if (materialUnit(db.settings, i.material) !== "g") continue;
+      // The piece's own metal from stock is in that metal's row and line (faXGrams), not a line of its own.
+      if (isOwnMetalStock(order, materialName(db.settings, i.material))) continue;
+      const used = Math.max(0, i.quantityIssued - faXReturnedOf(i));
+      if (!(used > 0)) continue;
+      const name = materialName(db.settings, i.material).trim();
+      const m = /gold/i.test(name) ? undefined
+        : metalsHere.find(x => sameName(x, name)) ?? metalsHere.find(x => sameName(metalFamily(x), metalFamily(name)) && metalFamily(name) !== "");
+      const k = m ? m.toLowerCase() : "__gold";
+      const cur = by.get(k) ?? { metal: m ?? "Gold", grams: 0, gold: !m };
+      cur.grams += used;
+      by.set(k, cur);
+    }
+    return [...by.values()];
+  };
   /** Grams the other materials add to the piece: metals as weighed, stones at 0.2 g a carat (pieces are not weighed). */
   const faXGrams = () => {
     let metal = 0, stone = 0;
     for (const i of faXIssues()) {
       const used = Math.max(0, i.quantityIssued - faXReturnedOf(i));
       const u = materialUnit(db.settings, i.material);
+      // Platinum from stock for a platinum piece is its platinum — left on the scale, in that metal's weight.
+      if (u === "g" && isOwnMetalStock(order, materialName(db.settings, i.material))) continue;
       if (u === "g") metal += used; else if (u === "ct") stone += used * CARAT_TO_GRAM;
     }
     return { metal: Math.round(metal * 1000) / 1000, stone: Math.round(stone * 1000) / 1000 };
@@ -1119,13 +1178,18 @@ function OrderDetailPageBody() {
    * The making by metal, when the piece has a metal besides gold: each metal's
    * grams at its own rate. Gold-only pieces: none — gram × rate on the net, as always.
    */
-  const faLabourLines = (goldG: number, firstOtherG: number, stockMetalG: number) => {
+  const faLabourLines = (goldG: number, firstOtherG: number) => {
     const first = faOtherMetal.trim(), more = faMoreRows();
-    if (!first && !more.length) return undefined;
+    // Metal issued from stock: gold (findings, a karat gold) on the gold line; platinum, palladium … each its own.
+    const stock = faXMetals();
+    const stockGold = stock.filter(x => x.gold).reduce((t, x) => t + x.grams, 0);
+    const stockOwn = stock.filter(x => !x.gold);
+    if (!first && !more.length && !stockOwn.length) return undefined;
     const lines = [
-      { metal: stockMetalG > 0 ? "Gold and metal from stock" : "Gold", grams: goldG + stockMetalG, rate: Number(faPerGram) || 0, gold: true },
+      { metal: stockGold > 0 ? "Gold and metal from stock" : "Gold", grams: goldG + stockGold, rate: Number(faPerGram) || 0, gold: true },
       ...(first ? [{ metal: first, grams: firstOtherG, rate: faRateOf(first) }] : []),
       ...more.map(m => ({ metal: m.metal, grams: m.w, rate: faRateOf(m.metal) })),
+      ...stockOwn.map(x => ({ metal: `${x.metal} from stock`, grams: x.grams, rate: faRateOf(x.metal) })),
     ].filter(l => l.grams > 0).map(l => ({ ...l, grams: Math.round(l.grams * 1000) / 1000 }));
     return lines.length ? lines : undefined;
   };
@@ -1325,7 +1389,7 @@ function OrderDetailPageBody() {
     const hasNet = !isNaN(netW) && netW > 0;
     const labourNet = Math.round(((hasNet ? netW : 0) + faOtherW + moreW + xG.metal) * 1000) / 1000;
     // Each metal at its own rate (gold, titanium …) when there is more than gold.
-    const lines = faLabourLines(hasNet ? netW : 0, faOtherW, xG.metal);
+    const lines = faLabourLines(hasNet ? netW : 0, faOtherW);
     if (lines) (labour as NonNullable<MaterialIssuance["labour"]>).lines = lines;
     const labourVal = labourValue(labour, labourNet, usedDiaCt);
     // The factory that made it: the one set on the order, or — not set, but every
@@ -4503,18 +4567,44 @@ The piece then takes ours — add them from stock or buy them, as for any order.
                       </div>
                     )}
                   </div>
+                  {activeMaterials(db.settings).length > 0 && (
+                    <div className="rounded-xl bg-secondary/40 p-3 space-y-2">
+                      <div className="flex items-center gap-2">
+                        <Package className="h-4 w-4 text-brand-dark/70" /><span className="text-xs font-semibold">Other material</span>
+                        <div className="ml-auto inline-flex rounded-lg bg-white border border-border p-0.5">
+                          {(["none", "add", "remove"] as const).map(dir => (
+                            <button key={dir} type="button" onClick={() => setRwXDir(dir)} aria-label={`Other material: ${dir === "none" ? "no change" : dir === "add" ? "add" : "take out"}`}
+                              className={`px-2.5 h-7 rounded-md text-xs font-medium transition-colors ${rwXDir === dir ? "bg-primary text-white" : "text-muted-foreground hover:text-foreground"}`}>{dir === "none" ? "No change" : dir === "add" ? "Add" : "Take out"}</button>
+                          ))}
+                        </div>
+                      </div>
+                      {rwXDir !== "none" && (
+                        <div className="grid grid-cols-2 gap-2">
+                          <div className="col-span-2"><OtherMaterialSelect value={rwXMat} onChange={v => { setRwXMat(v); setRwXGrade(""); }} className="rounded-xl h-9" /></div>
+                          {isOtherMaterial(rwXMat) && <>
+                            <div><Label className="text-xs">{materialDef(db.settings, rwXMat)?.kind === "stone" ? "Which stones" : "Grade"}</Label><StockGradeInput material={rwXMat} companyId={workCo} value={rwXGrade} onChange={setRwXGrade} className="rounded-xl mt-1 h-9" /></div>
+                            <div><Label className="text-xs">{UNIT_WORD[materialUnit(db.settings, rwXMat)]} {rwXDir === "add" ? "added" : "taken out"}</Label><Input type="number" step="0.001" min={0} value={rwXQty} onChange={e => setRwXQty(e.target.value)} className="rounded-xl mt-1 h-9"
+                              aria-label={`${materialName(db.settings, rwXMat)} ${rwXDir === "add" ? "added" : "taken out"} (${materialUnit(db.settings, rwXMat)})`}
+                              placeholder={`${materialUnit(db.settings, rwXMat)} ${rwXDir === "add" ? "added" : "taken out"}`} /></div>
+                          </>}
+                          <p className="col-span-2 text-[11px] text-muted-foreground">{rwXDir === "add" ? "Out of our stock and into the piece — the factory's balance is unchanged." : "Out of the piece and back into our stock."}</p>
+                        </div>
+                      )}
+                    </div>
+                  )}
                   <div className="grid grid-cols-2 gap-2">
                     <div><Label className="text-xs">Labour on the bill (₹)</Label><Input type="number" min={0} value={rwCharge} onChange={e => setRwCharge(e.target.value)} className="rounded-xl mt-1 h-9" placeholder="0" /></div>
                     <div><Label className="text-xs">Note (optional)</Label><Input value={rwNote} onChange={e => setRwNote(e.target.value)} className="rounded-xl mt-1 h-9" placeholder="e.g. resize, add stone" /></div>
                   </div>
                   {/* What the factory statement will show — read before it is saved. */}
-                  {(Number(rwGoldG) > 0 && rwGoldDir !== "none") || (Number(rwDiaCt) > 0 && rwDiaDir !== "none") || Number(rwCharge) > 0 ? (
+                  {(Number(rwGoldG) > 0 && rwGoldDir !== "none") || (Number(rwDiaCt) > 0 && rwDiaDir !== "none") || (Number(rwXQty) > 0 && rwXDir !== "none" && isOtherMaterial(rwXMat)) || Number(rwCharge) > 0 ? (
                     <p className="rounded-xl border border-border/70 bg-white px-3 py-2 text-xs text-muted-foreground">
                       On the factory statement: <span className="font-medium text-brand-dark">Repair{rwBillNo.trim() ? ` · ${rwBillNo.trim()}` : ""}</span>
                       {rwGoldDir !== "none" && Number(rwGoldG) > 0 && <> · gold {rwGoldDir === "add"
                         ? (rwGoldFrom === "stock" ? `${rwGoldG} g given and used (no change to their balance)` : `${rwGoldG} g used from their holding (their balance −${toPureGold(Number(rwGoldG), rwGoldKarat).toFixed(3)} g fine)`)
                         : `${rwGoldG} g kept by them (their balance +${toPureGold(Number(rwGoldG), rwGoldKarat).toFixed(3)} g fine)`}</>}
                       {rwDiaDir !== "none" && Number(rwDiaCt) > 0 && <> · {rwDiaCt} ct {rwDiaDir === "add" ? "added from our bag" : "back into our bag"}</>}
+                      {rwXDir !== "none" && Number(rwXQty) > 0 && isOtherMaterial(rwXMat) && <> · {rwXQty} {materialUnit(db.settings, rwXMat)} {materialName(db.settings, rwXMat)} {rwXDir === "add" ? "added from our stock" : "back into our stock"}</>}
                       {Number(rwCharge) > 0 && <> · labour {fmtMoneyInr(Number(rwCharge))}</>}
                     </p>
                   ) : null}
@@ -4711,7 +4801,7 @@ The piece then takes ours — add them from stock or buy them, as for any order.
         const faEffNet = faW ? faW.gold : (Number(faGoldNet) || 0);
         const faMoreG = faMoreRows().reduce((t, m) => t + m.w, 0);
         const faNetW = Math.round((faEffNet + faOtherG + faMoreG + faXG.metal) * 1000) / 1000;
-        const faLines = faLabourLines(faEffNet, faOtherG, faXG.metal);
+        const faLines = faLabourLines(faEffNet, faOtherG);
         if (faLines) (faLabour as NonNullable<MaterialIssuance["labour"]>).lines = faLines;
         const faLive = labourValue(faLabour, faNetW, usedDiaCt);
         const faMinInUse = minimumLabourApplies(faLabour, faNetW);
@@ -5037,7 +5127,7 @@ The piece then takes ours — add them from stock or buy them, as for any order.
                 <div className="grid grid-cols-2 gap-2.5">
                   <div><Label className="text-[11px]">{faLines ? "Labour / gram — gold" : "Labour / gram"}</Label><Input type="number" min={0} step="0.01" value={faPerGram} onChange={e => setFaPerGram(e.target.value)} className="rounded-lg h-9 mt-1" placeholder="₹ /g" /></div>
                   {/* Each other metal at its own rate — the factory's for that metal, else the gold rate. */}
-                  {[...new Set([faOtherMetal.trim(), ...faMoreRows().map(m => m.metal)].filter(Boolean))].map(m => (
+                  {[...new Set([faOtherMetal.trim(), ...faMoreRows().map(m => m.metal), ...faXMetals().filter(x => !x.gold).map(x => x.metal)].filter(Boolean))].map(m => (
                     <div key={m}><Label className="text-[11px]">Labour / gram — {m}</Label>
                       <Input type="number" min={0} step="0.01" value={faRates[m.toLowerCase()] ?? ""} aria-label={`${m} labour per gram`}
                         onChange={e => setFaRates(r => ({ ...r, [m.toLowerCase()]: e.target.value }))} className="rounded-lg h-9 mt-1" placeholder={faPerGram ? `₹${faPerGram} /g — as gold` : "₹ /g"} /></div>

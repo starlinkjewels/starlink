@@ -5,7 +5,7 @@ import { CheckCircle2, AlertTriangle, RefreshCw, Server, Loader2 } from "lucide-
 import { toast } from "sonner";
 import { db as fsdb, functions, DATABASE_ID } from "@/lib/firebase";
 import { loadDb } from "@/lib/db";
-import { factoryAccount, factoryFineGoldBalance, factoryPoolBuckets, supplierAccount, lockerBalance } from "@/lib/manufacturing";
+import { factoryAccount, factoryFineGoldBalance, factoryOtherBalances, factoryPoolBuckets, supplierAccount, lockerBalance } from "@/lib/manufacturing";
 import { Button } from "@/components/ui/button";
 
 /** Databases whose server totals are running (functions/src/summaries.ts). */
@@ -25,6 +25,8 @@ function appFigures() {
       ...a, fineGold: factoryFineGoldBalance(d.materialIssuances, f.id, f.openingFineGold),
       goldPool: factoryPoolBuckets(iss, f.id, "gold").reduce((t, x) => t + x.balance, 0),
       diaPool: factoryPoolBuckets(iss, f.id, "diamond").reduce((t, x) => t + x.balance, 0),
+      // Each other material held, as "other.<key>" (the server keeps them under other).
+      ...Object.fromEntries(Object.entries(factoryOtherBalances(iss, f.id)).map(([k, q]) => [`other.${k}`, q])),
     } });
   }
   for (const s of d.suppliers) {
@@ -75,7 +77,7 @@ export function ServerTotalsCheck() {
         const s = server.get(p.id);
         for (const [field, app] of Object.entries(p.fig)) {
           figures++;
-          const v = s?.[field];
+          const v = field.startsWith("other.") ? (s?.other as Record<string, unknown> | undefined)?.[field.slice(6)] : s?.[field];
           // A supplier's total from before sales to suppliers existed has no "sold": nothing sold, 0.
           const sv = typeof v === "number" ? v : field === "sold" && v === undefined && s ? 0 : null;
           // Gold and diamonds run to three decimals; money is whole rupees.

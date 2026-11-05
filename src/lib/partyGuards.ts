@@ -69,7 +69,8 @@ export function factoryDeleteGuard(db: DB, f: Factory, figures?: FactoryFigures)
   const assigned = orders ? plural(orders, "order assigned", "orders assigned") : "";
   if (figures) {
     const charged = figures.chargesTotal - openingCreditAmt(f) > 0.5;
-    const moved = figures.goldIssued > 0 || figures.diamondIssued > 0 || figures.goldUsed > 0 || figures.diamondUsed > 0;
+    const moved = figures.goldIssued > 0 || figures.diamondIssued > 0 || figures.goldUsed > 0 || figures.diamondUsed > 0
+      || Object.keys(figures.other ?? {}).length > 0; // platinum, gems … still with them
     const paid = figures.chargesPaid > 0.5;
     return has([charged || moved || paid ? "material issues / payments" : "", assigned].filter(Boolean));
   }

@@ -1,4 +1,6 @@
-import { CARAT_TO_GRAM, type MaterialIssuance, type Order } from "./db";
+import { CARAT_TO_GRAM, loadDb, type MaterialIssuance, type Order, type Settings } from "./db";
+import { isOtherMaterial, materialName, materialUnit } from "./materials";
+import { isNonGoldMetal, metalFamily } from "./metals";
 import { finishRecordOf, isReworkIssue } from "./rework";
 
 /**
@@ -117,18 +119,46 @@ export function isSelfMetal(o: Pick<Order, "metal" | "otherMetal" | "otherMetalW
 }
 
 /**
+ * A material issued from stock that is the piece's OWN metal — platinum from stock for a platinum
+ * piece. It is in that metal's weight (Final Approval leaves it on the scale), never a second metal.
+ */
+export function isOwnMetalStock(o: Pick<Order, "metal">, materialLabel: string): boolean {
+  const fam = metalFamily(materialLabel);
+  return !!fam && isNonGoldMetal(o.metal) && fam.toLowerCase() === metalFamily(o.metal).toLowerCase();
+}
+
+/**
+ * Metal issued from stock for the piece (Settings → Materials, counted in grams — palladium, findings):
+ * what went in, less what came back at Final Approval. Final Approval takes it off the scale before the
+ * gold, so it is in neither the gold nor the other-metal rows — it is added here. The piece's own metal
+ * from stock (platinum for a platinum piece) is not: it is already that metal's weight.
+ */
+export function stockMetalGrams(o: Pick<Order, "id" | "metal">, issuances: MaterialIssuance[] = [], settings: Pick<Settings, "materials"> = loadDb().settings): number {
+  let g = 0;
+  for (const i of issuances) {
+    if (i.orderId !== o.id || !isOtherMaterial(i.material) || i.source === "melt" || isReworkIssue(i)) continue;
+    if (materialUnit(settings, i.material) !== "g" || isOwnMetalStock(o, materialName(settings, i.material))) continue;
+    g += Math.max(0, (i.quantityIssued || 0) - (i.finishReturnedQty || 0));
+  }
+  return n3(g);
+}
+
+/**
  * The weights of an order's piece, from the best figures there are:
  * actual details first, then the finished-piece net weight recorded with the
  * factory, then the estimates taken when the order was placed. Where no gross
  * was weighed, it is built as the approval screen builds it — metal plus the
  * diamonds' own weight — so it can never come out under the net.
  */
-export function pieceWeights(o: Order, issuances: MaterialIssuance[] = []): PieceWeights {
+export function pieceWeights(o: Order, issuances: MaterialIssuance[] = [], settings?: Pick<Settings, "materials">): PieceWeights {
   // The piece's own finish — never a repair's record (lib/rework.ts), whose weight is only what the repair added.
   const golds = issuances.filter(i => i.orderId === o.id && i.material === "gold" && i.finishedNetWeight != null);
   const finish = finishRecordOf(golds, o.id) ?? golds.find(i => !isReworkIssue(i));
   const diamondCt = pos(o.actualDiamondWeight ?? o.diamondWeight);
   const actualNet = o.actualNetWeight ?? finish?.finishedNetWeight;
+  // Weighed: metal from stock is in the piece too (as a second metal). Before that, the estimates alone.
+  const weighed = o.actualGrossWeight != null || actualNet != null;
+  const fromStock = weighed ? stockMetalGrams(o, issuances, settings) : 0;
   if (isSelfMetal(o)) {
     // A platinum or silver piece weighed at Final Approval: its metal is on
     // file under "other metal". That is the piece's metal, not a second one,
@@ -136,7 +166,7 @@ export function pieceWeights(o: Order, issuances: MaterialIssuance[] = []): Piec
     // file is gold beside it only when the scale has room for it — else it is
     // the same metal written down before it was weighed.
     // Any metal after it (a silver part on a titanium piece) is a second metal, as on a gold one.
-    const metal = pos(o.otherMetalWeight), stonesG = diamondCt * CARAT_TO_GRAM, more = moreMetalsGrams(o);
+    const metal = pos(o.otherMetalWeight), stonesG = diamondCt * CARAT_TO_GRAM, more = moreMetalsGrams(o) + fromStock;
     const onScale = pos(o.actualGrossWeight), typed = pos(actualNet);
     const gold = typed && (!onScale || typed + metal + more + stonesG <= onScale + TOLERANCE_G) ? typed : 0;
     const net = metal + gold;
@@ -145,7 +175,7 @@ export function pieceWeights(o: Order, issuances: MaterialIssuance[] = []): Piec
   }
   // metalWeight: the old single "gold weight" estimate — metal only, so net.
   const net = pos(actualNet ?? (o.estimatedNetWeight || o.metalWeight));
-  const other = pos(o.otherMetalWeight) + moreMetalsGrams(o);
+  const other = pos(o.otherMetalWeight) + moreMetalsGrams(o) + fromStock;
   const built = net + other + diamondCt * CARAT_TO_GRAM;
   let gross: number;
   if (o.actualGrossWeight) gross = o.actualGrossWeight;
