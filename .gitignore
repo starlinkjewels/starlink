@@ -40,3 +40,12 @@ dist-ssr
 # Local scratch from test and patch runs
 .tmp-check/
 .tmp-patch/
+
+# Copies made by the functions build (functions/scripts/sync-shared.cjs) that the main functions never use
+functions/src/shared/campaignEmail.ts
+functions/src/shared/catalogMedia.ts
+functions/src/shared/liveRates.ts
+functions/src/shared/orderSpecs.ts
+functions/src/shared/pricing.ts
+functions/src/shared/specParse.ts
+functions/src/shared/tableRead.ts
