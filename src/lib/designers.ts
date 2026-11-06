@@ -329,13 +329,26 @@ export function cancelJob(d: DB, jobId: string, by: Who, note?: string): string 
 }
 
 /** Change the agreed charge or due date of a design not yet approved. */
-export function updateJobTerms(d: DB, jobId: string, a: { rate?: number; dueDate?: string }, by: Who): string | undefined {
+/** The note given to the designer when the job was assigned (kept in the brief as "Note: …" lines). */
+export function jobNote(j: Pick<CadJob, "brief">): string {
+  return (j.brief.instructions ?? "").split("\n").filter(l => l.startsWith("Note: ")).map(l => l.slice(6)).join("\n");
+}
+
+export function updateJobTerms(d: DB, jobId: string, a: { rate?: number; dueDate?: string; note?: string }, by: Who): string | undefined {
   const j = (d.cadJobs ?? []).find(x => x.id === jobId);
   if (!j) return "This design is not there any more";
   if (!isOpenJob(j)) return "Only a design still being worked on can be changed";
   const bits: string[] = [];
   if (a.rate != null && r2(a.rate) !== (j.rate ?? 0)) { j.rate = r2(Math.max(0, a.rate)); bits.push(`charge ₹${j.rate.toLocaleString("en-IN")}`); }
   if (a.dueDate != null && a.dueDate !== (j.dueDate ?? "")) { if (a.dueDate) j.dueDate = a.dueDate; else delete j.dueDate; bits.push(a.dueDate ? `due ${a.dueDate}` : "no due date"); }
+  // The note for the designer, as given when it was assigned: its "Note: …" lines replaced.
+  if (a.note != null && a.note.trim() !== jobNote(j).trim()) {
+    const rest = (j.brief.instructions ?? "").split("\n").filter(l => !l.startsWith("Note: "));
+    const lines = a.note.split("\n").map(l => l.trim()).filter(Boolean).map(l => `Note: ${l}`);
+    const instructions = [...rest, ...lines].join("\n").trim();
+    j.brief = { ...j.brief, instructions: instructions || undefined };
+    bits.push(lines.length ? "note for the designer" : "note taken off");
+  }
   if (bits.length) log(j, by, `Changed — ${bits.join(", ")}`);
   return undefined;
 }

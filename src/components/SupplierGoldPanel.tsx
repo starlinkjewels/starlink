@@ -1,13 +1,13 @@
 import { useEffect, useState } from "react";
-import { ArrowDownCircle, ArrowUpCircle, BookOpen, Coins, FileText, Scale, Trash2 } from "lucide-react";
+import { ArrowDownCircle, ArrowUpCircle, BookOpen, Coins, FileText, Pencil, Scale, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { useAuth } from "@/lib/auth";
 import { useDb } from "@/hooks/useDb";
-import { fmtDate, stampFor, todayLocal, type Supplier } from "@/lib/db";
+import { dayOf, fmtDate, stampFor, todayLocal, type Supplier, type SupplierGoldEntry } from "@/lib/db";
 import { fmtMoneyInr } from "@/lib/manufacturing";
 import { companiesOf, companyById, hasCompanies } from "@/lib/companies";
 import {
-  GOLD_COLS, GOLD_KARATS, billAmount, billProblem, deleteGoldEntry, fmtG, goldEntryDeleteBlocker, goldEntryDeleteImpact, goldFine, goldInStock,
+  GOLD_COLS, GOLD_KARATS, billAmount, billProblem, deleteGoldEntry, editGoldEntry, goldEntryEditProblem, fmtG, goldEntryDeleteBlocker, goldEntryDeleteImpact, goldFine, goldInStock,
   goldToBill, hasGoldAccount, loanProblem, owedIn, returnGold, returnProblem, setOpeningGold, supplierGoldOwed, takeGoldLoan,
   type SupplierGoldRow,
 } from "@/lib/supplierGold";
@@ -65,13 +65,19 @@ export function SupplierGoldPanel({ supplier, isAdmin, mode, onMode }: {
   // In bill (GST) — off unless ticked, at the % from Settings → Pricing.
   const [gstBill, setGstBill] = useState(false);
   const [gstPctText, setGstPctText] = useState("");
+  // A loan or a return being corrected: the same form, filled with it (lib/supplierGold.ts editGoldEntry).
+  const [editing, setEditing] = useState<SupplierGoldEntry | null>(null);
   useEffect(() => {
-    if (!mode) return;
+    if (!mode) { setEditing(null); return; }
     setGrams(""); setPurity(""); setDate(mode === "opening" ? supplier.openingGoldDate || "" : todayLocal()); setCompanyId(defaultCo);
     setNote(""); setFine(mode === "opening" && supplier.openingGoldFine ? String(supplier.openingGoldFine) : ""); setRate(""); setBillNo("");
     setGstBill(false); setGstPctText(pctText(defaultPurchaseGstPct(db.settings)));
+    if (editing && (mode === "take" || mode === "return")) {
+      setGrams(String(editing.grams)); setPurity(editing.purity); setDate(dayOf(editing.at));
+      setCompanyId(editing.companyId || "main"); setNote(editing.note ?? "");
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [mode]);
+  }, [mode, editing]);
 
   const close = () => onMode(null);
   // A return or a bill comes off the gold owed in the company it is for.
@@ -91,7 +97,19 @@ export function SupplierGoldPanel({ supplier, isAdmin, mode, onMode }: {
   const amount = baseAmount + gstAmount;
   /** Grams of a purity that make this much fine gold (owed 9.16 g fine = 10 g of 22K). */
   const grossOf = (f: number, p: string) => { const per = goldFine(1, p); return per > 0 ? r3(f / per) : 0; };
-  const move = () => ({ grams: g, purity, companyId, at: stampFor(date), note });
+  // A correction dated the same day keeps its moment, so nothing moves in the history by itself.
+  const move = () => ({ grams: g, purity, companyId, at: editing && date === dayOf(editing.at) ? editing.at : stampFor(date), note });
+  const correct = async () => {
+    if (!editing) return;
+    if (!ready) { toast.error("Still loading — a moment"); return; }
+    const problem = goldEntryEditProblem(db, supplier, editing, move());
+    if (problem) { toast.error(problem); return; }
+    try {
+      await editGoldEntry(supplier.id, editing.id, move(), user!);
+      toast.success("Corrected — stock and gold owed put right");
+      close();
+    } catch (e) { toast.error(e instanceof Error ? e.message : "It wasn't corrected"); }
+  };
 
   const take = async () => {
     const problem = loanProblem(supplier, move());
@@ -146,7 +164,12 @@ export function SupplierGoldPanel({ supplier, isAdmin, mode, onMode }: {
     }
     const e = r.entry!;
     const why = !isAdmin ? "Only an admin can change it" : !ready ? "Still loading" : goldEntryDeleteBlocker(db, supplier, e);
+    const editWhy = !isAdmin ? "Only an admin can change it" : !ready ? "Still loading" : e.kind === "toBill" ? "A bill — correct it in Purchase History" : undefined;
     return [{
+      label: "Edit", icon: Pencil, disabled: !!editWhy,
+      hint: editWhy ?? "Grams, purity, date, company and note",
+      onSelect: () => { setEditing(e); onMode(e.kind === "loanIn" ? "take" : "return"); },
+    }, {
       label: "Delete", icon: Trash2, danger: true, disabled: !!why,
       hint: why ?? (e.kind === "loanIn" ? "Its gold comes out of stock again" : "Its gold goes back into stock"),
       onSelect: async () => {
@@ -190,13 +213,15 @@ export function SupplierGoldPanel({ supplier, isAdmin, mode, onMode }: {
   const owedSub = byCo.length > 1 ? byCo.map(x => `${x.name} ${fmtG(x.owed)}`).join(" · ")
     : acc.owed > 0.0005 ? "Fine (24K) gold to give back" : "Nothing owed in gold";
 
-  const title = mode === "take" ? "Gold on loan" : mode === "return" ? "Return gold" : mode === "bill" ? "Gold to a bill" : "Opening gold owed";
+  const title = editing && mode === "take" ? "Correct gold loan" : editing && mode === "return" ? "Correct gold return" : mode === "take" ? "Gold on loan" : mode === "return" ? "Return gold" : mode === "bill" ? "Gold to a bill" : "Opening gold owed";
   const icon = mode === "take" ? ArrowDownCircle : mode === "return" ? ArrowUpCircle : mode === "bill" ? FileText : BookOpen;
   const description = mode === "take" ? `From ${supplier.name} — into our gold stock, owed back in gold`
     : mode === "return" ? `To ${supplier.name}, out of our stock · ${fmtG(owedCo)} fine owed${coName}`
     : mode === "bill" ? `Pay for gold owed in money · ${fmtG(owedCo)} fine owed${coName}`
     : "Fine gold we owed them when you started";
-  const owedAfter = mode === "take" ? owedCo + moveFine : mode === "return" ? owedCo - moveFine : mode === "bill" ? owedCo - billFine : acc.owed;
+  // Corrected: as if the line were never there, then the corrected one.
+  const was = editing && (editing.companyId || "main") === (companyId || "main") ? (editing.kind === "loanIn" ? editing.fine : -editing.fine) : 0;
+  const owedAfter = mode === "take" ? owedCo - was + moveFine : mode === "return" ? owedCo - was - moveFine : mode === "bill" ? owedCo - billFine : acc.owed;
 
   const dateField = (
     <Field label="Date">{id => <Input id={id} type="date" value={date} max={todayLocal()} onChange={e => setDate(e.target.value)} className="rounded-xl h-10" />}</Field>
@@ -256,9 +281,9 @@ export function SupplierGoldPanel({ supplier, isAdmin, mode, onMode }: {
               {mode !== "opening" && <Stat label="Owed after" value={`${fmtG(owedAfter)} fine`} sub={owedAfter < -0.0005 ? "more than is owed" : undefined} />}
             </Stats>
             <PanelActions onCancel={close}>
-              <AsyncButton onClick={mode === "take" ? take : mode === "return" ? giveBack : mode === "bill" ? bill : saveOpening}
+              <AsyncButton onClick={editing ? correct : mode === "take" ? take : mode === "return" ? giveBack : mode === "bill" ? bill : saveOpening}
                 className="btn-hero rounded-xl h-11 flex-1 sm:flex-none sm:min-w-44">
-                {mode === "take" ? "Take on loan" : mode === "return" ? "Return gold" : mode === "bill" ? "Make the bill" : "Save"}
+                {editing ? "Save correction" : mode === "take" ? "Take on loan" : mode === "return" ? "Return gold" : mode === "bill" ? "Make the bill" : "Save"}
               </AsyncButton>
             </PanelActions>
           </div>
@@ -287,7 +312,10 @@ export function SupplierGoldPanel({ supplier, isAdmin, mode, onMode }: {
                 <Field label="Purity" hint={stockPurities.length ? undefined : "No gold in stock."}>{id => (
                   <Select value={purity} onValueChange={setPurity}>
                     <SelectTrigger id={id} className="h-10 rounded-xl"><SelectValue placeholder="Choose purity in stock" /></SelectTrigger>
-                    <SelectContent>{stockPurities.map(([p, q]) => <SelectItem key={p} value={p}>{p} — {fmtG(q)} in stock</SelectItem>)}</SelectContent>
+                    <SelectContent>
+                      {stockPurities.map(([p, q]) => <SelectItem key={p} value={p}>{p} — {fmtG(q)} in stock</SelectItem>)}
+                      {editing && !stockPurities.some(([p]) => p === editing.purity) && <SelectItem value={editing.purity}>{editing.purity} — as returned</SelectItem>}
+                    </SelectContent>
                   </Select>
                 )}</Field>
                 <Field label="Grams" hint={purity ? <>In stock: {fmtG(inStock[purity] ?? 0)}{owedCo > 0.0005 ? <> · all owed = {fmtG(grossOf(owedCo, purity))} of {purity}</> : null}</> : undefined}>{id => (

@@ -16,7 +16,7 @@ import { requestPlayable } from "@/lib/webVideo";
 import { downloadAsZip, downloadFile } from "@/lib/zipDownload";
 import {
   STATUS_LABEL, STATUS_TONE, KIND_LABEL, designableWhy, addJobFiles, approveJob, askChanges, briefRows, cancelJob, designerEmail, designerOf,
-  fileKind, isOpenJob, refreshBrief, removeJobFile, reopenJob, submitJob, updateJobTerms, jobPayState,
+  fileKind, isOpenJob, refreshBrief, removeJobFile, reopenJob, submitJob, updateJobTerms, jobPayState, jobNote,
 } from "@/lib/designers";
 import { sendMail, designChangesEmail, designApprovedEmail } from "@/lib/email";
 import { ActionSheet } from "@/components/ActionSheet";
@@ -146,7 +146,7 @@ export function CadJobSheet({ jobId, onClose }: { jobId: string; onClose: () => 
   const doTerms = () => {
     const r = charge.trim() === "" ? undefined : Number(charge);
     if (r !== undefined && !(r >= 0)) { toast.error("Enter a charge of 0 or more"); return; }
-    if (run(`Design ${job.orderNumber}: terms changed`, d => updateJobTerms(d, job.id, { rate: r, dueDate: due }, who), "Saved")) setMode("");
+    if (run(`Design ${job.orderNumber}: terms changed`, d => updateJobTerms(d, job.id, { rate: r, dueDate: due, note }, who), "Saved")) setMode("");
   };
   const downloadAll = async () => {
     if (!job.files.length) return;
@@ -158,7 +158,7 @@ export function CadJobSheet({ jobId, onClose }: { jobId: string; onClose: () => 
 
   const menu: MoreAction[] = [
     { label: "Download all files", icon: Download, disabled: !job.files.length, onSelect: () => void downloadAll() },
-    { label: "Change charge or due date", icon: CalendarDays, show: mayAct && open, onSelect: () => { setMode("terms"); setCharge(job.rate != null ? String(job.rate) : ""); setDue(job.dueDate ?? ""); } },
+    { label: "Change charge, due date or note", icon: CalendarDays, show: mayAct && open, onSelect: () => { setMode("terms"); setCharge(job.rate != null ? String(job.rate) : ""); setDue(job.dueDate ?? ""); setNote(jobNote(job)); } },
     { label: "Bring the brief up to date", icon: RefreshCw, show: mayAct && open, hint: "Copy the order's details again", onSelect: () => run(`Design ${job.orderNumber}: brief refreshed`, d => refreshBrief(d, job.id, who), "Brief brought up to date") },
     { label: "Open again", icon: RotateCcw, show: mayAct && job.status === "approved", hint: "Ask for changes on an approved design", onSelect: () => { setMode("reopen"); setNote(""); } },
     { label: "Cancel this design", icon: Ban, danger: true, show: mayAct && open, onSelect: () => { setMode("cancel"); setNote(""); } },
@@ -307,7 +307,7 @@ export function CadJobSheet({ jobId, onClose }: { jobId: string; onClose: () => 
               </div>
             </>)}
             {mode === "terms" && (<>
-              <p className="text-sm font-semibold text-brand-dark">Charge and due date</p>
+              <p className="text-sm font-semibold text-brand-dark">Charge, due date and note</p>
               <div className="grid grid-cols-2 gap-3 max-w-md">
                 {freelance && (
                   <div>
@@ -319,6 +319,10 @@ export function CadJobSheet({ jobId, onClose }: { jobId: string; onClose: () => 
                   <Label className="text-xs">Due date</Label>
                   <Input type="date" value={due} onChange={e => setDue(e.target.value)} className="h-10 rounded-xl mt-1" aria-label="Due date" />
                 </div>
+              </div>
+              <div className="max-w-md">
+                <Label className="text-xs">Note for the designer</Label>
+                <Textarea value={note} onChange={e => setNote(e.target.value)} rows={2} className="rounded-xl mt-1" aria-label="Note for the designer" />
               </div>
               <div className="flex justify-end gap-2">
                 <Button variant="ghost" className="rounded-xl" onClick={() => setMode("")}>Back</Button>

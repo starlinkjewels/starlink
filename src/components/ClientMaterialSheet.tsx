@@ -10,8 +10,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { LooseLotFields } from "@/components/LotFields";
 import { useAuth } from "@/lib/auth";
 import { useDb } from "@/hooks/useDb";
-import { updateDbAs, type Order } from "@/lib/db";
-import { clientMaterialBalance, fmtCt, fmtFine, receiveClientMaterial, returnClientMaterial, sendClientDiamonds, sendClientGold } from "@/lib/clientMaterial";
+import { updateDbAs, type ClientMaterialEntry, type Order } from "@/lib/db";
+import { clientMaterialBalance, editClientMaterial, fmtCt, fmtFine, receiveClientMaterial, returnClientMaterial, sendClientDiamonds, sendClientGold } from "@/lib/clientMaterial";
 
 /** Purities offered for gold; any other can be typed. */
 const PURITIES: [string, number][] = [["24K · 999", 999], ["22K · 916", 916], ["18K · 750", 750], ["14K · 585", 585], ["10K · 417", 417], ["9K · 375", 375]];
@@ -21,27 +21,35 @@ const PURITIES: [string, number][] = [["24K · 999", 999], ["22K · 916", 916], 
  * factory for one of their orders. Gold by weight and purity (its fine gold
  * worked out), diamonds by carats and stones with what they are.
  */
-export function ClientMaterialSheet({ clientId, mode, material: start, order, onClose }: {
+export function ClientMaterialSheet({ clientId, mode, material: startMaterial, order, entry, onClose }: {
   clientId: string;
   mode: "receive" | "return" | "send";
   material?: "gold" | "diamond";
   /** "send": the order it is for (its factory). Receive: optionally the order it came for. */
   order?: Order;
+  /** A "received" / "handed back" line being corrected: the form opens with it. */
+  entry?: ClientMaterialEntry;
   onClose(): void;
 }) {
+  const start = entry?.material ?? startMaterial;
   const { user } = useAuth();
   const db = useDb();
   const client = db.clients.find(c => c.id === clientId);
   const bal = client ? clientMaterialBalance(db, client) : null;
   const [material, setMaterial] = useState<"gold" | "diamond">(start ?? "diamond");
-  const [f, setF] = useState({ grams: "", purity: "", ct: "", pcs: "", shape: "", type: "", mm: "", size: "", color: "", clarity: "", certified: false, certLab: "", certNo: "", note: "" });
+  const [f, setF] = useState(() => entry ? {
+    grams: entry.grams != null ? String(entry.grams) : "", purity: entry.purity != null ? String(entry.purity) : "",
+    ct: entry.ct != null ? String(entry.ct) : "", pcs: entry.pcs != null ? String(entry.pcs) : "",
+    shape: entry.shape ?? "", type: entry.type ?? "", mm: entry.mm ?? "", size: entry.size ?? "", color: entry.color ?? "", clarity: entry.clarity ?? "",
+    certified: !!(entry.certNo || entry.certLab), certLab: entry.certLab ?? "", certNo: entry.certNo ?? "", note: entry.note ?? "",
+  } : { grams: "", purity: "", ct: "", pcs: "", shape: "", type: "", mm: "", size: "", color: "", clarity: "", certified: false, certLab: "", certNo: "", note: "" });
   const set = (k: keyof typeof f, v: string | boolean) => setF(p => ({ ...p, [k]: v }));
   const grams = Number(f.grams) || 0, purity = Number(f.purity) || 0, ct = Number(f.ct) || 0, pcs = Math.round(Number(f.pcs) || 0);
   const fine = Math.round(grams * purity / 1000 * 1000) / 1000;
   const factory = order?.assignedFactoryId ? db.factories.find(x => x.id === order.assignedFactoryId) : undefined;
   if (!client || !bal) return null;
 
-  const title = mode === "receive" ? "Receive from the client" : mode === "return" ? "Hand back to the client" : `Send the client's ${material === "gold" ? "gold" : "diamonds"} to the factory`;
+  const title = entry ? (mode === "receive" ? "Correct what was received" : "Correct what was handed back") : mode === "receive" ? "Receive from the client" : mode === "return" ? "Hand back to the client" : `Send the client's ${material === "gold" ? "gold" : "diamonds"} to the factory`;
   const save = async () => {
     const who = { id: user!.id, name: user!.name };
     try {
@@ -49,7 +57,7 @@ export function ClientMaterialSheet({ clientId, mode, material: start, order, on
         if (grams <= 0 || purity <= 0 || purity > 1000) { toast.error("Enter the weight and its purity (‰)"); return; }
       } else if (ct <= 0) { toast.error("Enter the carats"); return; }
       const what = material === "gold" ? `${grams} g at ${purity}‰ (${fine} g fine)` : `${ct} ct${pcs ? ` · ${pcs} pcs` : ""}`;
-      updateDbAs({ summary: `${mode === "receive" ? "Received from" : mode === "return" ? "Handed back to" : "Sent to the factory for"} ${client.companyName}: ${what} ${material === "gold" ? "gold" : "diamonds"} (client's own)` }, d => {
+      updateDbAs({ summary: entry ? `${client.companyName}: corrected a client-material entry — ${what} ${material === "gold" ? "gold" : "diamonds"}` : `${mode === "receive" ? "Received from" : mode === "return" ? "Handed back to" : "Sent to the factory for"} ${client.companyName}: ${what} ${material === "gold" ? "gold" : "diamonds"} (client's own)` }, d => {
         if (mode === "send") {
           const o = d.orders.find(x => x.id === order!.id)!;
           if (material === "gold") sendClientGold(d, o, { grams, purity }, who);
@@ -60,17 +68,18 @@ export function ClientMaterialSheet({ clientId, mode, material: start, order, on
           ? { material, grams, purity, note: f.note.trim() || undefined, orderId: order?.id }
           : { material, ct, pcs: pcs || undefined, shape: f.shape || undefined, type: f.type || undefined, mm: f.mm || undefined, size: f.size || undefined, color: f.color || undefined, clarity: f.clarity || undefined,
               certLab: f.certified ? f.certLab || undefined : undefined, certNo: f.certified ? f.certNo || undefined : undefined, note: f.note.trim() || undefined, orderId: order?.id };
-        if (mode === "receive") receiveClientMaterial(d, client.id, e, who);
+        if (entry) editClientMaterial(d, client.id, entry.id, e);
+        else if (mode === "receive") receiveClientMaterial(d, client.id, e, who);
         else returnClientMaterial(d, client.id, e, who);
       });
-      toast.success(mode === "receive" ? `Received — ${what}` : mode === "return" ? `Handed back — ${what}` : `Sent to ${factory?.name ?? "the factory"} — ${what}`);
+      toast.success(entry ? `Corrected — ${what}` : mode === "receive" ? `Received — ${what}` : mode === "return" ? `Handed back — ${what}` : `Sent to ${factory?.name ?? "the factory"} — ${what}`);
       onClose();
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "That didn't work");
     }
   };
 
-  const limit = mode === "receive" ? null : material === "gold" ? bal.goldInHand : bal.diaInHand;
+  const limit = mode === "receive" ? null : (material === "gold" ? bal.goldInHand + (entry ? entry.fine ?? 0 : 0) : bal.diaInHand + (entry ? entry.ct ?? 0 : 0));
   return (
     <ActionSheet open onOpenChange={o => { if (!o) onClose(); }} icon={mode === "receive" ? PackageOpen : mode === "return" ? Undo2 : Send}
       title={title}
@@ -78,7 +87,7 @@ export function ClientMaterialSheet({ clientId, mode, material: start, order, on
       footer={
         <div className="flex items-center justify-end gap-2">
           <Button variant="outline" onClick={onClose} className="rounded-xl">Cancel</Button>
-          <AsyncButton onClick={save} className="btn-hero rounded-xl px-6">{mode === "receive" ? "Receive" : mode === "return" ? "Hand back" : "Send"}</AsyncButton>
+          <AsyncButton onClick={save} className="btn-hero rounded-xl px-6">{entry ? "Save correction" : mode === "receive" ? "Receive" : mode === "return" ? "Hand back" : "Send"}</AsyncButton>
         </div>
       }>
       <div className="space-y-4">
