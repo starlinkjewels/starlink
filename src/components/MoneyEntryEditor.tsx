@@ -6,7 +6,12 @@ import { useAuth } from "@/lib/auth";
 import { useDb } from "@/hooks/useDb";
 import { dayOf, type DB } from "@/lib/db";
 import { ccy, ccySymbol, fmtCcy, rateOf } from "@/lib/currency";
-import { deleteEntry, editEntry, entryDeleteQuestion, moveToDay, transferLegs, type MoneyEntry } from "@/lib/moneyEntries";
+import { deleteEntry, editEntry, entryDeleteQuestion, entryPlace, moveToDay, transferLegs, type MoneyEntry } from "@/lib/moneyEntries";
+import { purchasePending } from "@/lib/manufacturing";
+import { issuancePending } from "@/lib/pure/accounts";
+import { fmtMoneyInr } from "@/lib/manufacturing";
+import { materialUnit } from "@/lib/materials";
+import { CategoryCombo } from "@/components/CategoryCombo";
 import { confirmBox } from "@/lib/confirm";
 import type { MoreAction } from "@/components/MoreMenu";
 import { CHECKING, needsAccess } from "@/lib/actionHints";
@@ -165,6 +170,22 @@ function EntrySheet({ entry, onClose, mayDelete }: { entry: MoneyEntry; onClose:
     return samePair ? next : { ...next, rate: recordedRate(next.lockerId, next.toLockerId) };
   });
 
+  // Who it was paid to and the bill it settles — as the payment forms asked.
+  const place = entryPlace(db, entry);
+  const [party, setParty] = useState(place?.partyId ?? "");
+  const [target, setTarget] = useState(place?.target ?? "");
+  // An account entry of our own (a deposit, a withdrawal): its category, as Record entry asked.
+  const ownRow = entry.kind === "locker" && !entry.transfer && !entry.refundTo
+    ? (db.lockerTransactions ?? []).find(t => t.id === entry.id && (!t.refType || t.refType === "manual")) : undefined;
+  const [category, setCategory] = useState(ownRow?.category ?? "");
+  const receipt = place?.target === "__receipt";
+  const bills = !place || receipt ? [] : entry.kind === "supplier"
+    ? db.purchases.filter(p => p.supplierId === party && (purchasePending(p) > 0 || p.id === place.target))
+      .map(p => ({ id: p.id, label: `${p.invoiceNumber || p.id.slice(-6)} — ${p.id === place.target ? "this bill" : `pending ${fmtMoneyInr(purchasePending(p))}`}` }))
+    : db.materialIssuances.filter(i => i.factoryId === party && (issuancePending(i) > 0 || i.id === place.target))
+      .map(i => ({ id: i.id, label: `${db.orders.find(o => o.id === i.orderId)?.orderNumber ?? "Pool"} · ${i.quantityIssued}${materialUnit(db.settings, i.material)} ${i.purityOrQuality} — ${i.id === place.target ? "this job" : `pending ${fmtMoneyInr(issuancePending(i))}`}` }));
+  const moved = !!place && (party !== place.partyId || target !== place.target);
+
   // Several bills, or an old payment written one account row per bill: no
   // saying which part took a different total.
   const amountFixed = !!entry.legIds || (entry.txnIds?.length ?? 0) > 1;
@@ -181,10 +202,12 @@ function EntrySheet({ entry, onClose, mayDelete }: { entry: MoneyEntry; onClose:
       userId: user!.id,
       toLockerId: ef.toLockerId || undefined,
       exchangeRate: Number(ef.rate) || undefined,
+      ...(ownRow ? { category } : {}),
+      ...(moved ? { moveTo: { partyId: party, target } } : {}),
     });
     // Nothing was written — say why and leave the panel open to fix it.
     if (refused) { toast.error(refused); return; }
-    toast.success("Entry corrected");
+    toast.success(moved ? "Entry corrected — moved to where it belongs" : "Entry corrected");
     onClose();
   };
 
@@ -304,6 +327,47 @@ function EntrySheet({ entry, onClose, mayDelete }: { entry: MoneyEntry; onClose:
               this rate when the two are in different currencies.
             </p>
           </>
+        )}
+
+        {/* Who it was paid to (or came from) and the bill it settles. */}
+        {place && (
+          <div className="space-y-2 rounded-xl border border-border/60 bg-secondary/30 p-3">
+            <div className={receipt ? "" : "grid grid-cols-1 sm:grid-cols-2 gap-3"}>
+              <div>
+                <Label className="text-xs">{receipt ? "Received from" : entry.kind === "supplier" ? "Supplier" : "Factory"}</Label>
+                <Select value={party} onValueChange={v => { setParty(v); if (!receipt) setTarget(v === place.partyId ? place.target : "__advance"); }} disabled={!!entry.legIds}>
+                  <SelectTrigger aria-label={entry.kind === "supplier" ? "Supplier" : "Factory"} className="h-10 rounded-xl mt-1"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    {(entry.kind === "supplier" ? db.suppliers : db.factories)
+                      .filter(x => x.active !== false || x.id === place.partyId)
+                      .sort((a, b) => a.name.localeCompare(b.name))
+                      .map(x => <SelectItem key={x.id} value={x.id}>{x.name}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              </div>
+              {!receipt && (
+                <div>
+                  <Label className="text-xs">Against</Label>
+                  <Select value={target} onValueChange={setTarget} disabled={!!entry.legIds}>
+                    <SelectTrigger aria-label="Against" className="h-10 rounded-xl mt-1"><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="__advance">Advance / loan — no bill</SelectItem>
+                      {bills.map(x => <SelectItem key={x.id} value={x.id}>{x.label}</SelectItem>)}
+                    </SelectContent>
+                  </Select>
+                </div>
+              )}
+            </div>
+            {moved && <p className="text-[11px] font-medium text-primary">The payment moves there — its account movement stays as it is and names the new {entry.kind === "supplier" ? "supplier and bill" : "factory and job"}.</p>}
+            {entry.legIds && <p className="text-[11px] text-muted-foreground">One payment over several bills stays where it is — cancel it and enter it again to put it elsewhere.</p>}
+          </div>
+        )}
+
+        {ownRow && (
+          <div>
+            <Label className="text-xs">Category</Label>
+            <CategoryCombo kind="locker" value={category} onChange={setCategory} className="h-10 rounded-xl mt-1" />
+          </div>
         )}
 
         <div>

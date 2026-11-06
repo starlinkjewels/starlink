@@ -10,7 +10,7 @@ import { useCan } from "@/hooks/useCan";
 import { collectionsFresh, dayOf, ensureCollections, fmtMoney, fmtDate, loadDb, type AdvancePayment, type ClientReceipt, type DB } from "@/lib/db";
 import { ccy } from "@/lib/currency";
 import { moveToDay } from "@/lib/moneyEntries";
-import { editReceipt, deleteReceipt, deleteImpact, receiptApplied, receiptCancelBlocker } from "@/lib/receipts";
+import { editReceipt, deleteReceipt, deleteImpact, moveReceiptToClient, receiptApplied, receiptCancelBlocker } from "@/lib/receipts";
 import { needsAccess } from "@/lib/actionHints";
 import { confirmBox } from "@/lib/confirm";
 import { ActionSheet } from "@/components/ActionSheet";
@@ -76,7 +76,7 @@ export async function cancelReceiptFlow(receiptId: string, userId: string): Prom
   return true;
 }
 
-type Form = { amount: string; date: string; method: string; remarks: string; lockerId: string; rate: number | "" };
+type Form = { amount: string; date: string; method: string; remarks: string; lockerId: string; rate: number | ""; clientId: string; invoiceId: string };
 
 /**
  * Correct a client receipt, in the side panel — the same correction the
@@ -90,7 +90,7 @@ export function ReceiptEditSheet({ receiptId, onClose }: { receiptId: string | n
   const can = useCan();
   const db = useDb();
   const [shown, setShown] = useState<string | null>(null);
-  const [ef, setEf] = useState<Form>({ amount: "", date: "", method: "Cash", remarks: "", lockerId: "", rate: "" });
+  const [ef, setEf] = useState<Form>({ amount: "", date: "", method: "Cash", remarks: "", lockerId: "", rate: "", clientId: "", invoiceId: "" });
   const rec = receiptId ? (db.clientReceipts ?? []).find(x => x.id === receiptId) : undefined;
 
   // The currency a receipt's deposit is in. Older receipts may not name it;
@@ -113,6 +113,7 @@ export function ReceiptEditSheet({ receiptId, onClose }: { receiptId: string | n
         // the day before for anything entered in the small hours in India.
         amount: String(rec.amountUsd), date: dayOf(rec.date), method: rec.method,
         remarks: rec.remarks ?? "", lockerId: rec.lockerId ?? "", rate: rec.exchangeRate || landedAt || "",
+        clientId: rec.clientId, invoiceId: "",
       });
     }
   }
@@ -126,8 +127,28 @@ export function ReceiptEditSheet({ receiptId, onClose }: { receiptId: string | n
   const mayEdit = can("payments", "edit");
   const mayDelete = can("payments", "delete");
 
+  // Recorded under the wrong client: it moves to the right one (lib/receipts.ts moveReceiptToClient) —
+  // on its own, so a refusal never leaves the rest half saved.
+  const clientMoves = !!rec && !!ef.clientId && ef.clientId !== rec.clientId;
+  const newClientInvoices = clientMoves ? (db.invoices ?? []).filter(i => i.clientId === ef.clientId) : [];
+
   const save = () => {
     if (!rec || !mayEdit) return;
+    if (clientMoves) {
+      const landedAt = rec.lockerId && rec.lockerAmount && rec.amountUsd > 0 ? rec.lockerAmount / rec.amountUsd : undefined;
+      const same = Number(ef.amount) === rec.amountUsd && ef.date === dayOf(rec.date) && ef.method === rec.method
+        && ef.remarks === (rec.remarks ?? "") && ef.lockerId === (rec.lockerId ?? "") && (ef.rate === "" || ef.rate === (rec.exchangeRate || landedAt || ""));
+      if (!same) { toast.error("Change the client on its own — save it, then correct the rest"); return; }
+      try {
+        moveReceiptToClient(rec.id, ef.clientId, ef.invoiceId || undefined, user!.id);
+      } catch (e) {
+        toast.error(e instanceof Error ? e.message : "Couldn't move this receipt");
+        return;
+      }
+      toast.success(`Receipt ${rec.receiptNo} moved to ${db.clients.find(c => c.id === ef.clientId)?.companyName ?? "that client"}`);
+      onClose();
+      return;
+    }
     const amt = Number(ef.amount);
     if (!amt || amt <= 0) { toast.error("Enter a valid amount"); return; }
     const rate = Number(ef.rate) || 0;
@@ -206,6 +227,37 @@ export function ReceiptEditSheet({ receiptId, onClose }: { receiptId: string | n
               </p>
             )}
           </div>
+          {/* Who it came from — recorded under the wrong client, it moves to the right one. */}
+          <div className={clientMoves ? "grid grid-cols-1 sm:grid-cols-2 gap-3" : ""}>
+            <div>
+              <Label className="text-xs">Client</Label>
+              <Select value={ef.clientId} disabled={!mayEdit} onValueChange={v => setEf(p => ({ ...p, clientId: v, invoiceId: "" }))}>
+                <SelectTrigger className="h-10 rounded-xl mt-1" aria-label="Client"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  {[...db.clients]
+                    .sort((a, b) => (a.companyName ?? "").localeCompare(b.companyName ?? ""))
+                    .map(c => <SelectItem key={c.id} value={c.id}>{c.companyName}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            </div>
+            {clientMoves && (
+              <div>
+                <Label className="text-xs">Against</Label>
+                <Select value={ef.invoiceId || "__credit"} onValueChange={v => setEf(p => ({ ...p, invoiceId: v === "__credit" ? "" : v }))}>
+                  <SelectTrigger className="h-10 rounded-xl mt-1" aria-label="Against"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="__credit">No invoice — hold as credit</SelectItem>
+                    {newClientInvoices.map(i => <SelectItem key={i.id} value={i.id}>Invoice {i.number}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
+          </div>
+          {clientMoves && (
+            <p className="text-[11px] font-medium text-primary -mt-2">
+              It comes off {client?.companyName ?? "this client"}&rsquo;s orders and credit, as cancelling it would, and goes on the new client&rsquo;s — against that invoice, or held as their credit. The receipt number and its deposit stay.
+            </p>
+          )}
           <div className="grid grid-cols-2 gap-3">
             <div>
               <Label className="text-xs" htmlFor="rcpt-edit-amount">Amount received ($)</Label>

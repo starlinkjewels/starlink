@@ -566,6 +566,112 @@ export interface EntryPatch {
    *  TO-currency. */
   toLockerId?: string;
   exchangeRate?: number;
+  /** An account entry of our own (a deposit, a withdrawal): its category. */
+  category?: string;
+  /** A supplier's or factory's payment put where it really belongs: who it was paid to,
+   *  and the bill / job it settles ("__advance": against no bill). Money received from a
+   *  supplier: only who it came from. Checked before anything is written. */
+  moveTo?: { partyId: string; target: string };
+}
+
+/** Where a supplier's or factory's payment stands now: its party and the bill / job it
+ *  settles ("__advance" when none) — what the correction panel opens with. */
+export function entryPlace(d: DB, entry: MoneyEntry): { partyId: string; target: string } | undefined {
+  if (entry.kind === "supplier") {
+    const p = (d.purchases ?? []).find(x => (x.payments ?? []).some(y => y.id === entry.id));
+    if (p) return { partyId: p.supplierId, target: p.id };
+    const a = (d.supplierPayments ?? []).find(x => x.id === entry.id);
+    if (a) return { partyId: a.supplierId, target: "__advance" };
+    const r = (d.supplierReceipts ?? []).find(x => x.id === entry.id);
+    if (r) return { partyId: r.supplierId, target: "__receipt" };
+  }
+  if (entry.kind === "factory") {
+    const mi = (d.materialIssuances ?? []).find(x => (x.makingCharges?.payments ?? []).some(y => y.id === entry.id));
+    if (mi) return { partyId: mi.factoryId, target: mi.id };
+    const a = (d.factoryPayments ?? []).find(x => x.id === entry.id);
+    if (a) return { partyId: a.factoryId, target: "__advance" };
+  }
+  return undefined;
+}
+
+/** Why a payment can't be put against another bill or party, or nothing when it can. */
+function placeRefusal(d: DB, entry: MoneyEntry, mv: NonNullable<EntryPatch["moveTo"]>): string | undefined {
+  const at = entryPlace(d, entry);
+  if (!at) return "Only a supplier's or a factory's payment can be put against another bill.";
+  if (at.partyId === mv.partyId && at.target === mv.target) return undefined;
+  if (entry.legIds) return "This one payment settled several bills — to put it elsewhere, cancel it and enter it again.";
+  if (entry.kind === "supplier") {
+    if (!d.suppliers.some(s => s.id === mv.partyId)) return "That supplier is no longer on file.";
+    if (at.target === "__receipt") return mv.target === "__receipt" ? undefined : "Money received from a supplier can only be put on another supplier.";
+    const leg = (d.purchases ?? []).flatMap(p => p.payments ?? []).find(x => x.id === entry.id);
+    if (leg?.viaBrokerId) return "This was paid through a broker — cancel it on the broker's page and pay it again.";
+    if (mv.target !== "__advance" && !(d.purchases ?? []).some(p => p.id === mv.target && p.supplierId === mv.partyId)) return "That bill is not on file for that supplier — reopen and choose again.";
+  } else {
+    if (!d.factories.some(f => f.id === mv.partyId)) return "That factory is no longer on file.";
+    if (mv.target !== "__advance" && !(d.materialIssuances ?? []).some(i => i.id === mv.target && i.factoryId === mv.partyId)) return "That job is not on file for that factory — reopen and choose again.";
+  }
+  return undefined;
+}
+
+/** Put a payment where it belongs (placeRefusal has passed). Inside updateDb, after its
+ *  other fields were corrected. The record keeps its id, amount, account and moment, so
+ *  its account movement stays tied to it; that movement now names the new party and bill. */
+function applyPlace(d: DB, entry: MoneyEntry, mv: NonNullable<EntryPatch["moveTo"]>): void {
+  const at = entryPlace(d, entry);
+  if (!at || (at.partyId === mv.partyId && at.target === mv.target)) return;
+  const id = entry.id;
+  type Rec = { amountInr: number; lockerId: string; recordedBy: string; createdAt: string; note?: string };
+  const keep = (r: Rec) => ({ id, amountInr: r.amountInr, lockerId: r.lockerId, recordedBy: r.recordedBy, createdAt: r.createdAt, ...(r.note ? { note: r.note } : {}) });
+  const rows = liveTxns(d, entry);
+  if (entry.kind === "supplier") {
+    const sup = d.suppliers.find(s => s.id === mv.partyId)!;
+    if (at.target === "__receipt") {
+      const r = (d.supplierReceipts ?? []).find(x => x.id === id);
+      if (!r) return;
+      r.supplierId = sup.id;
+      for (const t of rows) { t.category = `Received from ${sup.name}`; t.refId = sup.id; t.paymentId = id; }
+      return;
+    }
+    let rec: Rec | undefined;
+    for (const p of d.purchases ?? []) {
+      const i = (p.payments ?? []).findIndex(x => x.id === id);
+      if (i >= 0) { rec = p.payments![i]; p.payments!.splice(i, 1); break; }
+    }
+    if (!rec) {
+      const i = (d.supplierPayments ?? []).findIndex(x => x.id === id);
+      if (i >= 0) { rec = d.supplierPayments![i]; d.supplierPayments!.splice(i, 1); }
+    }
+    if (!rec) return;
+    const bill = mv.target !== "__advance" ? (d.purchases ?? []).find(p => p.id === mv.target && p.supplierId === sup.id) : undefined;
+    if (bill) { if (!bill.payments) bill.payments = []; bill.payments.push(keep(rec)); }
+    else { if (!d.supplierPayments) d.supplierPayments = []; d.supplierPayments.push({ ...keep(rec), supplierId: sup.id }); }
+    for (const t of rows) {
+      t.category = `Supplier Payment — ${sup.name}`;
+      if (bill) t.refId = bill.id; else delete t.refId;
+      t.paymentId = id;
+    }
+    return;
+  }
+  const fac = d.factories.find(f => f.id === mv.partyId)!;
+  let rec: Rec | undefined;
+  for (const mi of d.materialIssuances ?? []) {
+    const list = mi.makingCharges?.payments ?? [];
+    const i = list.findIndex(x => x.id === id);
+    if (i >= 0) { rec = list[i]; list.splice(i, 1); break; }
+  }
+  if (!rec) {
+    const i = (d.factoryPayments ?? []).findIndex(x => x.id === id);
+    if (i >= 0) { rec = d.factoryPayments![i]; d.factoryPayments!.splice(i, 1); }
+  }
+  if (!rec) return;
+  const job = mv.target !== "__advance" ? (d.materialIssuances ?? []).find(i => i.id === mv.target && i.factoryId === fac.id) : undefined;
+  if (job) { if (!job.makingCharges.payments) job.makingCharges.payments = []; job.makingCharges.payments.push(keep(rec)); }
+  else { if (!d.factoryPayments) d.factoryPayments = []; d.factoryPayments.push({ ...keep(rec), factoryId: fac.id }); }
+  for (const t of rows) {
+    t.category = `Making Charges — ${fac.name}`;
+    t.refId = job ? job.id : "__advance";
+    t.paymentId = id;
+  }
 }
 
 /** The currency an account holds (unset = rupees, as every account made before
@@ -700,6 +806,10 @@ function planTransfer(d: DB, out: LockerTransaction, inn: LockerTransaction, pat
  *  anything is written, so a refusal leaves every record exactly as it was. */
 export function entryEditRefusal(d: DB, entry: MoneyEntry, patch: EntryPatch): string | undefined {
   if (entry.locked) return entry.locked;
+  if (patch.moveTo) {
+    const why = placeRefusal(d, entry, patch.moveTo);
+    if (why) return why;
+  }
   // Paid to a party kept in rupees from an account in another currency, at a rate
   // (partyAmountInr): the rupees on their books and the amount that left the account
   // were worked out together. Changing either alone (or moving it to another account)
@@ -759,7 +869,14 @@ export function editEntry(entry: MoneyEntry, patch: EntryPatch): string | undefi
   }
   const refused = entryEditRefusal(loadDb(), entry, patch);
   if (refused) return refused;
+  // One save: the corrected fields, then — a supplier's or factory's payment — where it belongs.
   updateDb(d => {
+    correct(d);
+    if (patch.moveTo && (entry.kind === "supplier" || entry.kind === "factory")) applyPlace(d, entry, patch.moveTo);
+  });
+  return undefined;
+
+  function correct(d: DB): void {
     if (entry.kind === "supplier") {
       // One payment split across several bills moves as one: the date, the
       // account and the remark belong to the payment, not to any one bill.
@@ -896,9 +1013,11 @@ export function editEntry(entry: MoneyEntry, patch: EntryPatch): string | undefi
         t.lockerId = patch.lockerId;
         t.currency = lockerCcy(d, patch.lockerId);
       }
+      // Its category — only on an entry of our own (a deposit, a withdrawal); one made by
+      // a payment, a sale or an expense is named by what made it.
+      if (patch.category !== undefined && (!t.refType || t.refType === "manual")) t.category = patch.category.trim() || undefined;
     }
-  });
-  return undefined;
+  }
 }
 
 /** In plain words, what cancelling this entry changes — shown before confirming. */
