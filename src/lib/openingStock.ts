@@ -8,8 +8,8 @@
 // opening of 10 g that orders have since drawn 8 g from cannot come down to
 // 5 g without the history running below zero. That is refused, with how much
 // can still come off.
-import { updateDb, loadDb, dayOf, type DB, type StockMovement } from "./db";
-import { fmtQty, materialName, materialUnit, purchaseBucket } from "./materials";
+import { updateDb, loadDb, dayOf, type DB, type Purchase, type StockMovement } from "./db";
+import { fmtQty, materialName, materialUnit, purchaseBucket, type MaterialKey } from "./materials";
 import { fmtMoneyInr } from "./manufacturing";
 import { adjustStockCounter } from "./stock";
 import { lotKey, tidySpec, type LotSpec } from "./diamondLots";
@@ -401,6 +401,124 @@ export async function refilePurchaseLot(purchaseId: string, spec: LotSpec, piece
       await adjust({ material: "diamond", companyId: co, purityOrQuality: key, delta: net }, moves);
     } catch (e) {
       throw new Error(`Moved — but the stock counter for the new bag did not go up (${e instanceof Error ? e.message : String(e)}). Use Recompute from history on the Stock page.`);
+    }
+  }
+}
+
+/**
+ * A purchase's material moved to where it is really counted, when its purity
+ * (gold), grade or lot (another material, a gem) or the material itself was
+ * entered wrong — the way refilePurchaseLot moves loose diamonds to their right
+ * bag. Every stock row the purchase made goes to the corrected bucket (an order
+ * purchase's in-and-out pair together, so it nets to nothing), the counters
+ * follow, and the factory issue made from it is relabelled (gold: the factory's
+ * fine gold follows its purity). Refused when the old bucket would have run
+ * below zero without it — some of it has since gone out — or nothing of it is on file.
+ */
+/** A purchase's own stock rows — and, bought for an order, the order's "used" leg made with it (same
+ *  moment, same material and quantity; lib/stock.ts logOrderDirectPurchase), so the pair moves together. */
+function purchaseStockRows(d: DB, p: Purchase): StockMovement[] {
+  const oldMat = p.material as MaterialKey, oldKey = purchaseBucket(p);
+  const qty = Number(p.gold?.weightGrams ?? p.other?.qty ?? p.diamond?.carat ?? 0);
+  const all = d.stockMovements ?? [];
+  const own = all.filter(x => x.material === oldMat && x.refId === p.id && x.refType === "purchase" && x.purityOrQuality === oldKey);
+  if (!p.orderId) return own;
+  const legs = all.filter(m => m.type === "order_direct_use" && m.refType === "order" && m.refId === p.orderId && m.material === oldMat && m.purityOrQuality === oldKey && Math.abs(m.quantity - qty) < 0.0001);
+  const leg = legs.find(m => m.createdAt === p.createdAt) ?? legs[0];
+  return leg ? [...own, leg] : own;
+}
+
+/**
+ * Why this purchase's material can't move to another purity / grade / material in stock, if it can't —
+ * asked BEFORE anything is saved, so a correction is never left half done.
+ */
+export function purchaseStockMoveProblem(d: DB, purchaseId: string): string | undefined {
+  const p = (d.purchases ?? []).find(x => x.id === purchaseId);
+  if (!p) return "This purchase was removed by someone else.";
+  if (p.material === "readyPiece" || (p.material === "diamond" && p.diamond?.kind === "certified")) return "This purchase isn't kept in stock by grade.";
+  const rows = purchaseStockRows(d, p);
+  if (!rows.length) return p.orderId ? undefined : "This purchase's stock entry isn't on file, so it can't be moved to another grade.";
+  const ids = new Set(rows.map(r => r.id));
+  const all = bucketMoves(d, rows[0]);
+  if (lowest(all.filter(x => !ids.has(x.id))) < Math.min(0, lowest(all)) - EPS) {
+    return "Some of it has since been issued, used or sold from that stock — cancel those first, then correct the purchase.";
+  }
+  return undefined;
+}
+
+export async function refilePurchaseStock(
+  purchaseId: string,
+  to: { material: MaterialKey; key: string; lot?: LotSpec; pieces?: number },
+  apply: (row: Purchase) => void,
+  deps: OpeningDeps & { userId?: string } = {},
+): Promise<void> {
+  const live = (deps.load ?? loadDb)();
+  const p = (live.purchases ?? []).find(x => x.id === purchaseId);
+  if (!p) throw new Error("This purchase was removed by someone else.");
+  if (p.material === "readyPiece" || (p.material === "diamond" && p.diamond?.kind === "certified")) throw new Error("This purchase isn't kept in stock by grade.");
+  const oldMat = p.material as MaterialKey, oldKey = purchaseBucket(p);
+  const update = deps.update ?? updateDb;
+  const mine = (d: DB) => purchaseStockRows(d, p);
+  const relabelIssues = (d: DB) => {
+    for (const i of d.materialIssuances ?? []) {
+      if (i.source !== "purchase" || i.sourcePurchaseId !== p.id) continue;
+      i.material = to.material;
+      i.purityOrQuality = to.key;
+    }
+  };
+  const lotRow = to.lot ? Object.fromEntries(Object.entries(tidySpec(to.lot)).filter(([, v]) => v)) as StockMovement["lot"] : undefined;
+  const setRow = (r: StockMovement) => {
+    r.material = to.material;
+    r.purityOrQuality = to.key;
+    if (lotRow) r.lot = lotRow; else delete r.lot;
+    if (r.type === "purchase_in") { if (to.pieces && to.pieces > 0) r.pieces = Math.round(to.pieces); else delete r.pieces; }
+  };
+  // Same place: only the details (and a gem's parts, its pieces).
+  if (to.material === oldMat && to.key === oldKey) {
+    update(d => {
+      const row = (d.purchases ?? []).find(x => x.id === p.id);
+      if (row) apply(row);
+      for (const r of mine(d)) { if (lotRow) r.lot = lotRow; if (r.type === "purchase_in") { if (to.pieces && to.pieces > 0) r.pieces = Math.round(to.pieces); else delete r.pieces; } }
+    });
+    return;
+  }
+  const rows = mine(live);
+  // Bought for an order before its in/out pair was logged: nothing of it is counted in stock, so
+  // only the purchase and the factory issue made from it are corrected — no counter moves.
+  if (!rows.length && p.orderId) {
+    update(d => {
+      relabelIssues(d);
+      const row = (d.purchases ?? []).find(x => x.id === p.id);
+      if (row) apply(row);
+    });
+    return;
+  }
+  // The old bucket without this purchase must never have run below zero; nothing of it on file is refused too.
+  const problem = purchaseStockMoveProblem(live, p.id);
+  if (problem) throw new Error(problem);
+  const net = r3(rows.reduce((t, x) => t + signOf(x) * Math.abs(x.quantity), 0));
+  const co = rows[0].companyId ?? p.companyId;
+  const adjust = deps.adjust ?? adjustStockCounter;
+  const moves = live.stockMovements ?? [];
+  if (net > 0) await adjust({ material: oldMat, companyId: co, purityOrQuality: oldKey, delta: -net }, moves);
+  let changed = false;
+  update(d => {
+    const now = mine(d);
+    if (now.length !== rows.length || r3(now.reduce((t, x) => t + signOf(x) * Math.abs(x.quantity), 0)) !== net) { changed = true; return; }
+    for (const r of now) setRow(r);
+    relabelIssues(d);
+    const row = (d.purchases ?? []).find(x => x.id === p.id);
+    if (row) apply(row);
+  });
+  if (changed) {
+    if (net > 0) await adjust({ material: oldMat, companyId: co, purityOrQuality: oldKey, delta: net }, moves);
+    throw new Error("This purchase was changed by someone else — reopen and try again.");
+  }
+  if (net > 0) {
+    try {
+      await adjust({ material: to.material, companyId: co, purityOrQuality: to.key, delta: net }, moves);
+    } catch (e) {
+      throw new Error(`Moved — but the stock counter for the new grade did not go up (${e instanceof Error ? e.message : String(e)}). Use Recompute from history on the Stock page.`);
     }
   }
 }
