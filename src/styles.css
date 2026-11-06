@@ -1032,3 +1032,84 @@ input[type="number"] { -moz-appearance: textfield; appearance: textfield; }
 
 /* Settings: the section list scrolls on its own beside the section (pages/Settings.tsx). */
 .settings-nav-scroll { scrollbar-width: thin; scrollbar-gutter: stable; }
+
+/* ── The agent (/ai): a living orb, an aurora header, the call panel — all in the
+   business's own colour (--color-primary follows Settings → Brand), never a fixed
+   one. Animation stops under "calm motion" (the rule above) and reduce-motion. ── */
+.ai-orb { position: relative; border-radius: 9999px; isolation: isolate; flex-shrink: 0;
+  transform: scale(calc(1 + var(--lvl, 0) * 0.16)); transition: transform 0.12s ease-out, filter 0.4s ease, opacity 0.4s ease; }
+.ai-orb-glow { position: absolute; inset: -32%; border-radius: inherit; z-index: -1; filter: blur(22px);
+  background: radial-gradient(closest-side, color-mix(in oklab, var(--color-primary) 45%, transparent), transparent);
+  opacity: calc(0.55 + var(--lvl, 0) * 0.45); }
+.ai-orb-core { position: absolute; inset: 0; border-radius: inherit; overflow: hidden;
+  background: conic-gradient(from 0deg,
+    color-mix(in oklab, var(--color-primary) 88%, #6d28d9),
+    color-mix(in oklab, var(--color-primary) 62%, #22d3ee),
+    color-mix(in oklab, var(--color-primary) 90%, #0b1020),
+    color-mix(in oklab, var(--color-primary) 66%, #a855f7),
+    color-mix(in oklab, var(--color-primary) 88%, #6d28d9));
+  animation: ai-spin 10s linear infinite; }
+.ai-orb-core::before, .ai-orb-core::after { content: ""; position: absolute; border-radius: 9999px; filter: blur(10px); }
+.ai-orb-core::before { width: 70%; height: 70%; left: 4%; top: 8%;
+  background: radial-gradient(circle, color-mix(in oklab, var(--color-primary) 40%, #38bdf8), transparent 70%); animation: ai-drift 7s ease-in-out infinite; }
+.ai-orb-core::after { width: 64%; height: 64%; right: 2%; bottom: 4%;
+  background: radial-gradient(circle, color-mix(in oklab, var(--color-primary) 50%, #c084fc), transparent 70%); animation: ai-drift 9s ease-in-out infinite reverse; }
+.ai-orb-sheen { position: absolute; inset: 0; border-radius: inherit; pointer-events: none;
+  background: radial-gradient(circle at 32% 26%, rgb(255 255 255 / 0.55), transparent 38%), radial-gradient(circle at 70% 82%, rgb(0 0 0 / 0.22), transparent 55%);
+  box-shadow: inset 0 0 0 1px rgb(255 255 255 / 0.18); }
+.ai-orb[data-state="thinking"] .ai-orb-core, .ai-orb[data-state="hearing"] .ai-orb-core { animation-duration: 2.4s; }
+.ai-orb[data-state="speaking"] { animation: ai-breathe 1.6s ease-in-out infinite; }
+.ai-orb[data-state="paused"] { filter: grayscale(0.7); opacity: 0.6; }
+.ai-orb[data-state="paused"] .ai-orb-core, .ai-orb[data-state="paused"] .ai-orb-core::before, .ai-orb[data-state="paused"] .ai-orb-core::after { animation-play-state: paused; }
+@keyframes ai-spin { to { transform: rotate(1turn); } }
+@keyframes ai-drift { 0%, 100% { transform: translate(0, 0) scale(1); } 50% { transform: translate(14%, 10%) scale(1.15); } }
+@keyframes ai-breathe { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.07); } }
+.ai-wave { width: 100%; height: 2rem; display: block; }
+
+/* The header: an aurora in the brand's colour, dark enough for white text on any brand. */
+.ai-hero { position: relative; overflow: hidden; color: white; border-radius: 1.75rem; isolation: isolate;
+  background: linear-gradient(135deg,
+    color-mix(in oklab, var(--color-primary) 78%, #0b1020) 0%,
+    color-mix(in oklab, var(--color-primary) 70%, #4c1d95) 55%,
+    color-mix(in oklab, var(--color-primary) 62%, #0e7490) 100%);
+  box-shadow: 0 24px 60px -28px color-mix(in oklab, var(--color-primary) 70%, transparent); }
+.ai-hero::before, .ai-hero::after { content: ""; position: absolute; z-index: -1; border-radius: 9999px; filter: blur(48px); opacity: 0.55; }
+.ai-hero::before { width: 46%; height: 140%; left: -8%; top: -60%; background: color-mix(in oklab, var(--color-primary) 35%, #60a5fa); animation: ai-drift 14s ease-in-out infinite; }
+.ai-hero::after { width: 40%; height: 120%; right: -6%; bottom: -70%; background: color-mix(in oklab, var(--color-primary) 30%, #e879f9); animation: ai-drift 18s ease-in-out infinite reverse; }
+.ai-glass { background: rgb(255 255 255 / 0.14); border: 1px solid rgb(255 255 255 / 0.24); backdrop-filter: blur(14px); }
+.ai-glass::placeholder { color: rgb(255 255 255 / 0.72); }
+
+/* Figures and rows: a soft lift, a coloured icon chip. */
+.ai-tile { position: relative; overflow: hidden; transition: transform 0.2s ease, box-shadow 0.2s ease; }
+.ai-tile:hover { transform: translateY(-2px); }
+.ai-tile::after { content: ""; position: absolute; inset: auto 0 0 0; height: 3px; background: var(--ai-accent, var(--color-primary)); opacity: 0.85; }
+.ai-chip { display: grid; place-items: center; border-radius: 0.8rem; background: color-mix(in oklab, var(--ai-accent, var(--color-primary)) 13%, transparent); color: var(--ai-accent, var(--color-primary)); }
+.ai-shimmer { background: linear-gradient(90deg, var(--color-secondary) 0%, color-mix(in oklab, var(--color-primary) 12%, var(--color-secondary)) 50%, var(--color-secondary) 100%); background-size: 200% 100%; animation: ai-shine 1.4s linear infinite; border-radius: 0.5rem; }
+@keyframes ai-shine { to { background-position: -200% 0; } }
+.ai-bubble-me { background: linear-gradient(135deg, var(--color-primary), color-mix(in oklab, var(--color-primary) 72%, #6d28d9)); color: white; }
+
+/* The call: dark and immersive in the brand's own colour — a floating card on a wide
+   screen, the whole screen on a phone. */
+.ai-call { position: fixed; z-index: 60; inset: 0; display: flex; flex-direction: column; overflow: hidden; color: white; isolation: isolate;
+  background:
+    radial-gradient(80% 55% at 50% 30%, color-mix(in oklab, var(--color-primary) 55%, transparent), transparent 70%),
+    radial-gradient(60% 40% at 85% 95%, color-mix(in oklab, var(--color-primary) 35%, #7c3aed), transparent 70%),
+    linear-gradient(180deg, color-mix(in oklab, var(--color-primary) 30%, #070b1a) 0%, #060914 100%); }
+.ai-call::before { content: ""; position: absolute; inset: 0; z-index: 0; pointer-events: none; opacity: 0.35;
+  background-image: radial-gradient(rgb(255 255 255 / 0.08) 1px, transparent 1px); background-size: 22px 22px;
+  mask-image: radial-gradient(70% 60% at 50% 35%, black, transparent); }
+@media (min-width: 640px) { .ai-call { inset: auto 1.5rem 1.5rem auto; width: 400px; height: min(720px, calc(100dvh - 3rem)); border-radius: 2rem;
+  box-shadow: 0 40px 90px -30px rgb(2 6 23 / 0.7), 0 0 0 1px rgb(255 255 255 / 0.08); } }
+.ai-call-btn { display: grid; place-items: center; border-radius: 9999px; color: white; background: rgb(255 255 255 / 0.12);
+  border: 1px solid rgb(255 255 255 / 0.16); backdrop-filter: blur(12px); transition: background 0.2s ease, transform 0.15s ease; }
+.ai-call-btn:hover { background: rgb(255 255 255 / 0.2); }
+.ai-call-btn:active { transform: scale(0.94); }
+.ai-call-pill { background: rgb(255 255 255 / 0.12); border: 1px solid rgb(255 255 255 / 0.16); backdrop-filter: blur(12px); }
+.ai-call-bubble { background: rgb(255 255 255 / 0.09); border: 1px solid rgb(255 255 255 / 0.12); backdrop-filter: blur(10px); }
+.ai-call-bubble, .ai-call-bubble * { color: rgb(255 255 255 / 0.92) !important; }
+.ai-call-bubble a { color: #c7d2fe !important; text-decoration: underline; text-underline-offset: 2px; }
+.ai-call-bubble strong { color: white !important; }
+.ai-call .ai-orb-glow { inset: -45%; filter: blur(30px); opacity: calc(0.75 + var(--lvl, 0) * 0.25); }
+@media (prefers-reduced-motion: reduce) {
+  .ai-orb, .ai-orb *, .ai-orb-core::before, .ai-orb-core::after, .ai-hero::before, .ai-hero::after, .ai-shimmer { animation: none !important; }
+}
