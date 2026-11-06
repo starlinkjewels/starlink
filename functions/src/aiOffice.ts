@@ -15,9 +15,11 @@ import { db } from "./lib/firestoreAdmin";
 import { resolveCaller } from "./lib/scope";
 import { chatCompletion, type ChatMessage, type ToolCall, type ToolDef } from "./lib/sarvam";
 import { REGION } from "./region";
+import { OWNER_EMAILS as OWNERS } from "./summaries";
 
 const SARVAM_API_KEY = defineSecret("SARVAM_API_KEY");
-const OWNER_EMAILS = ["marketing.starlinkjewels@gmail.com", "admin@starlinkjewels.com"];
+// The business's owners: each app's own list (summaries.ts), never another's.
+const OWNER_EMAILS = OWNERS.diamondflow;
 
 /** Provider calls a business may make in a day (one question is a few: each tool round is one). */
 const DAILY_CALLS = 400;
