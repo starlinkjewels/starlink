@@ -746,6 +746,15 @@ export interface Task {
   completed: boolean;
   completedAt?: string;
   createdAt: string;
+  /** Why it is to be done (an AI Office task: the figure behind it). */
+  note?: string;
+  /** The order or client it is about — the task opens it. */
+  link?: string;
+  /** Do it by (yyyy-mm-dd). */
+  due?: string;
+  priority?: "high" | "medium" | "low";
+  /** Proposed by the AI Office, approved by `assignedBy`. */
+  fromAi?: boolean;
 }
 
 /** A photo, a file or a voice note sent in a conversation (Storage URL). */

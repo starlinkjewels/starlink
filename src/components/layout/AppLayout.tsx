@@ -1,7 +1,7 @@
 import { UserAvatar } from "@/components/UserAvatar";
 import { applyTableUi, tableUiOf, type TableUi } from "@/lib/tableStyle";
 import { BrandLogo, useBrandMark } from "@/components/BrandLogo";
-import { useBrand, brandName } from "@/lib/brand";
+import { useBrand, brandName, brandShort } from "@/lib/brand";
 import { useStudio } from "@/lib/studio";
 import { studioSidebarGroups, StudioTabBar, StudioBackButton, parentPath } from "@/components/layout/StudioShell";
 import { applyAppearance, appearanceOf, rememberAppearance, type AppearanceUi } from "@/lib/appearance";
@@ -545,6 +545,18 @@ export function AppLayout() {
             className="md:hidden relative h-9 w-9 rounded-xl hover:bg-secondary flex items-center justify-center transition-colors shrink-0">
             <ScanLine className="h-[18px] w-[18px]" />
           </button>
+
+          {/* The agent (admins) — named after the business, never after whose AI it is: the day's brief, questions, the tasks it proposes. A phone's top bar
+              has no room for it — there it is in the menu (Workspace → AI). */}
+          {user?.role === "admin" && (
+            <button
+              onClick={() => navigate("/ai")}
+              aria-label={`${brandShort()} Agent`}
+              title={`${brandShort()} Agent`}
+              className={`relative h-9 w-9 rounded-xl hidden sm:flex items-center justify-center transition-colors shrink-0 ${loc.pathname === "/ai" ? "bg-primary/10 text-primary" : "hover:bg-secondary"}`}>
+              <Sparkles className="h-[18px] w-[18px]" />
+            </button>
+          )}
 
           {/* My Tasks (employee + admin) — in the top bar so it never overlaps
               page content like pagination. */}

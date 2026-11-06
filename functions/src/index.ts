@@ -8,6 +8,10 @@ import { buildToolDefs } from "./tools/schema";
 import { executeTool } from "./tools/execute";
 
 export { sendNotificationPush } from "./notifications";
+// The AI Office: an admin's business analyst (see aiOffice.ts).
+export { aiOffice } from "./aiOffice";
+// Its voice: what the owner says, and its answers spoken (see aiVoice.ts).
+export { aiVoice } from "./aiVoice";
 // Transactional email from the company's own Gmail account (see mail.ts).
 export { sendMail } from "./mail";
 // An admin changing a client's sign-in email or password (see clientLogin.ts).

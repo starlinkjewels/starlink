@@ -41,6 +41,7 @@ const ProductPhotosPage = lazy(() => import("./pages/ProductPhotos").then(m => (
 const SharedGalleryPage = lazy(() => import("./pages/SharedGallery").then(m => ({ default: m.SharedGalleryPage })));
 const DocShareViewPage = lazy(() => import("./pages/DocShareView").then(m => ({ default: m.DocShareViewPage })));
 const StarlinkAiPage = lazy(() => import("./pages/StarlinkAi").then(m => ({ default: m.StarlinkAiPage })));
+const AiOfficePage = lazy(() => import("./pages/AiOffice").then(m => ({ default: m.AiOfficePage })));
 const LockerPage = lazy(() => import("./pages/Locker").then(m => ({ default: m.LockerPage })));
 const SuppliersPage = lazy(() => import("./pages/Suppliers").then(m => ({ default: m.SuppliersPage })));
 const SupplierHistoryPage = lazy(() => import("./pages/SupplierHistory").then(m => ({ default: m.SupplierHistoryPage })));
@@ -71,6 +72,12 @@ function Protected({ children, roles }: { children: React.ReactNode; roles?: Rol
   if (!user) return <Navigate to="/login" state={{ from: loc }} replace />;
   if (roles && !roles.includes(user.role)) return <Navigate to="/" replace />;
   return <>{children}</>;
+}
+
+/** /ai: an admin's AI Office; for anyone else, the assistant for their own orders and accounts. */
+function AiRoute() {
+  const { user } = useAuth();
+  return user?.role === "admin" ? <AiOfficePage /> : <StarlinkAiPage />;
 }
 
 /** Documents: admins, and the employees an admin has let in (User.documentsAccess) —
@@ -222,7 +229,8 @@ export function App() {
           <Route path="catalog/check" element={<Protected roles={["admin","employee"]}><CatalogCheckPage /></Protected>} />
           <Route path="catalog/design/:key" element={<ProductPage />} />
           <Route path="product-photos" element={<ProductPhotosPage />} />
-          <Route path="ai" element={<StarlinkAiPage />} />
+          {/* An admin: the AI Office; anyone else: the assistant for their own orders and accounts. */}
+          <Route path="ai" element={<AiRoute />} />
           <Route path="locker" element={<Protected roles={["admin","employee"]}><LockerPage /></Protected>} />
           <Route path="suppliers" element={<Protected roles={["admin","employee"]}><SuppliersPage /></Protected>} />
           <Route path="suppliers/brokers/:id" element={<Protected roles={["admin","employee"]}><BrokerHistoryPage /></Protected>} />
