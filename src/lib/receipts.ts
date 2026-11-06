@@ -634,6 +634,83 @@ export function editReceipt(receiptId: string, patch: ReceiptEdit): void {
   if (refused) throw new Error(refused);
 }
 
+// ── Another client ─────────────────────────────────────────────────────────
+
+/**
+ * Put a receipt on the client it really came from — recorded under the wrong
+ * one. It comes off the first client exactly as cancelling it would (its money
+ * off their orders, the credit it left off their account) and goes on the right
+ * one exactly as recording it would: against the invoice named (theirs), else
+ * held as their credit. It keeps its number and its deposit — the same account
+ * row, now naming the right client. Refused, before anything is written, where
+ * cancelling would be: the credit it left has been spent since, or its deposit
+ * holds more than the receipt (an older overpayment), or can't be told apart.
+ */
+function planMoveClient(d: DB, receiptId: string, clientId: string, invoiceId: string | undefined, userId: string, at: string): Plan {
+  const rec = (d.clientReceipts ?? []).find(r => r.id === receiptId);
+  if (!rec) return { why: "That receipt is no longer on record." };
+  if (clientId === rec.clientId) return { apply: () => {} };
+  const to = d.clients.find(c => c.id === clientId);
+  if (!to) return { why: "That client is no longer on file — pick again." };
+  if (invoiceId && !(d.invoices ?? []).some(i => i.id === invoiceId && i.clientId === clientId)) return { why: "That invoice isn't the new client's — pick again." };
+  const landed = landings(d, rec);
+  const applied = r2(landed.reduce((s, x) => s + x.a.amount, 0));
+  const from = d.clients.find(c => c.id === rec.clientId);
+  const have = from?.creditBalance || 0;
+  const dep = receiptDeposit(d, rec, depositHint(landed));
+  if (!dep.row && !dep.rows.length && rec.lockerId && dep.nearby > 0) return { why: UNLINKED_DEPOSIT };
+  const rows = depositRows(dep);
+  const excess = depositExcess(d, rec, rows);
+  if (excess > 0) return { why: excessWhy(rec, excess) };
+  const after = r2(have + applied - rec.amountUsd);
+  if (after < -CENT) return { why: creditUsedWhy(d, rec, r2(rec.amountUsd - applied), have) };
+  return {
+    apply: () => {
+      // Off the first client, as cancelling it would.
+      const gone = new Set(landed.map(x => x.a));
+      for (const o of d.orders) {
+        if (o.clientId === rec.clientId && o.advances?.some(a => gone.has(a))) o.advances = o.advances.filter(a => !gone.has(a));
+      }
+      if (from) from.creditBalance = after > 0 ? after : undefined;
+      settleClientAccount(d, rec.clientId, 0, userId, at);
+      // On the right one, as recording it would.
+      rec.clientId = clientId;
+      rec.invoiceId = invoiceId || undefined;
+      rec.updatedAt = at;
+      const before = advanceIds(d, clientId);
+      settleClientAccount(d, clientId, rec.amountUsd, userId, rec.date, shortNote(rec.method, rec.remarks), invoiceId);
+      tagNewAdvances(d, clientId, rec.id, before);
+      // The same deposit, naming them.
+      for (const t of rows) {
+        t.refId = clientId;
+        t.category = `Client Payment — ${to.companyName ?? "Client"}`;
+        t.receiptId = rec.id;
+      }
+    },
+  };
+}
+
+/** Why a receipt can't be put on another client; undefined when it can. Changes nothing. */
+export function receiptMoveBlocker(db: DB, receiptId: string, clientId: string, invoiceId?: string): string | undefined {
+  const plan = planMoveClient(db, receiptId, clientId, invoiceId, "", new Date().toISOString());
+  return "why" in plan ? plan.why : undefined;
+}
+
+/** Put a receipt on another client (see planMoveClient). Throws, having changed nothing, when refused. */
+export function moveReceiptToClient(receiptId: string, clientId: string, invoiceId: string | undefined, userId: string): void {
+  needLoaded();
+  const why = receiptMoveBlocker(loadDb(), receiptId, clientId, invoiceId);
+  if (why) throw new Error(why);
+  let refused: string | undefined;
+  const label = receiptLabel(receiptId);
+  updateDbAs({ summary: `Receipt ${label} moved to ${loadDb().clients.find(c => c.id === clientId)?.companyName ?? "another client"}` }, d => {
+    const plan = planMoveClient(d, receiptId, clientId, invoiceId, userId, new Date().toISOString());
+    if ("why" in plan) { refused = plan.why; return; }
+    plan.apply();
+  });
+  if (refused) throw new Error(refused);
+}
+
 /** "0871 — Acme Jewels, $1,200": how a receipt reads in the activity log. */
 function receiptLabel(receiptId: string): string {
   const db = loadDb();
