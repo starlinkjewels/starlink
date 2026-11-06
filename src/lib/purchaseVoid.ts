@@ -274,6 +274,9 @@ export interface PurchaseEdit {
   quality?: string;
   certificateNumber?: string;
   certificateLab?: string;
+  /** A certified stone: what it is, as asked when it was bought — kept on the purchase and its packet.
+   *  A field left out stays as it was; "" clears it. */
+  cert?: { shape?: string; type?: string; color?: string; clarity?: string; cut?: string; polish?: string; symmetry?: string; fluorescence?: string; measurement?: string };
   /** The broker on this line and its brokerage (lib/brokers.ts); null takes the broker off. */
   brokerage?: Pick<Purchase, "brokerId" | "brokeragePct" | "brokerageInr" | "brokeragePaidBy"> | null;
   /** In bill (GST, lib/purchaseGst.ts): on or off, its % and this line's GST in ₹.
@@ -407,6 +410,14 @@ export async function editPurchase(db: DB, p: Purchase, edit: PurchaseEdit, user
       if (pur.diamond.kind === "certified") {
         if (edit.certificateNumber !== undefined) pur.diamond.certificateNumber = edit.certificateNumber.trim() || undefined;
         if (edit.certificateLab !== undefined) pur.diamond.certificateLab = edit.certificateLab.trim() || undefined;
+        // What the stone is: its shape, type, colour and clarity on the bill too.
+        const c = edit.cert;
+        if (c?.shape !== undefined && c.shape.trim()) pur.diamond.shape = c.shape.trim();
+        for (const k of ["type", "color", "clarity"] as const) {
+          if (c?.[k] === undefined) continue;
+          const v = c[k]!.trim();
+          if (v) pur.diamond[k] = v; else delete pur.diamond[k];
+        }
       }
     }
     pur.totalInr = edit.totalInr;
@@ -457,6 +468,14 @@ export async function editPurchase(db: DB, p: Purchase, edit: PurchaseEdit, user
       if (edit.certificateNumber) pk.certificateNumber = edit.certificateNumber.trim();
       if (edit.certificateLab !== undefined) pk.certificateLab = edit.certificateLab.trim() || undefined;
       if (edit.quality !== undefined) pk.quality = edit.quality.trim() || undefined;
+      // Its grading, as corrected — every field the purchase asked.
+      const c = edit.cert;
+      if (c?.shape !== undefined && c.shape.trim()) pk.shape = c.shape.trim();
+      for (const k of ["type", "color", "clarity", "cut", "polish", "symmetry", "fluorescence", "measurement"] as const) {
+        if (c?.[k] === undefined) continue;
+        const v = c[k]!.trim();
+        if (v) pk[k] = v; else delete pk[k];
+      }
     }
 
     // 4. Stock trail. For an ORDER purchase the in/out pair must both move (they

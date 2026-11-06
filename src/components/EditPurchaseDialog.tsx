@@ -13,18 +13,25 @@ import type { PurchaseEdit } from "@/lib/purchaseVoid";
 import { toast } from "sonner";
 import { BillBrokerFields } from "@/components/BillBrokerFields";
 import { billBrokerageProblem, brokerageForLines, emptyBillBrokerage, type BillBrokerage } from "@/lib/brokers";
-import { materialUnit, materialName, purchaseBucket, purchaseQty, purchaseRate, UNIT_LABEL } from "@/lib/materials";
+import { materialDef, materialUnit, materialName, purchaseBucket, purchaseQty, purchaseRate, UNIT_LABEL, type MaterialKey } from "@/lib/materials";
 import { loadDb } from "@/lib/db";
 import { lotKey, lotParts } from "@/lib/diamondLots";
 import { bagNoOf } from "@/lib/diamondBags";
-import { refilePurchaseLot } from "@/lib/openingStock";
-import { LooseLotFields, lotFromDraft, type LooseLotDraft } from "@/components/LotFields";
+import { purchaseStockMoveProblem, refilePurchaseLot, refilePurchaseStock } from "@/lib/openingStock";
+import { CertGradeFields, ListSelect, LooseLotFields, lotFromDraft, type CertGradeDraft, type LooseLotDraft } from "@/components/LotFields";
+import { GradeInput, OtherMaterialSelect } from "@/components/MaterialFields";
 import { useAuth } from "@/lib/auth";
 import { Checkbox } from "@/components/ui/checkbox";
 import { cleanGstPct, defaultPurchaseGstPct, gstOn, pctText, usdWithGst } from "@/lib/purchaseGst";
 
+/** Gold purities, as the purchase form offers them. */
+const GOLD_PURITIES = ["9K", "10K", "14K", "18K", "22K", "24K"];
+
 /**
- * Correct a purchase that was entered wrong (wrong carat, rate, invoice no.).
+ * Correct a purchase that was entered wrong (wrong carat, rate, invoice no.) —
+ * every detail asked when it was bought can be corrected here too: a certified
+ * stone's shape and grading, gold's purity, another material's grade (a gem's
+ * whole lot) and pieces, as well as the loose diamonds' bag.
  * Saving carries the change through the supplier's due, the factory issue, the
  * certified packet and the stock trail — see editPurchase() in purchaseVoid.ts.
  */
@@ -52,13 +59,21 @@ export function EditPurchaseDialog({ purchase, onClose, onSave, lockQuantity, lo
   const [inv, setInv] = useState("");
   const [notes, setNotes] = useState("");
   const [quality, setQuality] = useState("");
-  const [certNo, setCertNo] = useState("");
-  const [lab, setLab] = useState("");
   const [saving, setSaving] = useState(false);
   const { user } = useAuth();
   // Loose diamonds: the bag (shape · mm · sieve · colour · clarity) and the pieces.
   const [lot, setLot] = useState<LooseLotDraft>({ shape: "Round", mm: "", size: "", color: "", clarity: "" });
   const [pcs, setPcs] = useState("");
+  // A certified stone: its shape and grading (on its packet), as asked when it was bought.
+  const [certShape, setCertShape] = useState("Round");
+  const [grade, setGrade] = useState<CertGradeDraft>({ type: "", color: "", clarity: "", cut: "", polish: "", symmetry: "", fluorescence: "", measurement: "", lab: "", certNo: "" });
+  // Gold: its purity. Another material: which one, its grade (a gem: its lot) and pieces.
+  const [purity, setPurity] = useState("");
+  const [materialId, setMaterialId] = useState("");
+  const [otherGrade, setOtherGrade] = useState("");
+  const [gemLot, setGemLot] = useState<LooseLotDraft>({ shape: "Round", mm: "", size: "", color: "", clarity: "" });
+  // The gem's lot as it was read in: only a change from it moves anything (a label read back may not match its text exactly).
+  const [gemStart, setGemStart] = useState("");
   // The broker on this line (lib/brokers.ts).
   const [brokerage, setBrokerage] = useState<BillBrokerage>(emptyBillBrokerage());
   // In bill (GST) — on or off, and its % (lib/purchaseGst.ts).
@@ -75,14 +90,31 @@ export function EditPurchaseDialog({ purchase, onClose, onSave, lockQuantity, lo
     setInv(purchase.invoiceNumber ?? "");
     setNotes(purchase.notes ?? "");
     setQuality(purchase.diamond?.quality ?? "");
-    setCertNo(purchase.diamond?.certificateNumber ?? "");
-    setLab(purchase.diamond?.certificateLab ?? "");
     setGstBill(purchase.gstBill === true);
     setGstPctText(pctText(purchase.gstBill ? purchase.gstPct : defaultPurchaseGstPct(loadDb().settings)));
     if (purchase.material === "diamond" && purchase.diamond?.kind !== "certified") {
       const lp = lotParts(purchaseBucket(purchase), { shape: purchase.diamond?.shape ?? "", type: purchase.diamond?.type, size: purchase.diamond?.size, mm: purchase.diamond?.mm, color: purchase.diamond?.color, clarity: purchase.diamond?.clarity });
       setLot({ shape: lp.shape, type: lp.type ?? "", mm: lp.mm ?? "", size: lp.size ?? "", color: lp.color ?? "", clarity: lp.clarity ?? "" });
       setPcs(purchase.diamond?.pieces != null ? String(purchase.diamond.pieces) : "");
+    }
+    if (purchase.material === "diamond" && purchase.diamond?.kind === "certified") {
+      const pk = (loadDb().diamondPackets ?? []).find(x => x.purchaseId === purchase.id);
+      setCertShape(pk?.shape || purchase.diamond?.shape || "Round");
+      setGrade({
+        type: pk?.type ?? purchase.diamond?.type ?? "", color: pk?.color ?? purchase.diamond?.color ?? "", clarity: pk?.clarity ?? purchase.diamond?.clarity ?? "",
+        cut: pk?.cut ?? "", polish: pk?.polish ?? "", symmetry: pk?.symmetry ?? "", fluorescence: pk?.fluorescence ?? "", measurement: pk?.measurement ?? "",
+        lab: purchase.diamond?.certificateLab ?? pk?.certificateLab ?? "", certNo: purchase.diamond?.certificateNumber ?? pk?.certificateNumber ?? "",
+      });
+    }
+    setPurity(purchase.gold?.purity ?? "");
+    if (purchase.material !== "gold" && purchase.material !== "diamond" && purchase.material !== "readyPiece") {
+      setMaterialId(purchase.material);
+      setOtherGrade(purchase.other?.grade && purchase.other.grade !== "—" ? purchase.other.grade : "");
+      const gp = lotParts(purchase.other?.grade ?? "");
+      const draft = { shape: gp.shape || "Round", variety: gp.variety ?? "", type: gp.type ?? "", mm: gp.mm ?? "", size: gp.size ?? "", color: gp.color ?? "", clarity: gp.clarity ?? "" };
+      setGemLot(draft);
+      setGemStart(lotKey(lotFromDraft(draft)));
+      setPcs(purchase.other?.pieces != null ? String(purchase.other.pieces) : "");
     }
     setBrokerage(purchase.brokerId ? {
       brokerId: purchase.brokerId, pct: purchase.brokeragePct != null ? String(purchase.brokeragePct) : "",
@@ -123,10 +155,27 @@ export function EditPurchaseDialog({ purchase, onClose, onSave, lockQuantity, lo
   const lotChanged = loose && !forOrder && (newKey !== oldKey || pcs !== (purchase.diamond?.pieces != null ? String(purchase.diamond.pieces) : "")
     || JSON.stringify(lotFromDraft(lot)) !== JSON.stringify(lotParts(oldKey, { shape: purchase.diamond?.shape ?? "", type: purchase.diamond?.type, size: purchase.diamond?.size, mm: purchase.diamond?.mm, color: purchase.diamond?.color, clarity: purchase.diamond?.clarity })));
 
+  // Gold's purity, or another material (which, its grade or a gem's lot, its pieces): where it is counted in stock.
+  const isOther = !isGold && purchase.material !== "diamond" && !isReady;
+  const gem = isOther && materialDef(db.settings, materialId)?.kind === "stone";
+  const otherUnit = isOther ? materialUnit(db.settings, materialId || purchase.material) : unit;
+  const newOtherKey = !isOther ? "" : gem ? lotKey(lotFromDraft(gemLot)) : (otherGrade.trim() || "—");
+  const goldMoved = isGold && !!purity && purity !== (purchase.gold?.purity ?? "");
+  const otherMoved = isOther && (materialId !== purchase.material || (gem ? newOtherKey !== gemStart : newOtherKey !== (purchase.other?.grade || "—")));
+  const otherPcsChanged = isOther && pcs !== (purchase.other?.pieces != null ? String(purchase.other.pieces) : "");
+  const stockMoves = goldMoved || otherMoved || otherPcsChanged;
+  // A report no. it was bought with can't be cleared; an older purchase saved without one can still be corrected.
+  const hadReport = !!(purchase.diamond?.certificateNumber || (db.diamondPackets ?? []).find(x => x.purchaseId === purchase.id)?.certificateNumber);
+
   const submit = async () => {
     const brokerProblem = billBrokerageProblem(brokerage);
     if (brokerProblem) { toast.error(brokerProblem); return; }
     if (gstBill && !gstLocked && !(gstPct > 0)) { toast.error("Enter the GST % — or untick In bill"); return; }
+    // A move to another purity / grade / material is checked first: refused, nothing is saved.
+    if (goldMoved || otherMoved) {
+      const problem = purchaseStockMoveProblem(loadDb(), purchase.id);
+      if (problem) { toast.error(problem); return; }
+    }
     setSaving(true);
     try {
       await onSave({
@@ -141,8 +190,9 @@ export function EditPurchaseDialog({ purchase, onClose, onSave, lockQuantity, lo
         notes,
         // Loose: its colour and clarity read as its quality, as when it was bought.
         quality: purchase.material === "diamond" ? (loose ? [lot.color, lot.clarity].filter(Boolean).join(" ") || quality : quality) : undefined,
-        certificateNumber: isCertified ? certNo : undefined,
-        certificateLab: isCertified ? lab : undefined,
+        certificateNumber: isCertified ? grade.certNo : undefined,
+        certificateLab: isCertified ? grade.lab : undefined,
+        ...(isCertified ? { cert: { shape: certShape, type: grade.type ?? "", color: grade.color, clarity: grade.clarity, cut: grade.cut, polish: grade.polish, symmetry: grade.symmetry, fluorescence: grade.fluorescence, measurement: grade.measurement } } : {}),
         // Brokerage on the line before GST, as when it was bought.
         brokerage: brokerage.brokerId ? brokerageForLines(brokerage, [isReady ? totalInr : lineInr + roundOff])[0] : null,
         ...gstEdit,
@@ -155,6 +205,26 @@ export function EditPurchaseDialog({ purchase, onClose, onSave, lockQuantity, lo
           await refilePurchaseLot(purchase.id, lotFromDraft(lot), Number(pcs) > 0 ? Number(pcs) : undefined, { userId: user?.id });
           if (newKey !== oldKey) toast.success(`Stones moved into ${bagNoOf(loadDb(), newKey) ?? "their bag"} · ${newKey}`);
         } catch (e) { toast.error(e instanceof Error ? e.message : "Couldn't move the stones to that bag."); return; }
+      }
+      // Gold's purity, another material's grade (a gem's lot), which material, its pieces: moved where it is counted.
+      if (stockMoves) {
+        const fresh = (loadDb().purchases ?? []).find(x => x.id === purchase.id);
+        if (!fresh || Math.abs(purchaseQty(fresh) - q) > 0.0005) { toast.error("The other changes didn't save, so the stock wasn't moved."); return; }
+        // A gem whose lot wasn't changed keeps its label exactly as it was.
+        const key = isGold ? purity : gem && newOtherKey === gemStart ? (purchase.other?.grade || "—") : newOtherKey;
+        const mat = (isGold ? "gold" : materialId || purchase.material) as MaterialKey;
+        const pieces = isOther && Number(pcs) > 0 ? Math.round(Number(pcs)) : undefined;
+        try {
+          await refilePurchaseStock(purchase.id, { material: mat, key, lot: gem ? lotFromDraft(gemLot) : undefined, pieces }, row => {
+            if (row.gold && isGold) row.gold.purity = purity;
+            if (row.other && isOther) {
+              row.other.grade = key;
+              if (pieces) row.other.pieces = pieces; else delete row.other.pieces;
+              row.material = mat as typeof row.material;
+            }
+          }, { userId: user?.id });
+          if (goldMoved || otherMoved) toast.success(`Moved to ${isGold ? `${purity} gold` : `${materialName(db.settings, mat)} · ${key}`}`);
+        } catch (e) { toast.error(e instanceof Error ? e.message : "Couldn't move it in stock."); return; }
       }
       onClose();
     } finally { setSaving(false); }
@@ -188,6 +258,39 @@ export function EditPurchaseDialog({ purchase, onClose, onSave, lockQuantity, lo
           <p className="text-[11px] text-muted-foreground -mt-1">{lockNote}</p>
         )}
 
+        {/* Gold: its purity — where it is counted in stock, and the fine gold a factory gets. */}
+        {isGold && (
+          <div className="grid grid-cols-2 lg:grid-cols-3 gap-3">
+            <div>
+              <Label className="text-xs">Purity</Label>
+              <Select value={purity} onValueChange={setPurity} disabled={lockQuantity}>
+                <SelectTrigger aria-label="Purity" className="h-10 rounded-xl mt-1"><SelectValue placeholder="Purity" /></SelectTrigger>
+                <SelectContent>{[...new Set([...GOLD_PURITIES, purchase.gold?.purity ?? ""].filter(Boolean))].map(x => <SelectItem key={x} value={x}>{x}</SelectItem>)}</SelectContent>
+              </Select>
+            </div>
+            {goldMoved && <p className="col-span-2 self-end text-[11px] font-medium text-primary">Moves from {purchase.gold?.purity} to {purity} gold in stock{purchase.orderId || forOrder ? " (and on the order's factory issue)" : ""} — only if none of it has gone out since.</p>}
+          </div>
+        )}
+
+        {/* Another material: which one, its grade — a gem: its whole lot — and its pieces. */}
+        {isOther && (
+          <div className="space-y-2 rounded-xl border border-border/60 bg-secondary/30 p-3">
+            <div className="grid grid-cols-2 lg:grid-cols-3 gap-3">
+              <div className="min-w-0"><Label className="text-xs">Material</Label><OtherMaterialSelect value={materialId} onChange={v => { setMaterialId(v); setOtherGrade(""); }} className="h-10 rounded-xl mt-1" /></div>
+              {!gem && <div className="min-w-0"><Label className="text-xs">Grade</Label><GradeInput material={materialId} value={otherGrade} onChange={setOtherGrade} className="h-10 rounded-xl mt-1" /></div>}
+              {otherUnit !== "pcs" && (
+                <div>
+                  <Label htmlFor="edit-pur-opcs" className="text-xs">Pcs</Label>
+                  <Input id="edit-pur-opcs" type="number" min={0} step="1" value={pcs} onChange={e => setPcs(e.target.value)} className="rounded-xl h-10 mt-1" placeholder="Optional" />
+                </div>
+              )}
+            </div>
+            {gem && <LooseLotFields idPrefix="edit-pur-gem" compact gem showStone showBag={false} value={gemLot} onChange={p => setGemLot(l => ({ ...l, ...p }))} />}
+            {otherMoved && <p className="text-[11px] font-medium text-primary">Moves from {materialName(db.settings, purchase.material)} · {purchase.other?.grade || "—"} to {materialName(db.settings, materialId)} · {newOtherKey} in stock — only if none of it has gone out since.</p>}
+            {lockQuantity && <p className="text-[11px] text-muted-foreground">It's in a finished piece now — its grade can't move in stock.</p>}
+          </div>
+        )}
+
         {loose && (forOrder ? (
           <p className="text-xs text-muted-foreground rounded-xl border border-border/60 bg-secondary/30 px-3 py-2">
             Bought for an order: {oldKey}{purchase.diamond?.pieces ? ` · ${purchase.diamond.pieces} pcs` : ""} — its stones are corrected on the order.
@@ -206,16 +309,16 @@ export function EditPurchaseDialog({ purchase, onClose, onSave, lockQuantity, lo
           </div>
         ))}
 
+        {/* A certified stone: its shape and its full grading — everything asked when it was bought. */}
         {isCertified && (
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <Label className="text-xs">Report / Certificate #</Label>
-              <Input value={certNo} onChange={e => setCertNo(e.target.value)} className="rounded-xl h-10 mt-1" />
+          <div className="space-y-2 rounded-xl border border-border/60 bg-secondary/30 p-3">
+            <div className="grid grid-cols-2 lg:grid-cols-3 gap-3">
+              <div>
+                <Label htmlFor="edit-pur-shape" className="text-xs">Shape</Label>
+                <ListSelect id="edit-pur-shape" list="diamondShapes" value={certShape} onChange={v => setCertShape(v || "Round")} optional={false} className="h-10 rounded-xl mt-1" />
+              </div>
             </div>
-            <div>
-              <Label className="text-xs">Lab</Label>
-              <Input value={lab} onChange={e => setLab(e.target.value)} className="rounded-xl h-10 mt-1" />
-            </div>
+            <CertGradeFields idPrefix="edit-pur-cert" compact requireReport={hadReport} value={grade} onChange={p => setGrade(g => ({ ...g, ...p }))} />
           </div>
         )}
 
@@ -287,7 +390,7 @@ export function EditPurchaseDialog({ purchase, onClose, onSave, lockQuantity, lo
 
         <div className="flex gap-2 mt-1">
           <Button variant="outline" onClick={onClose} className="rounded-xl flex-1">Cancel</Button>
-          <AsyncButton onClick={submit} disabled={saving || q <= 0} className="btn-hero rounded-xl flex-1">
+          <AsyncButton onClick={submit} disabled={saving || q <= 0 || (isCertified && hadReport && !grade.certNo.trim()) ||(isOther && !materialId)} className="btn-hero rounded-xl flex-1">
             {saving ? "Saving…" : "Save correction"}
           </AsyncButton>
         </div>
