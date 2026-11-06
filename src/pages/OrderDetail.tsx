@@ -102,6 +102,7 @@ import {
 import { decreaseStockSelfHealing, increaseStock, transferStock } from "@/lib/stock";
 import { canVoidPurchase, voidPurchase as voidPurchaseCascade, purchaseLabel, voidImpact, canEditPurchase, purchaseEditScope, editPurchase, type PurchaseEdit } from "@/lib/purchaseVoid";
 import { EditPurchaseDialog } from "@/components/EditPurchaseDialog";
+import { IssueExtraFields, issueExtraDraft, issueExtraEdit, type IssueExtraDraft } from "@/components/IssuanceEditSheet";
 import { canEditIssuance, editIssuance, deleteIssuance, issuanceVoidImpact, isStockIssuance } from "@/lib/issuanceEdit";
 import { receiptForAdvance, deleteReceipt, deleteImpact, receiptCancelBlocker } from "@/lib/receipts";
 import { ccy, ccySymbol, fmtCcy, rateText, roundCcy, tableRate } from "@/lib/currency";
@@ -442,6 +443,7 @@ function OrderDetailPageBody() {
   // the stones stayed out of stock. See src/lib/issuanceEdit.ts.
   const [editingIssuance, setEditingIssuance] = useState<MaterialIssuance | null>(null);
   const [isf, setIsf] = useState({ qty: "", bucket: "", charge: "", notes: "" });
+  const [issueExtra, setIssueExtra] = useState<IssueExtraDraft>({ pcs: "", rate: "" });
   const [savingIssuance, setSavingIssuance] = useState(false);
   const [removingIssuanceId, setRemovingIssuanceId] = useState<string | null>(null);
 
@@ -467,6 +469,7 @@ function OrderDetailPageBody() {
     const check = canEditIssuance(db, mi);
     if (!check.ok) { toast.error(check.reason!); return; }
     setEditingIssuance(mi);
+    setIssueExtra(issueExtraDraft(mi));
     setIsf({
       qty: String(mi.quantityIssued), bucket: mi.purityOrQuality,
       charge: mi.makingCharges.amountInr ? String(mi.makingCharges.amountInr) : "",
@@ -483,6 +486,7 @@ function OrderDetailPageBody() {
         purityOrQuality: isf.bucket,
         chargeAmount: isf.charge === "" ? undefined : Number(isf.charge) || 0,
         notes: isf.notes,
+        ...issueExtraEdit(editingIssuance, issueExtra, editingIssuance.diamondKind !== "certified" && Math.abs((Number(isf.qty) || editingIssuance.quantityIssued) - editingIssuance.quantityIssued) > 0.0005),
       }, user!.id);
       toast.success("Corrected — stock moved by the difference");
       setEditingIssuance(null);
@@ -5579,6 +5583,7 @@ The piece then takes ours — add them from stock or buy them, as for any order.
             )}
           </div>
         </div>
+        <IssueExtraFields mi={editingIssuance} value={issueExtra} onChange={setIssueExtra} qty={Number(isf.qty) || 0} />
         <div>
           <Label className="text-xs">Making charge (₹)</Label>
           <Input type="number" min={0} step="0.01" value={isf.charge}

@@ -7,7 +7,7 @@ import { useDb } from "@/hooks/useDb";
 import { DIAMOND_SHAPES, type MaterialIssuance } from "@/lib/db";
 import { editIssuance, isPoolDelivery, isPoolDraw } from "@/lib/issuanceEdit";
 import { factoryPoolBalance } from "@/lib/manufacturing";
-import { companyOf } from "@/lib/companies";
+import { companyById, companyOf, hasCompanies } from "@/lib/companies";
 import { isOtherMaterial, materialName, materialUnit } from "@/lib/materials";
 import { ActionSheet } from "@/components/ActionSheet";
 import { AsyncButton } from "@/components/AsyncButton";
@@ -17,6 +17,59 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 
 const GOLD_PURITIES = ["9K", "10K", "14K", "18K", "22K", "24K"];
+
+/** What an issue asked besides its weight and grade, as typed in the edit forms. */
+export interface IssueExtraDraft { pcs: string; rate: string }
+export const issueExtraDraft = (mi: MaterialIssuance): IssueExtraDraft => ({
+  pcs: mi.piecesIssued != null ? String(mi.piecesIssued) : "",
+  rate: mi.diamondSpec?.ratePerCaratInr ? String(mi.diamondSpec.ratePerCaratInr) : mi.diamondSpec?.amountInr && mi.quantityIssued > 0 ? String(Math.round(mi.diamondSpec.amountInr / mi.quantityIssued * 100) / 100) : "",
+});
+const looseOf = (mi: MaterialIssuance | null) => mi?.material === "diamond" && mi.diamondKind !== "certified";
+/** Only what changed is sent — a field left as it was changes nothing. */
+export function issueExtraEdit(mi: MaterialIssuance, x: IssueExtraDraft, qtyChanged: boolean): { pieces?: number | null; diamondRate?: number | null } {
+  if (!looseOf(mi)) return {};
+  const was = issueExtraDraft(mi);
+  return {
+    ...(x.pcs !== was.pcs ? { pieces: Number(x.pcs) > 0 ? Number(x.pcs) : null } : {}),
+    // The amount is rate × carats, so a weight change re-works it too.
+    ...(x.rate !== was.rate || (qtyChanged && Number(x.rate) > 0) ? { diamondRate: Number(x.rate) > 0 ? Number(x.rate) : null } : {}),
+  };
+}
+
+/**
+ * Everything else the issue forms asked (order page, factory page, Buy & Assign):
+ * loose stones' count and the price a carat typed for them; and, fixed with the
+ * reason, the factory and the company it went to.
+ */
+export function IssueExtraFields({ mi, value, onChange, qty }: { mi: MaterialIssuance | null; value: IssueExtraDraft; onChange: (x: IssueExtraDraft) => void; qty: number }) {
+  const db = useDb();
+  if (!mi) return null;
+  const loose = looseOf(mi);
+  const factory = db.factories.find(x => x.id === mi.factoryId)?.name ?? "—";
+  const multi = hasCompanies(db.settings);
+  return (
+    <div className="space-y-2">
+      {loose && (
+        <div className="grid grid-cols-2 gap-3">
+          <div>
+            <Label htmlFor="issue-pcs" className="text-xs">Pcs</Label>
+            <Input id="issue-pcs" type="number" min={0} step="1" value={value.pcs} onChange={e => onChange({ ...value, pcs: e.target.value })} className="rounded-xl h-10 mt-1" placeholder="Optional" />
+          </div>
+          {mi.orderId && (
+            <div>
+              <Label htmlFor="issue-rate" className="text-xs">Rate / ct (₹)</Label>
+              <Input id="issue-rate" type="number" min={0} step="0.01" value={value.rate} onChange={e => onChange({ ...value, rate: e.target.value })} className="rounded-xl h-10 mt-1" placeholder="Stock average" />
+              {Number(value.rate) > 0 && qty > 0 && <p className="text-[11px] text-muted-foreground mt-1">Amount ₹{(Math.round(Number(value.rate) * qty * 100) / 100).toLocaleString("en-IN")} — the order's cost uses it.</p>}
+            </div>
+          )}
+        </div>
+      )}
+      <p className="text-[11px] text-muted-foreground">
+        Factory: <span className="font-medium text-foreground">{factory}</span>{multi ? <> · Company: <span className="font-medium text-foreground">{companyById(db.settings, companyOf(mi)).name}</span></> : null} — to give it to another {multi ? "factory or company" : "factory"}, cancel this issue and issue it again.
+      </p>
+    </div>
+  );
+}
 
 /**
  * Correct material issued to a factory — an order's issue, a bulk delivery or
@@ -29,8 +82,10 @@ export function IssuanceEditSheet({ issuance, onClose }: { issuance: MaterialIss
   const { user } = useAuth();
   const db = useDb();
   const [f, setF] = useState({ qty: "", bucket: "", charge: "", notes: "" });
+  const [extra, setExtra] = useState<IssueExtraDraft>({ pcs: "", rate: "" });
   useEffect(() => {
     if (!issuance) return;
+    setExtra(issueExtraDraft(issuance));
     setF({
       qty: String(issuance.quantityIssued), bucket: issuance.purityOrQuality,
       charge: issuance.makingCharges.amountInr ? String(issuance.makingCharges.amountInr) : "",
@@ -57,6 +112,7 @@ export function IssuanceEditSheet({ issuance, onClose }: { issuance: MaterialIss
         purityOrQuality: f.bucket,
         chargeAmount: charged ? (f.charge === "" ? undefined : Number(f.charge) || 0) : undefined,
         notes: f.notes,
+        ...issueExtraEdit(mi, extra, !certified && Math.abs(qty - mi.quantityIssued) > 0.0005),
       }, user!.id);
       toast.success(isPoolDraw(mi) ? "Corrected — the factory's pool follows it" : "Corrected — stock moved by the difference");
       onClose();
@@ -134,6 +190,7 @@ export function IssuanceEditSheet({ issuance, onClose }: { issuance: MaterialIss
             {mi && isPoolDelivery(mi) ? " This can come down by at most that — what orders have already drawn can't be taken back here." : " A bigger draw needs that much in the pool."}
           </p>
         )}
+        <IssueExtraFields mi={mi} value={extra} onChange={setExtra} qty={Number(f.qty) || 0} />
         {charged && (
           <div>
             <Label htmlFor="issue-charge" className="text-xs">Making charge (₹)</Label>

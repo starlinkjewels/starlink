@@ -325,6 +325,69 @@ export async function refileOpeningLot(opened: StockMovement, spec: LotSpec, pie
 }
 
 /**
+ * Move an opening entry to where it is really counted — gold's purity, another
+ * material's grade (a gem's lot), a loose lot, or whose stock it is (company) —
+ * when it was entered wrong. The old place must still hold all of it (nothing
+ * issued, used or sold out of it since), exactly as removing the entry would
+ * require; refused, nothing has changed. Same place: only its lot parts / pieces.
+ */
+export function openingMoveProblem(live: DB, opened: StockMovement): string | undefined {
+  const m = liveOpening(live, opened, "This opening stock was removed by someone else — reopen and try again.");
+  if (typeof m === "string") return m;
+  if (m.purityOrQuality === "Certified") return "A certified stone is corrected on its own packet.";
+  const refused = openingRefusal(live, m, null);
+  return refused?.replace("Correct it down to what is left, or cancel those first.", "Only what is still there can move — cancel those first.");
+}
+
+export async function moveOpeningStock(
+  opened: StockMovement,
+  to: { purityOrQuality: string; companyId: string; lot?: LotSpec; pieces?: number },
+  deps: OpeningDeps & { userId?: string } = {},
+): Promise<void> {
+  const live = (deps.load ?? loadDb)();
+  const m = liveOpening(live, opened, "This opening stock was removed by someone else — reopen and try again.");
+  if (typeof m === "string") throw new Error(m);
+  const key = to.purityOrQuality.trim() || "—";
+  const co = to.companyId || "main";
+  const lotRow = to.lot ? Object.fromEntries(Object.entries(tidySpec(to.lot)).filter(([, v]) => v)) as StockMovement["lot"] : undefined;
+  const pcs = to.pieces != null && to.pieces > 0 ? Math.round(to.pieces) : undefined;
+  const update = deps.update ?? updateDb;
+  const setDetails = (row: StockMovement) => {
+    if (lotRow) row.lot = lotRow; else if (m.material !== "diamond") delete row.lot;
+    if (pcs) row.pieces = pcs; else delete row.pieces;
+  };
+  if (key === m.purityOrQuality && co === coOf(m)) {
+    update(d => { const row = (d.stockMovements ?? []).find(x => x.id === m.id); if (row) setDetails(row); });
+    return;
+  }
+  const problem = openingMoveProblem(live, m);
+  if (problem) throw new Error(problem);
+  const adjust = deps.adjust ?? adjustStockCounter;
+  const moves = live.stockMovements ?? [];
+  const toCo = co === "main" ? undefined : co;
+  // Out of the old place first (floor-checked); if the entry moved on meanwhile, give it back.
+  await adjust({ material: m.material, companyId: m.companyId, purityOrQuality: m.purityOrQuality, delta: -m.quantity }, moves);
+  let changed = false;
+  update(d => {
+    const row = (d.stockMovements ?? []).find(x => x.id === m.id);
+    if (!row || openingBasis(row) !== openingBasis(m)) { changed = true; return; }
+    row.purityOrQuality = key;
+    if (toCo) row.companyId = toCo; else delete row.companyId;
+    setDetails(row);
+    if (m.material === "diamond") addBags(d, [key], deps.userId);
+  });
+  if (changed) {
+    await adjust({ material: m.material, companyId: m.companyId, purityOrQuality: m.purityOrQuality, delta: m.quantity }, moves);
+    throw new Error(OPENING_CHANGED);
+  }
+  try {
+    await adjust({ material: m.material, companyId: toCo, purityOrQuality: key, delta: m.quantity }, moves);
+  } catch (e) {
+    throw new Error(`Moved — but the stock counter for its new place did not go up (${e instanceof Error ? e.message : String(e)}). Use Recompute from history on the Stock page.`);
+  }
+}
+
+/**
  * Move a loose-diamond PURCHASE into another bag — its shape, mm, sieve, colour
  * or clarity were entered wrong — and set its piece count. Every stock entry the
  * purchase made (the purchase itself and any later corrections of it) moves

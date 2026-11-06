@@ -137,6 +137,11 @@ export interface IssuanceEdit {
   purityOrQuality?: string;
   chargeAmount?: number;
   notes?: string;
+  /** Loose diamonds: how many stones went out (null/0 clears it). Its stock line's count follows. */
+  pieces?: number | null;
+  /** Loose diamonds: the price a carat typed when they went out (null/0 clears it — the
+   *  order's cost then uses the stock's average); its amount is this × the carats. */
+  diamondRate?: number | null;
 }
 
 /** Said when the record moved on while the panel was open — the figures it
@@ -334,6 +339,28 @@ export function applyIssuanceEdit(d: DB, plan: IssuancePlan, edit: IssuanceEdit,
   }
   if (edit.chargeAmount != null) live.makingCharges.amountInr = Math.round(edit.chargeAmount * 100) / 100;
   if (edit.notes !== undefined) live.notes = edit.notes.trim() || undefined;
+  if (live.material === "diamond" && live.diamondKind !== "certified") {
+    // How many stones: on the issue, and on its own stock line while it is still in the
+    // same lot (the bag's count follows; a count that can't be trusted shows as unknown).
+    if (edit.pieces !== undefined) {
+      const pcs = edit.pieces && edit.pieces > 0 ? Math.round(edit.pieces) : undefined;
+      if (pcs) live.piecesIssued = pcs; else delete live.piecesIssued;
+      if (plan.newBucket === plan.oldBucket) {
+        const mine = (d.stockMovements ?? []).filter(m => m.type === "issuance_out" && m.refType === "materialIssuance" && m.refId === live.id && m.purityOrQuality === live.purityOrQuality && m.material === "diamond");
+        const row = mine.find(m => m.pieces != null) ?? mine.find(m => !m.reversesId);
+        if (row) { if (pcs) row.pieces = pcs; else delete row.pieces; }
+      }
+    }
+    // The price a carat typed for them: the order's cost uses it (amount = rate × carats).
+    if (edit.diamondRate !== undefined) {
+      const rate = edit.diamondRate && edit.diamondRate > 0 ? Math.round(edit.diamondRate * 100) / 100 : 0;
+      if (rate > 0) live.diamondSpec = { ...(live.diamondSpec ?? {}), ratePerCaratInr: rate, amountInr: Math.round(rate * live.quantityIssued * 100) / 100 };
+      else if (live.diamondSpec) {
+        const { ratePerCaratInr: _r, amountInr: _a, ...rest } = live.diamondSpec;
+        if (Object.values(rest).some(v => v)) live.diamondSpec = rest; else delete live.diamondSpec;
+      }
+    }
+  }
 
   const o = d.orders.find(x => x.id === live.orderId);
   if (o) {
