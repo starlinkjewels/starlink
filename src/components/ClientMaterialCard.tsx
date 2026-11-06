@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { Link } from "react-router-dom";
-import { Coins, Gem, PackageOpen, Trash2, Undo2 } from "lucide-react";
+import { Coins, Gem, PackageOpen, Pencil, Trash2, Undo2 } from "lucide-react";
 import { toast } from "sonner";
 import { SectionTitle } from "@/components/SectionTitle";
 import { StatStrip } from "@/components/TableToolbar";
@@ -22,6 +22,8 @@ export function ClientMaterialCard({ clientId }: { clientId: string }) {
   const db = useDb();
   const { user } = useAuth();
   const [sheet, setSheet] = useState<"receive" | "return" | null>(null);
+  // A received / handed-back line being corrected — the same form, filled with it.
+  const [editing, setEditing] = useState<ClientMaterialEntry | null>(null);
   const client = db.clients.find(c => c.id === clientId);
   if (!client) return null;
   const ledger = client.materialLedger ?? [];
@@ -86,6 +88,7 @@ export function ClientMaterialCard({ clientId }: { clientId: string }) {
         {ledger.length > 0 ? (
           <DataTable id="client-material" noun="movement" rows={ledger} rowKey={e => e.id} columns={columns} defaultSort={{ key: "date", dir: "desc" }} details={false}
             rowActions={isStaff ? e => [
+              { label: "Edit", icon: Pencil, show: e.kind !== "use", hint: "Everything it was entered with", onSelect: () => setEditing(e) },
               { label: "Delete", icon: Trash2, danger: true, show: e.kind !== "use", onSelect: () => { void remove(e); } },
               { label: "Used at Final Approval", icon: Coins, show: e.kind === "use", disabled: true, hint: "Changes when the order's Final Approval is saved again", onSelect: () => undefined },
             ] : undefined} />
@@ -94,6 +97,7 @@ export function ClientMaterialCard({ clientId }: { clientId: string }) {
         )}
       </div>
       {sheet && <ClientMaterialSheet clientId={clientId} mode={sheet} onClose={() => setSheet(null)} />}
+      {editing && <ClientMaterialSheet key={editing.id} clientId={clientId} mode={editing.kind === "out" ? "return" : "receive"} entry={editing} onClose={() => setEditing(null)} />}
     </div>
   );
 }

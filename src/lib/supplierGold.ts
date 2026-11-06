@@ -386,6 +386,88 @@ export async function deleteGoldEntry(supplierId: string, movementId: string, wh
   }
 }
 
+/** The history as if this line had never been written — what a correction is checked against. */
+const without = <T extends GoldData>(d: T, movementId: string): T => ({ ...d, stockMovements: (d.stockMovements ?? []).filter(x => x.id !== movementId) });
+
+/**
+ * Why a loan or a return can't be corrected to `next` — or null. Checked as if the
+ * line were never there and the corrected one written instead: a loan's gold must
+ * still all be in stock (it comes out again first) and what was given back or
+ * billed against it must still be owed; a return is checked as a fresh return.
+ */
+export function goldEntryEditProblem(d: GoldData & Pick<DB, "settings">, s: Supplier | undefined, e: SupplierGoldEntry, next: GoldMove): string | null {
+  if (!s) return "That supplier is not there any more";
+  if (e.kind === "toBill") return "It is a bill — correct it in Purchase History";
+  const sim = without(d, e.id);
+  if (e.kind === "loanIn") {
+    const p = loanProblem(s, next);
+    if (p) return p;
+    const have = goldInStock(d, e.companyId)[e.purity] ?? 0;
+    if (have + EPS < e.grams) return `Only ${fmtG(Math.max(0, have))} of ${e.purity} gold is in stock — the rest has been used, so this loan can't be changed`;
+    const same = (coOf(next.companyId) ?? "main") === (e.companyId ?? "main");
+    const owed = owedIn(sim, s, e.companyId) + (same ? goldFine(r3(next.grams), next.purity) : 0);
+    if (owed < -EPS) return `Gold has been given back or billed against it${coWords(d, e.companyId)} — that much must still be owed`;
+    return null;
+  }
+  return returnProblem(sim, s, next);
+}
+
+/**
+ * Correct a loan or a return entered wrong — its grams, purity, company, date or
+ * note. A note alone is changed on the line itself. Anything else: the line is
+ * cancelled (a line the other way that names it, as deleting it does) and the
+ * corrected one written — in the order where the one step that can be refused
+ * comes first: a loan's gold comes out again before the corrected loan goes in;
+ * a return's gold goes back in, then the corrected return comes out — refused,
+ * the first return is written again, so nothing is left half done.
+ */
+export async function editGoldEntry(supplierId: string, movementId: string, next: GoldMove, who: Who): Promise<void> {
+  if (busy.has(supplierId)) throw new Error("Already saving a change to their gold — a moment");
+  const live = loadDb();
+  const s = live.suppliers.find(x => x.id === supplierId);
+  const m = (live.stockMovements ?? []).find(x => x.id === movementId);
+  const e = s ? supplierGoldEntries(live, supplierId).find(x => x.id === movementId) : undefined;
+  if (!s || !m || !e || !isLoanMove(m) || m.refId !== supplierId) throw new Error("That line was deleted meanwhile — reopen it");
+  const grams = r3(next.grams);
+  const co = coOf(next.companyId);
+  const note = next.note?.trim() || undefined;
+  const sameMove = grams === e.grams && next.purity === e.purity && (co ?? "main") === (e.companyId ?? "main") && next.at === e.at;
+  if (sameMove) {
+    if ((note ?? "") === (e.note ?? "")) return;
+    updateDbAs({ summary: `Corrected the note on a gold ${e.kind === "loanIn" ? "loan from" : "return to"} ${s.name}` }, d => {
+      const row = (d.stockMovements ?? []).find(x => x.id === movementId);
+      if (!row) return;
+      if (note) row.note = note; else delete row.note;
+    });
+    return;
+  }
+  const why = goldEntryEditProblem(live, s, e, next);
+  if (why) throw new Error(why);
+  busy.add(supplierId);
+  try {
+    const args = { material: "gold" as const, companyId: co, purityOrQuality: next.purity, quantity: grams, refType: "supplierLoan" as const, refId: supplierId, fine: goldFine(grams, next.purity), createdBy: who.id, createdAt: next.at, note };
+    if (e.kind === "loanIn") {
+      await reverseMovement(m, who.id, `Gold loan from ${s.name} corrected — taken back out, entered again`);
+      try { await increaseStock(args); }
+      catch (err) { throw new Error(`The first loan was taken out but the corrected one wasn't written (${err instanceof Error ? err.message : String(err)}) — take it on loan again.`); }
+    } else {
+      await reverseMovement(m, who.id, `Return to ${s.name} corrected — back in stock, entered again`);
+      try {
+        await decreaseStockSelfHealing({ ...args, type: "issuance_out" }, loadDb().stockMovements ?? []);
+      } catch (err) {
+        // Refused: the first return is written again, as it was.
+        await decreaseStockSelfHealing({
+          material: "gold", companyId: m.companyId, purityOrQuality: m.purityOrQuality, quantity: Math.abs(m.quantity), type: "issuance_out",
+          refType: "supplierLoan", refId: supplierId, fine: m.fine ?? goldFine(Math.abs(m.quantity), m.purityOrQuality), createdBy: m.createdBy, createdAt: m.createdAt, note: m.note,
+        }, loadDb().stockMovements ?? []).catch(() => {});
+        throw new Error(err instanceof Error ? err.message : "The corrected return wasn't written — the first one stands");
+      }
+    }
+  } finally {
+    busy.delete(supplierId);
+  }
+}
+
 /** Gold we already owed them when the app started, in fine grams (0 clears it) — the first company's. */
 export function setOpeningGold(supplierId: string, fine: number, date: string | undefined): void {
   const f = r3(Number(fine) || 0);

@@ -97,6 +97,30 @@ export function returnClientMaterial(d: DB, clientId: string, e: Omit<ClientMate
   return entry;
 }
 
+/**
+ * Correct a "received" or "handed back" line entered wrong — everything it was entered
+ * with; it keeps its moment and who entered it. Refused (nothing changed) when what
+ * is held for them would fall below what is already at a factory or in their pieces.
+ * A "used" line changes only when the order's Final Approval is saved again.
+ */
+export function editClientMaterial(d: DB, clientId: string, entryId: string, e: Omit<ClientMaterialEntry, "id" | "at" | "by" | "byName" | "kind">): ClientMaterialEntry {
+  const c = d.clients.find(x => x.id === clientId);
+  if (!c) throw new Error("That client is not there any more");
+  const L = c.materialLedger ?? [];
+  const old = L.find(x => x.id === entryId);
+  if (!old) throw new Error("That entry was deleted meanwhile");
+  if (old.kind === "use") throw new Error("Used at Final Approval — it changes when the order's Final Approval is saved again");
+  const next: ClientMaterialEntry = { ...clean({ ...e, orderId: e.orderId ?? old.orderId }), id: old.id, at: old.at, by: old.by, byName: old.byName, kind: old.kind };
+  if (next.material === "gold") next.fine = r3((next.grams ?? 0) * (next.purity ?? 0) / 1000);
+  const ledger = L.map(x => (x.id === entryId ? next : x));
+  const b = clientMaterialBalance(d, { ...c, materialLedger: ledger });
+  if (b.goldFine - b.goldAtFactory < -0.0005 || b.diaCt - b.diaAtFactory < -0.0005) {
+    throw new Error("Some of their material has already gone to a factory or into their pieces — it can't come down that far");
+  }
+  c.materialLedger = ledger;
+  return next;
+}
+
 /** Their diamonds to the order's factory, for this order. */
 export function sendClientDiamonds(d: DB, order: Order, s: { ct: number; pcs?: number; certified?: boolean; shape?: string; type?: string; mm?: string; size?: string; color?: string; clarity?: string; certLab?: string; certNo?: string }, who: Who, at = new Date().toISOString()): MaterialIssuance {
   const c = d.clients.find(x => x.id === order.clientId);

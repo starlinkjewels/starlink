@@ -16,7 +16,7 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 
 const fieldsOf = (c: Client): Partial<Client> => ({
-  companyName: c.companyName, ownerName: c.ownerName, phone: c.phone,
+  companyName: c.companyName, ownerName: c.ownerName, email: c.email ?? "", phone: c.phone,
   country: c.country, zip: c.zip, gstVat: c.gstVat, address: c.address, shippingAddress: c.shippingAddress,
   accountManagerId: c.accountManagerId,
   companyId: companyIdOfClient(c),
@@ -47,6 +47,9 @@ export function ClientEditDialog({ clientId, onClose }: { clientId: string | nul
   const [ef, setEf] = useState<Partial<Client>>({});
   const [shown, setShown] = useState<string | null>(null);
   const [savingEdit, setSavingEdit] = useState(false);
+  // With a sign-in, their email is that login — changed in the login section (through the server).
+  // Without one, it is only how we reach them, and is corrected here like any other detail.
+  const hasLogin = !!clientId && db.users.some(u => u.clientId === clientId && !!u.authUid);
 
   // Start from the client's current details each time one is opened.
   if (clientId !== shown && (!clientId || client)) {
@@ -57,6 +60,8 @@ export function ClientEditDialog({ clientId, onClose }: { clientId: string | nul
   const saveEdit = async () => {
     if (!clientId) return;
     if (!ef.companyName?.trim()) { toast.error("Company name is required"); return; }
+    const email = (ef.email ?? "").trim().toLowerCase();
+    if (!hasLogin && email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { toast.error("Check the email"); return; }
     setSavingEdit(true);
     try {
       updateDbAs({ summary: `Edited client ${ef.companyName.trim()}` }, d => {
@@ -65,6 +70,7 @@ export function ClientEditDialog({ clientId, onClose }: { clientId: string | nul
         c.companyName = ef.companyName!.trim();
         c.ownerName = ef.ownerName?.trim() || "";
         c.phone = ef.phone?.trim() || "";
+        if (!hasLogin) c.email = email;
         c.country = ef.country?.trim() || "";
         c.zip = ef.zip?.trim() || undefined;
         c.gstVat = ef.gstVat?.trim() || "";
@@ -108,7 +114,7 @@ export function ClientEditDialog({ clientId, onClose }: { clientId: string | nul
       }
     >
       <div className="grid grid-cols-2 lg:grid-cols-3 gap-3">
-        {(["companyName", "ownerName", "phone", "country", "zip", "gstVat", "address", "shippingAddress"] as const).map(k => (
+        {(["companyName", "ownerName", "email", "phone", "country", "zip", "gstVat", "address", "shippingAddress"] as const).map(k => (
           <div key={k} className={k === "address" || k === "shippingAddress" || k === "companyName" ? "col-span-2" : ""}>
             <Label className="text-xs capitalize" htmlFor={`client-edit-${k}`}>
               {k === "zip" ? "ZIP / Postal Code" : k === "gstVat" ? "GST / VAT" : k === "address" ? "Billing address" : k === "shippingAddress" ? "Shipping address" : k.replace(/([A-Z])/g, " $1")}
@@ -116,10 +122,13 @@ export function ClientEditDialog({ clientId, onClose }: { clientId: string | nul
             </Label>
             <Input
               id={`client-edit-${k}`}
+              type={k === "email" ? "email" : "text"}
               value={(ef as Record<string, string>)[k] || ""}
               onChange={e => setEf({ ...ef, [k]: e.target.value })}
-              className="rounded-xl mt-1"
+              disabled={k === "email" && hasLogin}
+              className="rounded-xl mt-1 disabled:opacity-70"
             />
+            {k === "email" && hasLogin && <p className="text-[11px] text-muted-foreground mt-1">Their sign-in — {user!.role === "admin" ? "changed in Login below" : "an admin changes it in Login"}.</p>}
           </div>
         ))}
       </div>
