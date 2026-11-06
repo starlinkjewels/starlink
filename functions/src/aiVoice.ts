@@ -10,9 +10,11 @@ import { db } from "./lib/firestoreAdmin";
 import { resolveCaller } from "./lib/scope";
 import { speechToText, textToSpeech } from "./lib/sarvam";
 import { REGION } from "./region";
+import { OWNER_EMAILS as OWNERS } from "./summaries";
 
 const SARVAM_API_KEY = defineSecret("SARVAM_API_KEY");
-const OWNER_EMAILS = ["marketing.starlinkjewels@gmail.com", "admin@starlinkjewels.com"];
+// The business's owners: each app's own list (summaries.ts), never another's.
+const OWNER_EMAILS = OWNERS.diamondflow;
 const DAILY_VOICE = 600;
 /** About a minute of speech, compressed. */
 const MAX_AUDIO_BYTES = 1_500_000;
