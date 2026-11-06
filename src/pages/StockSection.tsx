@@ -7,7 +7,7 @@ import { companyOf, coField, companyById } from "@/lib/companies";
 import { useCan } from "@/hooks/useCan";
 import { fmtCcy, rateText } from "@/lib/currency";
 import { filled, noteText, recorded, refLink, type Detail } from "@/components/rowDetails";
-import { fmtDate, loadDb, updateDb, DIAMOND_SHAPES, nextDiamondStockNumber, type DiamondPacket, type StockMovement, type Purchase } from "@/lib/db";
+import { dayOf, fmtDate, loadDb, updateDb, DIAMOND_SHAPES, nextDiamondStockNumber, type DiamondPacket, type StockMovement, type Purchase } from "@/lib/db";
 import { useDb } from "@/hooks/useDb";
 import { useAuth } from "@/lib/auth";
 import { stockBucketHistory, deriveStockBalances, fmtMoneyInr } from "@/lib/manufacturing";
@@ -737,7 +737,20 @@ function CertifiedSection() {
           measurement: clean(p.measurement?.trim()),
           certificateNumber: p.certificateNumber.trim(),
           certificateLab: clean(p.certificateLab?.trim()),
+          quality: clean(p.quality?.trim()),
+          note: clean(p.note?.trim()),
+          // Only opening stock (no purchase behind it) has an as-of date of its own.
+          ...(d.diamondPackets[idx].purchaseId ? {} : { createdAt: p.createdAt }),
         };
+        // The purchase it was bought on describes the same stone: its shape and grading follow.
+        const pk = d.diamondPackets[idx];
+        const pu = pk.purchaseId ? (d.purchases ?? []).find(x => x.id === pk.purchaseId) : undefined;
+        if (pu?.diamond?.kind === "certified") {
+          pu.diamond.shape = pk.shape;
+          for (const k of ["type", "color", "clarity"] as const) { if (pk[k]) pu.diamond[k] = pk[k]; else delete pu.diamond[k]; }
+          pu.diamond.certificateNumber = pk.certificateNumber || pu.diamond.certificateNumber;
+          if (pk.certificateLab) pu.diamond.certificateLab = pk.certificateLab; else delete pu.diamond.certificateLab;
+        }
       }
     });
     toast.success(`Certified diamond updated${billNote}`);
@@ -957,6 +970,25 @@ function CertifiedSection() {
                   Stone value {editPacket.carat > 0 && Number(editRate) > 0 ? fmtMoneyInr(Math.round(Number(editRate) * editPacket.carat)) : "—"}.
                   {editPacket.purchaseId ? " Changing the carat or rate corrects the supplier’s bill for this stone too." : ""}
                 </p>
+              </div>
+              <div>
+                <Label htmlFor="edit-pk-quality" className="text-xs">Quality</Label>
+                <Input id="edit-pk-quality" value={editPacket.quality ?? ""} onChange={e => setEditPacket({ ...editPacket, quality: e.target.value })} className="rounded-xl mt-1" placeholder="Optional" />
+              </div>
+              {/* Opening stock (no purchase behind it): the date it was owned as of. */}
+              {!editPacket.purchaseId ? (
+                <div>
+                  <Label htmlFor="edit-pk-date" className="text-xs">As of date</Label>
+                  <Input id="edit-pk-date" type="date" value={dayOf(editPacket.createdAt)} onChange={e => {
+                    const day = e.target.value; if (!day) return;
+                    const o = new Date(editPacket.createdAt); const [y, mo, dd] = day.split("-").map(Number);
+                    setEditPacket({ ...editPacket, createdAt: new Date(y, (mo || 1) - 1, dd || 1, o.getHours(), o.getMinutes(), o.getSeconds(), o.getMilliseconds()).toISOString() });
+                  }} className="rounded-xl mt-1" />
+                </div>
+              ) : <div />}
+              <div className="col-span-2">
+                <Label htmlFor="edit-pk-note" className="text-xs">Note</Label>
+                <Input id="edit-pk-note" value={editPacket.note ?? ""} onChange={e => setEditPacket({ ...editPacket, note: e.target.value })} className="rounded-xl mt-1" placeholder="Optional" />
               </div>
               {/* Its report — the same fields as when it was bought. */}
               <div className="col-span-2">

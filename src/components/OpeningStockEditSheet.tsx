@@ -8,11 +8,18 @@ import { bagNoOf } from "@/lib/diamondBags";
 import { LooseLotFields, lotFromDraft, type LooseLotDraft } from "@/components/LotFields";
 import { useAuth } from "@/lib/auth";
 import { dayOf, type DB, type StockMovement } from "@/lib/db";
-import { fmtQty, materialName, materialUnit } from "@/lib/materials";
+import { fmtQty, materialDef, materialName, materialUnit } from "@/lib/materials";
+import { GradeInput } from "@/components/MaterialFields";
+import { CompanyPicker } from "@/components/CompanyFields";
+import { hasCompanies } from "@/lib/companies";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { fmtMoneyInr } from "@/lib/manufacturing";
 import {
-  deleteOpeningStock, editOpeningStock, openingDeleteImpact, openingRefusal, openingRoom, refileOpeningLot,
+  deleteOpeningStock, editOpeningStock, moveOpeningStock, openingDeleteImpact, openingMoveProblem, openingRefusal, openingRoom, refileOpeningLot,
 } from "@/lib/openingStock";
+
+/** Gold purities, as the opening-stock form offers them. */
+const GOLD_PURITIES = ["9K", "10K", "14K", "18K", "22K", "24K"];
 import { confirmBox } from "@/lib/confirm";
 import type { MoreAction } from "@/components/MoreMenu";
 import { ActionSheet } from "@/components/ActionSheet";
@@ -56,7 +63,7 @@ export function openingStockActions(db: DB, m: StockMovement, opts: {
   const blocked = opts.deleteDenied ? undefined : openingRefusal(db, m, null);
   return [
     { label: "Edit opening stock", icon: Pencil, onSelect: opts.onEdit, disabled: !!opts.editDenied,
-      hint: opts.editDenied ?? "Quantity, value, date and note" },
+      hint: opts.editDenied ?? "Everything it was entered with" },
     { label: "Remove opening stock", icon: Trash2, danger: true, onSelect: () => removeOpeningStock(db, m),
       disabled: !!opts.deleteDenied || !!blocked,
       hint: opts.deleteDenied ?? blocked ?? "It comes out of stock; nothing else changes" },
@@ -64,9 +71,11 @@ export function openingStockActions(db: DB, m: StockMovement, opts: {
 }
 
 /**
- * Correct an opening-stock entry: how much, what it was worth, as of when, and
- * its note. The stock counter moves by the difference; the entry's own line in
- * the ledger is corrected where it stands.
+ * Correct an opening-stock entry — everything the opening-stock form asked: how
+ * much, what it was worth, as of when, its note, and where it is counted (gold's
+ * purity, another material's grade or a gem's lot, a loose lot, whose stock).
+ * The stock counter moves by the difference; the entry's own line in the ledger
+ * is corrected where it stands.
  */
 export function OpeningStockEditSheet({ movement, onClose }: { movement: StockMovement | null; onClose: () => void }) {
   const db = useDb();
@@ -75,6 +84,11 @@ export function OpeningStockEditSheet({ movement, onClose }: { movement: StockMo
   // Loose diamonds: the bag it is in (shape · mm · sieve · colour · clarity) and its pieces.
   const [lot, setLot] = useState<LooseLotDraft>({ shape: "Round", mm: "", size: "", color: "", clarity: "" });
   const [pcs, setPcs] = useState("");
+  // Gold's purity / another material's grade, and whose stock it is.
+  const [key, setKey] = useState("");
+  const [company, setCompany] = useState("main");
+  // A gem's lot as it was read in: only a change from it moves anything.
+  const [gemStart, setGemStart] = useState("");
   useEffect(() => {
     if (movement) {
       setF({
@@ -84,6 +98,9 @@ export function OpeningStockEditSheet({ movement, onClose }: { movement: StockMo
       const p = lotParts(movement.purityOrQuality, movement.lot);
       setLot({ shape: p.shape, type: p.type ?? "", mm: p.mm ?? "", size: p.size ?? "", color: p.color ?? "", clarity: p.clarity ?? "" });
       setPcs(movement.pieces != null ? String(movement.pieces) : "");
+      setKey(movement.purityOrQuality === "—" ? "" : movement.purityOrQuality);
+      setCompany(movement.companyId || "main");
+      setGemStart(lotKey(lotFromDraft({ shape: p.shape, type: p.type ?? "", mm: p.mm ?? "", size: p.size ?? "", color: p.color ?? "", clarity: p.clarity ?? "" })));
     }
   }, [movement]);
 
@@ -94,6 +111,16 @@ export function OpeningStockEditSheet({ movement, onClose }: { movement: StockMo
   const newKey = lotKey(lotFromDraft(lot));
   const bagMoves = loose && newKey !== m!.purityOrQuality;
   const pcsNow = m?.pieces != null ? String(m.pieces) : "";
+  const isGold = m?.material === "gold";
+  const gem = !!m && m.material !== "gold" && m.material !== "diamond" && materialDef(db.settings, m.material)?.kind === "stone";
+  const graded = !!m && m.material !== "gold" && m.material !== "diamond" && !gem;
+  const certified = m?.purityOrQuality === "Certified";
+  // Where it would be counted after the correction (a gem's lot unchanged keeps its label exactly).
+  const gemKey = lotKey(lotFromDraft(lot));
+  const newPlace = !m ? "" : isGold ? key : graded ? (key.trim() || "—") : gem ? (gemKey === gemStart ? m.purityOrQuality : gemKey) : m.purityOrQuality;
+  const placeMoves = !!m && !loose && !certified && newPlace !== m.purityOrQuality;
+  const companyMoves = !!m && !certified && company !== (m.companyId || "main");
+  const gemPcsChanged = gem && pcs !== pcsNow;
 
   const save = async () => {
     if (!m) return;
@@ -105,14 +132,26 @@ export function OpeningStockEditSheet({ movement, onClose }: { movement: StockMo
     const figuresChanged = qty !== m.quantity || (Number(f.value) || 0) !== (m.valueInr ?? 0) || f.date !== dayOf(m.createdAt) || f.note.trim() !== (m.note ?? "");
     const lotChanged = loose && (bagMoves || pcs !== pcsNow
       || JSON.stringify(lotFromDraft(lot)) !== JSON.stringify(lotParts(m.purityOrQuality, m.lot)));
+    if (isGold && !key) { toast.error("Choose the purity"); return; }
+    // A move to another purity / grade / lot / company is checked first: refused, nothing is saved.
+    if (placeMoves || companyMoves || bagMoves) {
+      const problem = openingMoveProblem(loadDb(), m);
+      if (problem) { toast.error(problem); return; }
+    }
     try {
       if (figuresChanged) await editOpeningStock(db, m, { quantity: qty, valueInr: Number(f.value) || 0, date: f.date, note: f.note });
-      if (lotChanged) {
-        // Worked out from the entry as it now stands (the figures may just have changed).
-        const fresh = (loadDb().stockMovements ?? []).find(x => x.id === m.id) ?? m;
-        await refileOpeningLot(fresh, lotFromDraft(lot), Number(pcs) > 0 ? Number(pcs) : undefined, { userId: user?.id });
+      // Worked out from the entry as it now stands (the figures may just have changed).
+      const fresh = () => (loadDb().stockMovements ?? []).find(x => x.id === m.id) ?? m;
+      if (loose && companyMoves) {
+        await moveOpeningStock(fresh(), { purityOrQuality: newKey, companyId: company, lot: lotFromDraft(lot), pieces: Number(pcs) > 0 ? Number(pcs) : undefined }, { userId: user?.id });
+      } else if (lotChanged) {
+        await refileOpeningLot(fresh(), lotFromDraft(lot), Number(pcs) > 0 ? Number(pcs) : undefined, { userId: user?.id });
+      } else if (placeMoves || companyMoves || gemPcsChanged) {
+        await moveOpeningStock(fresh(), { purityOrQuality: newPlace, companyId: company, lot: gem ? lotFromDraft(lot) : undefined, pieces: gem && Number(pcs) > 0 ? Number(pcs) : undefined }, { userId: user?.id });
       }
-      toast.success(bagMoves ? `Moved into ${bagNoOf(loadDb(), newKey) ?? "its bag"} · ${newKey}` : "Opening stock corrected — stock moved by the difference");
+      toast.success(bagMoves ? `Moved into ${bagNoOf(loadDb(), newKey) ?? "its bag"} · ${newKey}`
+        : placeMoves || companyMoves ? `Moved to ${newPlace}${companyMoves ? " · that company's stock" : ""}`
+        : "Opening stock corrected — stock moved by the difference");
       onClose();
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Couldn't correct this.");
@@ -148,6 +187,41 @@ export function OpeningStockEditSheet({ movement, onClose }: { movement: StockMo
       }
     >
       <div className="space-y-3">
+        {/* Where it is counted: gold's purity, another material's grade or a gem's lot, whose stock. */}
+        {m && !certified && (isGold || graded || gem || hasCompanies(db.settings)) && (
+          <div className="space-y-2 rounded-xl border border-border/60 bg-secondary/30 p-3">
+            <div className="grid grid-cols-2 gap-3">
+              {isGold && (
+                <div>
+                  <Label className="text-xs">Purity</Label>
+                  <Select value={key} onValueChange={setKey}>
+                    <SelectTrigger aria-label="Purity" className="h-10 rounded-xl mt-1"><SelectValue placeholder="Purity" /></SelectTrigger>
+                    <SelectContent>{[...new Set([...GOLD_PURITIES, m.purityOrQuality])].map(x => <SelectItem key={x} value={x}>{x}</SelectItem>)}</SelectContent>
+                  </Select>
+                </div>
+              )}
+              {graded && (
+                <div className="min-w-0">
+                  <Label className="text-xs">Grade</Label>
+                  <GradeInput material={m.material} value={key} onChange={setKey} className="h-10 rounded-xl mt-1" />
+                </div>
+              )}
+              {gem && (
+                <div>
+                  <Label htmlFor="opening-gem-pcs" className="text-xs">Pcs</Label>
+                  <Input id="opening-gem-pcs" type="number" min={0} step="1" value={pcs} onChange={e => setPcs(e.target.value)} className="rounded-xl h-10 mt-1" placeholder="Optional" />
+                </div>
+              )}
+              <div className="min-w-0"><CompanyPicker value={company} onChange={setCompany} label="Company — whose stock this is" /></div>
+            </div>
+            {gem && <LooseLotFields idPrefix="open-edit-gem" compact gem showStone showBag={false} value={lot} onChange={p => setLot(l => ({ ...l, ...p }))} />}
+            {(placeMoves || companyMoves) && (
+              <p className="text-[11px] text-primary font-medium">
+                {fmtQty(m.quantity, unit)} move{placeMoves ? ` from ${m.purityOrQuality} to ${newPlace}` : ""}{companyMoves ? " to that company's stock" : ""} — only if none of it has gone out since.
+              </p>
+            )}
+          </div>
+        )}
         {loose && (
           <div className="space-y-2 rounded-xl border border-border/60 bg-secondary/30 p-3">
             <p className="text-xs font-semibold text-brand-dark">Bag · now {bagNoOf(db, m!.purityOrQuality) ?? "no bag no."} · {m!.purityOrQuality}</p>
