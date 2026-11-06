@@ -8,7 +8,8 @@ import { Input } from "@/components/ui/input";
 import { CheckCircle2, Circle, ChevronDown, ChevronRight, X, ListTodo, Pencil, Check } from "lucide-react";
 import { toast } from "sonner";
 import { confirmBox } from "@/lib/confirm";
-import { useLocation } from "react-router-dom";
+import { Link, useLocation } from "react-router-dom";
+import { brandShort } from "@/lib/brand";
 
 interface Props {
   /** Whose tasks to show. Pass the userId. */
@@ -313,13 +314,22 @@ function TaskRow({
           </div>
         ) : (
           <p className={`text-sm leading-snug ${task.completed ? "line-through text-muted-foreground" : "text-foreground"}`}>
+            {task.priority === "high" && !task.completed && <span className="mr-1.5 inline-block rounded bg-destructive/10 px-1 text-[10px] font-semibold text-destructive align-middle">Urgent</span>}
             {task.title}
+          </p>
+        )}
+        {/* An AI Office task: why it is to be done, by when, and the order or client it is about. */}
+        {task.note && <p className="text-xs text-muted-foreground mt-0.5">{task.note}</p>}
+        {(task.link || task.due) && (
+          <p className="text-[11px] mt-0.5 flex flex-wrap gap-x-2">
+            {task.due && !task.completed && <span className={task.due < new Date().toISOString().slice(0, 10) ? "font-semibold text-destructive" : "text-muted-foreground"}>By {task.due}</span>}
+            {task.link && <Link to={task.link} className="font-medium text-primary hover:underline">Open {task.link.startsWith("/orders/") ? "the order" : "the client"} →</Link>}
           </p>
         )}
         <p className="text-[11px] text-muted-foreground mt-0.5">
           {task.completed
             ? `Completed: ${fmtCompleted(task.completedAt)}`
-            : own ? `Added ${fmtCompleted(task.createdAt)}` : assigner ? `Assigned by ${assigner.name} · ${fmtCompleted(task.createdAt)}` : task.assignedBy === "autopilot" ? "From Autopilot" : ""}
+            : own ? `Added ${fmtCompleted(task.createdAt)}` : assigner ? `${task.fromAi ? `Suggested by ${brandShort()} Agent, approved` : "Assigned"} by ${assigner.name} · ${fmtCompleted(task.createdAt)}` : task.assignedBy === "autopilot" ? "From Autopilot" : ""}
         </p>
       </div>
 

@@ -216,6 +216,9 @@ service cloud.firestore {
 
     // Staff-only collections — clients never load or touch these.
     match /tasks/{id}    { allow read, write: if isStaff(); }
+    // The AI Office (src/lib/aiOffice/store.ts): the day's brief and the tasks
+    // the AI proposed — admins only; what an admin approves becomes a task above.
+    match /aiOffice/{id} { allow read, write: if isAdmin(); }
     match /expenses/{id} { allow read, write: if isStaff(); }
 
     // Manufacturing & Accounts — Locker, Supplier/Purchases/Receipts, Factory,
