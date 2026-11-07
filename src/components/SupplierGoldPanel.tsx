@@ -26,6 +26,7 @@ import { Input } from "@/components/ui/input";
 import { Checkbox } from "@/components/ui/checkbox";
 import { cleanGstPct, defaultPurchaseGstPct, gstOn, pctText } from "@/lib/purchaseGst";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { openMin } from "@/lib/openMin";
 
 /** Which form is open: take on loan, give back, turn into a bill, or the opening figure. */
 export type GoldMode = "take" | "return" | "bill" | "opening" | null;
@@ -224,7 +225,7 @@ export function SupplierGoldPanel({ supplier, isAdmin, mode, onMode }: {
   const owedAfter = mode === "take" ? owedCo - was + moveFine : mode === "return" ? owedCo - was - moveFine : mode === "bill" ? owedCo - billFine : acc.owed;
 
   const dateField = (
-    <Field label="Date">{id => <Input id={id} type="date" value={date} max={todayLocal()} onChange={e => setDate(e.target.value)} className="rounded-xl h-10" />}</Field>
+    <Field label="Date">{id => <Input id={id} type="date" min={openMin()} value={date} max={todayLocal()} onChange={e => setDate(e.target.value)} className="rounded-xl h-10" />}</Field>
   );
   const companyField = multiCo && (
     <div className="col-span-2">
@@ -369,7 +370,7 @@ export function SupplierGoldPanel({ supplier, isAdmin, mode, onMode }: {
                 <Field label="Fine gold owed (g)" hint="0 clears it">{id => (
                   <UnitInput id={id} min={0} step="0.001" unit="g" value={fine} onChange={e => setFine(e.target.value)} autoFocus />
                 )}</Field>
-                <Field label="As of">{id => <Input id={id} type="date" value={date} max={todayLocal()} onChange={e => setDate(e.target.value)} className="rounded-xl h-10" />}</Field>
+                <Field label="As of">{id => <Input id={id} type="date" min={openMin()} value={date} max={todayLocal()} onChange={e => setDate(e.target.value)} className="rounded-xl h-10" />}</Field>
               </div>
             </Group>
           )}

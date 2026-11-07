@@ -14,6 +14,7 @@ import { fmtMoneyInr } from "./manufacturing";
 import { adjustStockCounter } from "./stock";
 import { lotKey, tidySpec, type LotSpec } from "./diamondLots";
 import { addBags } from "./diamondBags";
+import { closedWhy } from "./yearLock";
 
 const r3 = (n: number) => Math.round(n * 1000) / 1000;
 const EPS = 0.0005;
@@ -71,6 +72,8 @@ export function openingRoom(db: DB, m: StockMovement): number {
  * records that already dip below, any further than it already goes.
  */
 export function openingRefusal(db: DB, m: StockMovement, next: { quantity: number; createdAt: string } | null): string | undefined {
+  const closed = closedWhy(m.createdAt, db.settings) ?? (next ? closedWhy(next.createdAt, db.settings) : null);
+  if (closed) return closed;
   const list = bucketMoves(db, m);
   const changed = next
     ? list.map(x => (x.id === m.id ? { ...x, quantity: next.quantity, createdAt: next.createdAt } : x))

@@ -25,6 +25,7 @@ import {
 import { factoryPoolBalance, issuancePaid } from "@/lib/manufacturing";
 import { materialUnit } from "@/lib/materials";
 import { increaseStock, decreaseStock, decreaseStockSelfHealing } from "@/lib/stock";
+import { closedWhy } from "./yearLock";
 
 const r3 = (n: number) => Math.round(n * 1000) / 1000;
 const EPS = 0.0005;
@@ -56,6 +57,9 @@ function poolLeft(db: DB, mi: MaterialIssuance, bucket = mi.purityOrQuality): nu
  * unwound where that happened, not here.
  */
 export function canEditIssuance(db: DB, mi: MaterialIssuance): { ok: boolean; reason?: string } {
+  // Issued in a closed year: the year was closed on it (lib/yearLock.ts).
+  const closed = closedWhy(mi.issuedAt, db.settings);
+  if (closed) return { ok: false, reason: closed };
   // Each source says where it IS corrected — "came from a purchase" was
   // given for every one of them, a melt and a company move included.
   if (mi.source === "purchase") {

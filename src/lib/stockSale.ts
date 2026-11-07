@@ -21,6 +21,7 @@
 // to the build; the separate order is closed and marked as merged.
 import { findInvoiceForOrder, invoiceOrderIds, orderIsDispatched, type DB, type Order, type ReadyStockItem, type StockSaleRecord } from "./db";
 import { logItem, type Who } from "./readyStockHistory";
+import { closedWhy } from "./yearLock";
 
 /** Sold as a ready-made piece — a sale order, or a build sold on itself. Its stages run Ready → Dispatched → Delivered. */
 export const isShelfSale = (o: Pick<Order, "materialSourcing" | "stockSale">) => o.materialSourcing === "readyStock" || !!o.stockSale;
@@ -113,6 +114,8 @@ export const SALE_REPAIR_COLS = ["orders", "readyStock", "invoices", "giftCards"
 /** Why a build sold on itself can't go back to Ready Stock — or undefined. */
 export function undoSaleBlocker(d: Pick<DB, "invoices" | "readyStock">, o: Order): string | undefined {
   if (!o.stockSale) return "This order was not sold from Ready Stock";
+  const closed = closedWhy(o.stockSale.soldAt, (d as { settings?: DB["settings"] }).settings);
+  if (closed) return closed;
   if (o.stockSale.mergedFrom) return "Its sale was moved onto it from a separate order — return the pieces instead";
   if (o.deletedAt || o.melted) return "This order is closed";
   if (orderIsDispatched(o) || o.returns?.length) return "Already dispatched — use “Return pieces” instead (credit note, piece back into Ready Stock)";

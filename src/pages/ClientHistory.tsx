@@ -439,7 +439,11 @@ function ClientHistoryPageBody() {
       gross: t.gross + b.gross, gift: t.gift + b.gift, returned: t.returned + b.returned,
       received: t.received + b.received, balance: t.balance + b.balance,
     }), { gross: 0, gift: 0, returned: 0, received: 0, balance: 0 });
-    const closing = oD - oC + T.balance;
+    // Still owed on invoices before the period: brought forward with the opening,
+    // or a year's statement would leave older unpaid bills out of what is owed.
+    const before = from ? invoiceBlocks.filter(b => +new Date(b.date) < +from).reduce((t, b) => t + b.balance, 0) : 0;
+    const bf = oD - oC + before;
+    const closing = bf + T.balance;
 
     // One table per invoice: its pieces, then the payments received against it.
     const sections = blocks.map(b => ({
@@ -486,7 +490,7 @@ function ClientHistoryPageBody() {
         `Report Generated: ${new Date().toLocaleDateString("en-IN", { month: "long", day: "numeric", year: "numeric" })}`,
       ].filter(Boolean),
       summary: [
-        ...(oD || oC ? [{ label: "Balance brought forward", value: fmtMoney(oD - oC) }] : []),
+        ...(Math.abs(bf) > 0.009 ? [{ label: from ? `Brought forward to ${fmtDate(from.toISOString())}` : "Balance brought forward", value: fmtMoney(bf) }] : []),
         { label: "Total billed (gross)", value: fmtMoney(T.gross) },
         ...(T.gift > 0 ? [{ label: "Gift card used", value: fmtMoney(T.gift) }] : []),
         ...(T.returned > 0 ? [{ label: "Returned (credit notes)", value: fmtMoney(T.returned) }] : []),

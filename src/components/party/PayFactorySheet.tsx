@@ -20,6 +20,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { openMin } from "@/lib/openMin";
 
 /**
  * Everything a payment to a factory reads: its jobs (the money settles the
@@ -149,7 +150,7 @@ export function PayFactorySheet({ factoryId, open, onOpenChange }: {
           </div>
           <div>
             <Label className="text-xs">Date</Label>
-            <Input type="date" value={date} max={todayLocal()} onChange={e => setDate(e.target.value)} className={field} aria-label="Date" />
+            <Input type="date" min={openMin()} value={date} max={todayLocal()} onChange={e => setDate(e.target.value)} className={field} aria-label="Date" />
           </div>
         </div>
         {owed > 0 && owedInCur > 0 && amt !== owedInCur && (

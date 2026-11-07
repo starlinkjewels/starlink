@@ -117,6 +117,14 @@ export function DayBook({ lockerId: chosen }: { lockerId?: string }) {
   const nIn = rows.filter(r => isIn(r.t)).length, nOut = rows.length - nIn;
   const totalOut = rows.filter(r => !isIn(r.t)).reduce((s, r) => s + r.t.amountInr, 0);
   const closing = withBalance.length ? withBalance[withBalance.length - 1].balance : (locker?.openingBalance || 0);
+  // For a period: what the account held when it began (brought forward) and
+  // when it ended — the book's own figures, not the account's first and last.
+  const fromT = from ? +new Date(`${from}T00:00:00`) : null;
+  const toT = to ? +new Date(`${to}T23:59:59.999`) : null;
+  const beforeLines = fromT === null ? [] : withBalance.filter(l => +new Date(l.t.createdAt) < fromT);
+  const periodOpening = fromT === null ? (locker?.openingBalance || 0) : beforeLines.length ? beforeLines[beforeLines.length - 1].balance : (locker?.openingBalance || 0);
+  const upToEnd = toT === null ? withBalance : withBalance.filter(l => +new Date(l.t.createdAt) <= toT);
+  const periodClosing = upToEnd.length ? upToEnd[upToEnd.length - 1].balance : periodOpening;
 
   const lk = lockerLookup(db);
   const particulars = (t: LockerTransaction) => {
@@ -127,10 +135,13 @@ export function DayBook({ lockerId: chosen }: { lockerId?: string }) {
   const HEAD = ["Date", "Voucher", "Particulars", `In (${code})`, `Out (${code})`, `Balance (${code})`];
   // The download keeps the book's own order — oldest first — because a printed
   // page gets laid beside the written rojmel, which runs that way down the page.
-  const body = matching.map(({ t, balance }) => [
-    fmtDate(t.createdAt), t.voucherNo ?? "", particulars(t),
-    isIn(t) ? t.amountInr : "", isIn(t) ? "" : t.amountInr, balance,
-  ]);
+  const body = [
+    ...(from ? [[fmtDate(from), "", "Opening balance — brought forward", "", "", periodOpening]] : []),
+    ...matching.map(({ t, balance }) => [
+      fmtDate(t.createdAt), t.voucherNo ?? "", particulars(t),
+      isIn(t) ? t.amountInr : "", isIn(t) ? "" : t.amountInr, balance,
+    ]),
+  ];
 
   const exportCsv = () => downloadCsv(`Day-Book-${locker?.name?.replace(/\s+/g, "-") ?? "account"}`, HEAD, body);
 
@@ -138,13 +149,14 @@ export function DayBook({ lockerId: chosen }: { lockerId?: string }) {
     title: `Day Book — ${locker?.name ?? "Account"}`,
     subjectLines: [
       `${matching.length} entr${matching.length !== 1 ? "ies" : "y"} · ${rangeLabel(from, to)} · oldest first`,
-      `Opening ${pdfMoney(locker?.openingBalance || 0)} · Closing ${pdfMoney(closing)}`,
+      `Opening ${pdfMoney(periodOpening)} · Closing ${pdfMoney(from || to ? periodClosing : closing)}`,
       `Report Generated: ${new Date().toLocaleDateString("en-IN", { month: "long", day: "numeric", year: "numeric" })}`,
     ],
     summary: [
       { label: "Money in", value: pdfMoney(totalIn) },
       { label: "Money out", value: pdfMoney(totalOut) },
-      { label: "Balance", value: pdfMoney(closing) },
+      ...(from ? [{ label: "Brought forward", value: pdfMoney(periodOpening) }] : []),
+      { label: from || to ? "Closing balance" : "Balance", value: pdfMoney(from || to ? periodClosing : closing) },
     ],
     landscape: true,
     columns: [
@@ -152,10 +164,13 @@ export function DayBook({ lockerId: chosen }: { lockerId?: string }) {
       { header: "In", x: 180 }, { header: "Out", x: 215 }, { header: "Balance", x: 252 },
     ],
     align: ["left", "left", "left", "right", "right", "right"],
-    rows: matching.map(({ t, balance }) => [
-      fmtDate(t.createdAt), t.voucherNo ?? "", particulars(t).slice(0, 62),
-      isIn(t) ? pdfMoney(t.amountInr) : "", isIn(t) ? "" : pdfMoney(t.amountInr), pdfMoney(balance),
-    ]),
+    rows: [
+      ...(from ? [[fmtDate(from), "", "Opening balance — brought forward", "", "", pdfMoney(periodOpening)]] : []),
+      ...matching.map(({ t, balance }) => [
+        fmtDate(t.createdAt), t.voucherNo ?? "", particulars(t).slice(0, 62),
+        isIn(t) ? pdfMoney(t.amountInr) : "", isIn(t) ? "" : pdfMoney(t.amountInr), pdfMoney(balance),
+      ]),
+    ],
     filename: `Day-Book-${locker?.name?.replace(/\s+/g, "-") ?? "account"}`,
   });
 

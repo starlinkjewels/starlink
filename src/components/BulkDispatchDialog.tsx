@@ -14,6 +14,7 @@ import { orderDispatchedEmail, sendMail } from "@/lib/email";
 import { ccy, ccySymbol } from "@/lib/currency";
 import { Truck, AlertTriangle, Ban, PackageCheck } from "lucide-react";
 import { toast } from "sonner";
+import { openMin } from "@/lib/openMin";
 
 /**
  * One parcel, one entry.
@@ -124,7 +125,7 @@ export function BulkDispatchDialog({ orders, onClose, onDone }: {
             </div>
             <div className="space-y-1.5">
               <Label className="text-xs">Dispatch Date *</Label>
-              <Input type="date" value={day} max={todayLocal()} onChange={e => setDay(e.target.value)}
+              <Input type="date" min={openMin()} value={day} max={todayLocal()} onChange={e => setDay(e.target.value)}
                 className="rounded-xl h-10" />
             </div>
             <div className="space-y-1.5 sm:col-span-2">
@@ -280,7 +281,7 @@ export function BulkDeliverDialog({ orders, onClose, onDone }: {
         <div className="space-y-3">
           <div className="space-y-1.5 sm:max-w-[50%]">
             <Label className="text-xs">Delivery Date *</Label>
-            <Input type="date" value={day} max={todayLocal()} onChange={e => setDay(e.target.value)}
+            <Input type="date" min={openMin()} value={day} max={todayLocal()} onChange={e => setDay(e.target.value)}
               className="rounded-xl h-10" autoFocus />
           </div>
 

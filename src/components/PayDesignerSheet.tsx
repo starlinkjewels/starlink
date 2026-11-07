@@ -17,6 +17,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { openMin } from "@/lib/openMin";
 
 /**
  * Pay a freelance designer — from a rupee account, or one in another currency at
@@ -113,7 +114,7 @@ export function PayDesignerSheet({ designerId, jobId, onClose }: { designerId: s
           </div>
           <div>
             <Label className="text-xs">Date</Label>
-            <Input type="date" value={date} onChange={e => setDate(e.target.value)} className="h-10 rounded-xl mt-1" aria-label="Date" />
+            <Input type="date" min={openMin()} value={date} onChange={e => setDate(e.target.value)} className="h-10 rounded-xl mt-1" aria-label="Date" />
           </div>
         </div>
         <div>

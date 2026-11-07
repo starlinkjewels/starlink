@@ -185,32 +185,46 @@ export function ClientInvoiceLedger({
   // Outstanding or settled — stays as it was left (this browser, this person,
   // every client's statement alike) until cleared. One choice: the two together are all.
   const [only, setOnly] = useStickyFilter<"all" | "due" | "paid">("clientStatement.status", "all");
+  // A period — a financial year, a month. Invoices before it are brought forward
+  // as one line: what is still owed on them (and the opening from before the app).
+  const [from, setFrom] = useState("");
+  const [to, setTo] = useState("");
+  const fromT = from ? +new Date(`${from}T00:00:00`) : null;
+  const toT = to ? +new Date(`${to}T23:59:59.999`) : null;
 
   const filtered = useMemo(() => {
     const ql = q.trim().toLowerCase();
     return blocks.filter(b => {
+      if (fromT !== null && +new Date(b.date) < fromT) return false;
+      if (toT !== null && +new Date(b.date) > toT) return false;
       if (only === "due" && b.balance <= 0.009) return false;
       if (only === "paid" && b.balance > 0.009) return false;
       if (!ql) return true;
       return b.number.toLowerCase().includes(ql)
         || b.items.some(i => i.orderNo.toLowerCase().includes(ql) || i.description.toLowerCase().includes(ql));
     });
-  }, [blocks, q, only]);
+  }, [blocks, q, only, fromT, toT]);
 
   const T = filtered.reduce((t, b) => ({
     gross: t.gross + b.gross, gift: t.gift + b.gift, returned: t.returned + b.returned,
     received: t.received + b.received, balance: t.balance + b.balance,
   }), { gross: 0, gift: 0, returned: 0, received: 0, balance: 0 });
-  const closing = openingDebit - openingCredit + T.balance;
+  // Still owed on the invoices before the period — brought forward with the opening.
+  const before = fromT === null ? 0 : blocks.filter(b => +new Date(b.date) < fromT).reduce((t, b) => t + b.balance, 0);
+  const closing = openingDebit - openingCredit + before + T.balance;
 
-  const filters: TableFilter[] = [{ kind: "select", label: "Status", allLabel: "All", value: only === "all" ? "" : only,
-    onChange: v => setOnly((v || "all") as "all" | "due" | "paid"),
-    options: [{ value: "due", label: "Outstanding" }, { value: "paid", label: "Settled" }] }];
+  const filters: TableFilter[] = [
+    { kind: "date", label: "Invoice date", from, to, onChange: (f, t) => { setFrom(f); setTo(t); } },
+    { kind: "select", label: "Status", allLabel: "All", value: only === "all" ? "" : only,
+      onChange: v => setOnly((v || "all") as "all" | "due" | "paid"),
+      options: [{ value: "due", label: "Outstanding" }, { value: "paid", label: "Settled" }] },
+  ];
 
   // The balance brought forward: a line of its own, kept at the top.
-  const opening: InvoiceBlock | null = openingDebit > 0 || openingCredit > 0 ? {
-    id: "__opening", number: "Balance brought forward", date: "", items: [],
-    gross: openingDebit, gift: 0, returned: 0, net: openingDebit, received: openingCredit, balance: openingDebit - openingCredit,
+  const bfAmount = openingDebit - openingCredit + before;
+  const opening: InvoiceBlock | null = openingDebit > 0 || openingCredit > 0 || Math.abs(before) > 0.009 ? {
+    id: "__opening", number: "Balance brought forward", date: from || "", items: [],
+    gross: fromT === null ? openingDebit : 0, gift: 0, returned: 0, net: fromT === null ? openingDebit : 0, received: fromT === null ? openingCredit : 0, balance: bfAmount,
     payments: [], credits: [],
   } : null;
   const isOpening = (b: InvoiceBlock) => b.id === "__opening";
@@ -219,7 +233,7 @@ export function ClientInvoiceLedger({
   const columns: DataColumn<InvoiceBlock>[] = [
     { key: "invoice", header: "Invoice", always: true, sortValue: b => b.number, csv: b => b.number,
       cell: b => isOpening(b)
-        ? <span className="font-medium text-brand-dark">Balance brought forward</span>
+        ? <span className="font-medium text-brand-dark">{from ? `Brought forward to ${fmtDate(from)}` : "Balance brought forward"}</span>
         : <span className="inline-flex items-center gap-1.5 font-medium text-brand-dark whitespace-nowrap"><FileText className="h-3.5 w-3.5 text-primary" />{b.number}</span> },
     { key: "date", header: "Date", kind: "date", sortValue: b => b.date || null, csv: b => (b.date ? fmtDate(b.date) : ""),
       cell: b => (b.date ? <CellDate>{fmtDate(b.date)}</CellDate> : null) },
@@ -287,7 +301,7 @@ export function ClientInvoiceLedger({
           rowKey={b => b.id}
           search={{ value: q, onChange: setQ, placeholder: "Search invoice, order or item…", ariaLabel: "Search invoice, order or item" }}
           filters={filters}
-          onClearFilters={() => setOnly("all")}
+          onClearFilters={() => { setOnly("all"); setFrom(""); setTo(""); }}
           exports={onExport ? [{ label: "PDF or Excel", icon: Download, hint: "The statement, invoice by invoice", onSelect: onExport }] : undefined}
           exportScope="Pick the invoices or dates, then the file"
           pinnedRows={opening ? [opening] : undefined}

@@ -19,6 +19,7 @@ import { Field, PanelActions, Stat, Stats, UnitInput } from "@/components/BillLa
 import { AddNewItem, useAddNew } from "@/components/create/QuickCreate";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { openMin } from "@/lib/openMin";
 
 /**
  * Money received for a diamond sold on credit ("Not received yet"): all of
@@ -74,7 +75,7 @@ export function SalePaymentSheet({ sale, onClose }: { sale: DiamondSale | null; 
         <Field label={`Amount (${cur})`} hint="Blank = all of it">{id => (
           <UnitInput id={id} min={0} unit={cur === "USD" ? "$" : "₹"} value={amount} placeholder={String(owed)} onChange={e => setAmount(e.target.value)} />
         )}</Field>
-        <Field label="Date">{id => <Input id={id} type="date" value={date} onChange={e => setDate(e.target.value)} className="rounded-xl h-10" />}</Field>
+        <Field label="Date">{id => <Input id={id} type="date" min={openMin()} value={date} onChange={e => setDate(e.target.value)} className="rounded-xl h-10" />}</Field>
         <Field label="Into account *" className="col-span-2">{id => (
           <Select value={lockerId} onValueChange={addNew("locker", setLockerId)}>
             <SelectTrigger id={id} className="h-10 rounded-xl"><SelectValue placeholder={`Choose the ${cur} account`} /></SelectTrigger>

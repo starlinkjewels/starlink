@@ -108,7 +108,14 @@ export function App() {
       }
     };
     window.addEventListener("starlink-db-error", onErr);
-    return () => window.removeEventListener("starlink-db-error", onErr);
+    // A save refused because it would touch a closed year (lib/yearLock.ts):
+    // everything in it was put back, and this says why.
+    const onLocked = (e: Event) => toast.error(String((e as CustomEvent).detail || "Not saved — that is in a closed year."), { duration: 9000 });
+    window.addEventListener("starlink-year-locked", onLocked);
+    return () => {
+      window.removeEventListener("starlink-db-error", onErr);
+      window.removeEventListener("starlink-year-locked", onLocked);
+    };
   }, []);
 
   // Foreground push handler — a notification that arrives while this tab is

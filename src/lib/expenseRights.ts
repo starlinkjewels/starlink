@@ -1,6 +1,7 @@
 import type { DB, Expense, User } from "./db";
 import type { PermAction } from "./permissions";
 import type { ModuleKey } from "./modules";
+import { closedWhy } from "./yearLock";
 
 type Can = (module: ModuleKey, action?: PermAction) => boolean;
 
@@ -20,10 +21,13 @@ type Can = (module: ModuleKey, action?: PermAction) => boolean;
  * Returns why not (shown under the greyed action), or nothing when allowed.
  */
 export function expenseBlock(
-  db: Pick<DB, "users">, me: Pick<User, "id" | "role"> | null | undefined, can: Can,
-  e: Pick<Expense, "employeeId">, action: "edit" | "delete",
+  db: Pick<DB, "users"> & Partial<Pick<DB, "settings">>, me: Pick<User, "id" | "role"> | null | undefined, can: Can,
+  e: Pick<Expense, "employeeId"> & Partial<Pick<Expense, "createdAt">>, action: "edit" | "delete",
 ): string | undefined {
   if (!me) return "Sign in again to change this";
+  // Dated in a closed year (lib/yearLock.ts) — for everyone, admins too.
+  const closed = closedWhy(e.createdAt, db.settings);
+  if (closed) return closed;
   if (me.role === "admin") return undefined;
   if (e.employeeId === me.id) return can("expenses", action) ? undefined : `Your access doesn't let you ${action} expenses`;
   if (can("payments", action)) return undefined;

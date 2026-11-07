@@ -2,6 +2,7 @@ import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import type { LedgerDir } from "@/lib/db";
+import { openMin } from "@/lib/openMin";
 
 /** Shared "opening balance" block for the Client / Supplier / Factory forms —
  *  a one-time migration figure for a business already running before this app.
@@ -45,7 +46,7 @@ export function OpeningBalanceFields({
         </div>
         <div>
           <Label className="text-[11px]">As of date</Label>
-          <Input type="date" value={date} onChange={e => onDate(e.target.value)} className="rounded-lg mt-1 h-9" />
+          <Input type="date" min={openMin()} value={date} onChange={e => onDate(e.target.value)} className="rounded-lg mt-1 h-9" />
         </div>
       </div>
       {hint && <p className="text-[11px] text-muted-foreground leading-relaxed">{hint}</p>}

@@ -27,6 +27,7 @@ import { stockCostOf } from "./db";
 import { lotParts } from "./diamondLots";
 import { logItem, whoOf } from "./readyStockHistory";
 import { brokerAccount, saleBrokerageWePay } from "./brokers";
+import { closedWhy } from "./yearLock";
 
 const r2 = (n: number) => Math.round(n * 100) / 100;
 const companyOf = (s: { companyId?: string }) => s.companyId || "main";
@@ -238,6 +239,8 @@ export function saleUndoImpact(db: DB, sale: SupplierSale): string[] {
 
 /** Why a sale can't be deleted — or null. */
 export function saleUndoBlocker(db: DB, sale: SupplierSale): string | null {
+  const closed = closedWhy(sale.createdAt, db.settings);
+  if (closed) return closed;
   for (const l of sale.lines) {
     if (l.kind === "certified") {
       const p = (db.diamondPackets ?? []).find(x => x.id === l.packetId);

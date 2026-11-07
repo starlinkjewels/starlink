@@ -1,6 +1,7 @@
 import { ShopifySettings } from "@/components/settings/ShopifySettings";
 import { EtsySettings } from "@/components/settings/EtsySettings";
 import { LiveRatesSettings } from "@/components/settings/LiveRatesSettings";
+import { YearClosingSettings } from "@/components/settings/YearClosingSettings";
 import { CatalogReadingSettings } from "@/components/settings/CatalogReadingSettings";
 import { ProductPricingSettings } from "@/components/settings/ProductPricingSettings";
 import { CurrencyRatesSettings } from "@/components/CurrencyRatesSettings";
@@ -23,7 +24,7 @@ import { TimelineSettings } from "@/components/TimelineSettings";
 import { OrderLayoutSettings } from "@/components/OrderLayoutSettings";
 import { VideoFixSettings } from "@/components/VideoFixSettings";
 import { PhotoPreviewSettings } from "@/components/PhotoPreviewSettings";
-import { ListOrdered, LayoutList, Film, Images, ChevronLeft, ScanText, Tags } from "lucide-react";
+import { ListOrdered, LayoutList, Film, Images, ChevronLeft, ScanText, Tags, CalendarCheck } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useUrlState } from "@/hooks/useUrlState";
 import { SettingsSearch } from "@/components/settings-search/SettingsSearch";
@@ -820,6 +821,7 @@ export function SettingsPage() {
     { id: "company", label: "Company", icon: Building2, show: true, group: "Business", hint: "Your business name" },
     { id: "companies", label: "Companies", icon: Building2, show: isAdmin, group: "Business", hint: "Each company's stock, bills and numbering" },
     { id: "brand", label: "Brand Studio", icon: Sparkles, show: isAdmin, group: "Business", hint: "Logo, name and colour across the app" },
+    { id: "yearclose", label: "Year closing", icon: CalendarCheck, show: isAdmin, group: "Business", hint: "Close a financial year, see past years' books" },
     { id: "invoice", label: "Invoice & Bill", icon: FileText, show: true, group: "Sales & billing", hint: "Address, bank details and stamp on every bill" },
     { id: "pricing", label: "Pricing Rates", icon: DollarSign, show: canEditRates, group: "Sales & billing", hint: "Rates, exchange rates, shipping" },
     { id: "liverates", label: "Live gold & $ rates", icon: TrendingUp, show: isAdmin, group: "Sales & billing", hint: "Gold, platinum and ₹/$ every minute, by hand when needed" },
@@ -1603,6 +1605,7 @@ export function SettingsPage() {
       {activeId === "shopify" && <ShopifySettings />}
       {activeId === "etsy" && <EtsySettings />}
       {activeId === "liverates" && <LiveRatesSettings />}
+      {activeId === "yearclose" && <YearClosingSettings />}
       {activeId === "productpricing" && <ProductPricingSettings />}
       {activeId === "videos" && <VideoFixSettings />}
       {activeId === "previews" && <PhotoPreviewSettings />}

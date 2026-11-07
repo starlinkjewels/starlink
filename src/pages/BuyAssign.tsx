@@ -28,6 +28,7 @@ import { CompanyPicker, useDefaultCompany, useMultiCo } from "@/components/Compa
 import { coField, companyOf } from "@/lib/companies";
 import { Field, Group, PanelActions, Segmented, Stat, Stats, UnitInput } from "@/components/BillLayout";
 import { SellToSupplierSheet } from "@/components/SellToSupplierSheet";
+import { openMin } from "@/lib/openMin";
 
 const GOLD_PURITIES = ["9K", "10K", "14K", "18K", "22K", "24K"];
 type Mode = "buy" | "assign" | "sell" | "sellSupplier" | "opening";
@@ -278,7 +279,7 @@ function AssignGold({ open, onOpenChange }: PanelProps) {
                 <SelectContent>{factories.map(f => <SelectItem key={f.id} value={f.id}>{f.name}</SelectItem>)}<AddNewItem kind="factory" /></SelectContent>
               </Select>
             )}</Field>
-            <Field label="Date">{id => <Input id={id} type="date" value={date} onChange={e => setDate(e.target.value)} className="rounded-xl h-10" />}</Field>
+            <Field label="Date">{id => <Input id={id} type="date" min={openMin()} value={date} onChange={e => setDate(e.target.value)} className="rounded-xl h-10" />}</Field>
             <Field label="Remark">{id => (
               <Input id={id} value={notes} onChange={e => setNotes(e.target.value)} className="rounded-xl h-10" placeholder="Optional" />
             )}</Field>
@@ -460,7 +461,7 @@ function SellDiamond({ open, onOpenChange }: PanelProps) {
               </div>
             )}
             <Field label="Date" className={multiCo ? "col-span-2 @md:col-span-1" : ""}>{id => (
-              <Input id={id} type="date" value={date} onChange={e => setDate(e.target.value)} className="rounded-xl h-10" />
+              <Input id={id} type="date" min={openMin()} value={date} onChange={e => setDate(e.target.value)} className="rounded-xl h-10" />
             )}</Field>
             <Field label="Remark" className={multiCo ? "col-span-2" : ""}>{id => (
               <Input id={id} value={notes} onChange={e => setNotes(e.target.value)} className="rounded-xl h-10" placeholder="Optional" />

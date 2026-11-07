@@ -37,6 +37,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { AddNewItem, useAddNew } from "@/components/create/QuickCreate";
+import { openMin } from "@/lib/openMin";
 
 type Dir = "in" | "out" | "transfer";
 /**
@@ -401,7 +402,7 @@ export function LockerEntrySheet({ open, onOpenChange, lockerId: startLocker }: 
           </div>
           <div>
             <Label className="text-xs">Date</Label>
-            <Input type="date" value={date} onChange={e => setDate(e.target.value)} className={field} aria-label="Date" />
+            <Input type="date" min={openMin()} value={date} onChange={e => setDate(e.target.value)} className={field} aria-label="Date" />
           </div>
         </div>
         {who === "client" && dir === "out" && partyId && refundable(db, partyId) > 0.005 && (cur === "USD" || Number(rate) > 0) && (

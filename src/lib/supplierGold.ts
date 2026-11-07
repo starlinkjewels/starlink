@@ -28,6 +28,7 @@ import { deriveStockBalances, fmtMoneyInr } from "./manufacturing";
 import { gstFields, gstOn } from "./purchaseGst";
 import { toPureGold } from "./pure/basics";
 import { decreaseStockSelfHealing, increaseStock, reverseMovement } from "./stock";
+import { closedWhy } from "./yearLock";
 
 const r3 = (n: number) => Math.round(n * 1000) / 1000;
 const EPS = 0.0005;
@@ -346,6 +347,8 @@ export function goldToBill(supplierId: string, b: GoldBill, who: Who): Purchase 
 
 /** Why this line can't be deleted — or null. */
 export function goldEntryDeleteBlocker(d: GoldData & Pick<DB, "settings">, s: Supplier, e: SupplierGoldEntry): string | null {
+  const closed = closedWhy(e.at, d.settings);
+  if (closed) return closed;
   if (e.kind === "toBill") return "It is a bill — void the bill (Purchase History) and the gold goes back on what is owed";
   if (e.kind === "loanIn") {
     const owed = owedIn(d, s, e.companyId);

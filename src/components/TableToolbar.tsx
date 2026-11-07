@@ -46,6 +46,14 @@ const BTN = "h-9 px-3 inline-flex items-center gap-2 rounded-xl border border-bo
 
 const iso = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 
+/** The first year of the financial year `back` years ago (April–March, India's). */
+function fyStart(back: number): number {
+  const d = new Date();
+  return (d.getMonth() >= 3 ? d.getFullYear() : d.getFullYear() - 1) - back;
+}
+/** "2025-26". */
+const fyKey = (back: number) => { const y = fyStart(back); return `${y}-${String(y + 1).slice(-2)}`; };
+
 /** The ranges people actually ask for — the Indian financial year included. */
 export const DATE_PRESETS: { key: string; label: string; range: () => [string, string] }[] = [
   { key: "today", label: "Today", range: () => [todayLocal(), todayLocal()] },
@@ -55,8 +63,11 @@ export const DATE_PRESETS: { key: string; label: string; range: () => [string, s
   { key: "month", label: "This month", range: () => { const d = new Date(); return [iso(new Date(d.getFullYear(), d.getMonth(), 1)), todayLocal()]; } },
   { key: "lastmonth", label: "Last month", range: () => { const d = new Date(); return [iso(new Date(d.getFullYear(), d.getMonth() - 1, 1)), iso(new Date(d.getFullYear(), d.getMonth(), 0))]; } },
   { key: "year", label: "This year", range: () => { const d = new Date(); return [iso(new Date(d.getFullYear(), 0, 1)), todayLocal()]; } },
-  { key: "fy", label: "This financial year", range: () => { const d = new Date(); const y = d.getMonth() >= 3 ? d.getFullYear() : d.getFullYear() - 1; return [iso(new Date(y, 3, 1)), todayLocal()]; } },
-  { key: "lastfy", label: "Last financial year", range: () => { const d = new Date(); const y = (d.getMonth() >= 3 ? d.getFullYear() : d.getFullYear() - 1) - 1; return [iso(new Date(y, 3, 1)), iso(new Date(y + 1, 2, 31))]; } },
+  { key: "fy", label: `This financial year (${fyKey(0)})`, range: () => { const y = fyStart(0); return [iso(new Date(y, 3, 1)), todayLocal()]; } },
+  { key: "lastfy", label: `Last financial year (${fyKey(1)})`, range: () => { const y = fyStart(1); return [iso(new Date(y, 3, 1)), iso(new Date(y + 1, 2, 31))]; } },
+  // The two years before that — a closed year's books, read from any table.
+  { key: "fy2", label: `Financial year ${fyKey(2)}`, range: () => { const y = fyStart(2); return [iso(new Date(y, 3, 1)), iso(new Date(y + 1, 2, 31))]; } },
+  { key: "fy3", label: `Financial year ${fyKey(3)}`, range: () => { const y = fyStart(3); return [iso(new Date(y, 3, 1)), iso(new Date(y + 1, 2, 31))]; } },
 ];
 
 const short = (s: string) => new Date(`${s}T00:00:00`).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" }).replace(/\bSept\b/, "Sep");

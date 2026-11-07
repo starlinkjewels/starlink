@@ -22,6 +22,7 @@ import { purchaseQty, purchaseBucket, purchaseText, materialUnit, type MaterialK
 import { readyStockDeleteBlocker } from "./readyStockGuards";
 import { purchasePaid, issuancePaid, fmtMoneyInr } from "./manufacturing";
 import { decreaseStockSelfHealing, increaseStock } from "./stock";
+import { closedWhy } from "./yearLock";
 
 /** Human description of what was bought, for confirmations and the audit line. */
 export function purchaseLabel(p: Purchase): string {
@@ -59,6 +60,8 @@ const GOLD_LOAN_BILL = "Made from gold taken on loan: its grams, rate and suppli
  * UI can tell the user exactly what to undo first instead of failing silently.
  */
 export function canVoidPurchase(db: DB, p: Purchase): { ok: boolean; reason?: string } {
+  const closed = closedWhy(p.createdAt, db.settings);
+  if (closed) return { ok: false, reason: closed };
   if (purchasePaid(p) > 0) {
     return { ok: false, reason: "A payment has already been made against this purchase. Cancel that payment in Payments → Supplier payments first, then remove it." };
   }
@@ -337,6 +340,8 @@ export function purchaseEditScope(db: DB, p: Purchase): {
  * purchaseEditScope() directly.
  */
 export function canEditPurchase(db: DB, p: Purchase): { ok: boolean; reason?: string } {
+  const closed = closedWhy(p.createdAt, db.settings);
+  if (closed) return { ok: false, reason: closed };
   const scope = purchaseEditScope(db, p);
   if (scope.quantity || scope.money) return { ok: true };
   return { ok: false, reason: scope.reason };

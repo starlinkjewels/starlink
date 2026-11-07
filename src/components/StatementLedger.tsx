@@ -143,7 +143,18 @@ export function StatementLedger({
   // the newest-first list. With nothing else to show it is just the one row,
   // so the table doesn't also print "nothing here" beneath it.
   const entries = filtered.filter(r => !r.pinned);
-  const pinned = filtered.filter(r => r.pinned);
+  // With a start date, the statement opens as books do: one line with the
+  // balance brought forward — everything before that day, the opening from
+  // before the app included. Each row already carries its balance after it
+  // (worked out by the page over the whole account, oldest first), so it is
+  // the balance after the last entry before the day. Rows arrive newest first.
+  const fromDay = from ? new Date(`${from}T00:00:00`) : null;
+  const pinned = fromDay ? (() => {
+    const before = rows.find(r => !r.pinned && new Date(r.date) < fromDay);
+    const opening = rows.find(r => r.pinned);
+    const bf = before ? before.balance : opening ? opening.balance : 0;
+    return [{ id: "brought-forward", date: from, particulars: `Opening balance on ${fmtDate(from)} — brought forward`, debit: 0, credit: 0, balance: bf, kind: "Opening", pinned: true } as StatementRow];
+  })() : filtered.filter(r => r.pinned);
   const onlyPinned = entries.length === 0 && pinned.length > 0;
 
   // The bill / invoice number in a column of its own whenever any entry has one —

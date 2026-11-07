@@ -139,6 +139,7 @@ import type { MaterialDef, MaterialKey } from "./materials";
 import type { ItemDesign, ItemSpecs } from "./pure/catalogMedia";
 export type { MaterialDef, MaterialKey } from "./materials";
 import { KARAT_PURITY, toPureGold, pureFromPurity, openingDebitAmt, openingCreditAmt, hasOpeningBalance } from "./pure/basics";
+import { closedTo, isClosedDate, lockBreaches, breachMessage } from "./yearLock";
 export { KARAT_PURITY, toPureGold, pureFromPurity, openingDebitAmt, openingCreditAmt, hasOpeningBalance };
 
 export interface OpeningBalanceInfo {
@@ -1284,6 +1285,27 @@ export interface Settings {
   // Monotonic counter behind nextDiamondStockNumber() — never reused even if
   // a packet is later deleted, unset = no certified packet has been numbered yet.
   nextDiamondStockNo?: number;
+  /** Year closing (lib/yearLock.ts): the last day of the last closed financial
+   *  year, "YYYY-MM-DD". Nothing dated on or before it can be added, changed or
+   *  deleted until the main admin reopens that year. Unset = no year closed. */
+  booksClosedTo?: string;
+  /** The month the financial year starts in, 1–12. Unset = 4 (April, India's).
+   *  Fixed once the first year is closed. */
+  fyStartMonth?: number;
+  /** Every year closed or reopened, newest last — the small public part of each
+   *  close (the figures themselves are admin-only, in adminRecords). */
+  yearCloses?: YearCloseEntry[];
+}
+
+/** One financial year's close, as every signed-in person may read it. */
+export interface YearCloseEntry {
+  /** "2025-26". */
+  key: string;
+  from: string;
+  to: string;
+  status: "closed" | "reopened";
+  /** Each close and reopen, oldest first — who, when, why. */
+  log: { action: "closed" | "reopened"; at: string; by: string; byName: string; note?: string }[];
 }
 
 /** A saved label profile — the size & layout to print a barcode band at, so it
@@ -2090,6 +2112,10 @@ export interface MaterialIssuance {
   issuedAt: string;
   issuedBy: string;
   status: "open" | "closed"; // "closed" = wastage finalized
+  /** When it was closed (Final Approval, a cancel, the leftover settled) — the
+   *  year-closing lock (lib/yearLock.ts) dates its final figures by it. Unset on
+   *  issues closed before this was kept: their last piece back, or the issue day. */
+  closedAt?: string;
   finishedPieces: FinishedPiece[];
   makingCharges: { amountInr: number; payments: FactoryChargePayment[] };
   notes?: string;
@@ -2252,7 +2278,12 @@ export interface DB {
  */
 export type AdminRecord =
   | { id: "fx"; kind: "fx"; rates: { from: string; rate: number }[]; flat?: number }
-  | { id: string; kind: "stockCost"; itemId: string; cost: number };
+  | { id: string; kind: "stockCost"; itemId: string; cost: number }
+  /** A closed year's Year book: every balance as it stood on the last day of
+   *  the year, frozen when it was closed (lib/yearEnd.ts). Kept in parts, one
+   *  record each (id "year_<key>_<part>"), so a big business never meets the
+   *  one-megabyte limit of a single record. */
+  | { id: string; kind: "yearBook"; key: string; part: string; book: unknown };
 
 const LEGACY_KEY = "starlink_db_v2"; // pre-Firebase localStorage blob (migrated on first run)
 
@@ -2524,12 +2555,32 @@ export function allocateInOrder(
  * already paid, or an over-sized single payment.)
  */
 export function capOrderAdvances(o: Order): number {
-  const r2 = (n: number) => Math.round(n * 100) / 100;
-  let excess = r2(totalAdvance(o) - orderTotal(o));
+  const excess = Math.round((totalAdvance(o) - orderTotal(o)) * 100) / 100;
   if (excess <= 0) return 0;
-  const reclaimed = excess;
-  const adv = o.advances || [];
+  return releaseAdvances(o, excess, new Date().toISOString(), "Moved to the client's credit");
+}
+
+/**
+ * Take `amount` of the money paid on an order off it — newest payment first —
+ * for the caller to put on the client's credit (an over-payment, a cancel, a
+ * melt). Returns what came off.
+ *
+ * A payment dated in a closed year (lib/yearLock.ts) is never shortened or
+ * removed: that would rewrite a year already closed. What still has to come off
+ * is a "moved to credit" line dated now instead — a negative entry, the way an
+ * accountant corrects a closed period with an entry in the open one. Totals
+ * read the same either way (totalAdvance adds the lines up).
+ */
+export function releaseAdvances(o: Order, amount: number, at: string, note: string): number {
+  const r2 = (n: number) => Math.round(n * 100) / 100;
+  let excess = r2(amount);
+  if (excess <= 0) return 0;
+  if (!o.advances) o.advances = [];
+  const adv = o.advances;
+  const until = closedTo(cache.settings);
   for (let i = adv.length - 1; i >= 0 && excess > 0.001; i--) {
+    if (adv[i].amount <= 0) continue; // a "moved to credit" line itself
+    if (until && isClosedDate(adv[i].createdAt || "", cache.settings)) continue; // closed — left as it is
     if (adv[i].amount <= excess + 0.001) {
       excess = r2(excess - adv[i].amount);
       adv.splice(i, 1);
@@ -2538,7 +2589,8 @@ export function capOrderAdvances(o: Order): number {
       excess = 0;
     }
   }
-  return reclaimed;
+  if (excess > 0.001) adv.push({ id: uid("adv_"), amount: -excess, note, recordedBy: "system", createdAt: at, fromCredit: true });
+  return r2(amount);
 }
 
 /**
@@ -2941,6 +2993,32 @@ function emit() {
 }
 
 /** Persist the current cache to Firestore, writing only what changed vs `remote`. */
+/**
+ * Put back every record a refused save would have changed — to what the server
+ * holds — and say why. Used when a save would touch a closed year.
+ */
+function refuseSave(
+  raw: { col: string; id: string; before: Record<string, unknown> | null }[],
+  breaches: string[],
+): void {
+  for (const r of raw) {
+    if (r.col === SETTINGS_COL) { cache.settings = clean(remote.settings); continue; }
+    const col = r.col as ArrayCol;
+    const list = cache[col] as unknown as Record<string, unknown>[] | undefined;
+    if (!list) continue;
+    const at = list.findIndex(x => docId(col, x) === r.id);
+    if (r.before) {
+      const back = clean(r.before);
+      if (at >= 0) list[at] = back; else list.push(back);
+    } else if (at >= 0) list.splice(at, 1);
+    intentDeletes[col]?.delete(r.id);
+  }
+  emit();
+  const message = breachMessage(breaches, remote.settings);
+  console.warn("[year lock] save refused:", breaches);
+  if (typeof window !== "undefined") window.dispatchEvent(new CustomEvent("starlink-year-locked", { detail: message }));
+}
+
 async function persist() {
   // Snapshot the state we are about to commit. Diffing and the post-commit
   // reconciliation both use this frozen copy, so a concurrent updateDb() during
@@ -3077,6 +3155,25 @@ async function persist() {
       if (!desired[auid]) {
         idxOps.push({ kind: "del", col: INDEX_COL, id: auid });
         idxDeletes.push(auid);
+      }
+    }
+  }
+
+  // ── The closed-year lock (lib/yearLock.ts) ──
+  // Checked here, where every save passes, so no screen can get round it. The
+  // lock in force is the server's (remote), never a local edit of it. A save
+  // that would touch a closed year is refused WHOLE — every record in it goes
+  // back to what the server holds — so nothing is ever half-saved. Nothing has
+  // been awaited yet in this save, so the cache still equals `snap` and the
+  // records put back are exactly this save's.
+  if (logRaw.length) {
+    const until = closedTo(remote.settings);
+    const touchesClose = logRaw.some(r => r.col === SETTINGS_COL);
+    if (until || touchesClose) {
+      const breaches = lockBreaches(logRaw, until, isAdminEmail(fbAuth.currentUser?.email));
+      if (breaches.length) {
+        refuseSave(logRaw, breaches);
+        return;
       }
     }
   }
