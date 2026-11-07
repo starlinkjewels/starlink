@@ -34,6 +34,7 @@ import { supplierSalesProfit } from "./supplierSales";
 import { companiesOf } from "./companies";
 import { materialDefs, materialName, materialUnit } from "./materials";
 import { dayOf, type FiscalYear } from "./fiscalYear";
+import { advanceOwed } from "./employeeAdvances";
 
 /** Bumped when the book's shape changes, so an older book is read for what it holds. */
 export const YEAR_BOOK_VERSION = 1;
@@ -261,6 +262,8 @@ export interface YearBook {
   brokers: (PartyLine & { due: number })[];
   designers: (PartyLine & { due: number })[];
   lockers: (PartyLine & { currency: string; balance: number })[];
+  /** Advances (upad) employees owe back, by currency. */
+  employees: (PartyLine & { owed: Record<string, number> })[];
   stock: StockLine[];
   packets: ReturnType<typeof packetsAsAt>;
   readyStock: ReturnType<typeof readyStockAsAt>;
@@ -336,6 +339,14 @@ export function buildYearBook(db: DB, fy: FiscalYear): YearBook {
     if (nonZero(due)) designers.push({ id: d.id, name: d.name, due });
   }
 
+  // Employees' advances (upad) — money they owe back.
+  const employees: YearBook["employees"] = [];
+  for (const u of db.users) {
+    if (u.role !== "employee" && u.role !== "admin") continue;
+    const owed = Object.fromEntries([...advanceOwed(db, u, day)].filter(([, v]) => Math.abs(v) >= 0.005));
+    if (Object.keys(owed).length) employees.push({ id: u.id, name: u.name, owed });
+  }
+
   // Lockers
   const lockers: YearBook["lockers"] = [];
   for (const l of db.lockers) {
@@ -350,7 +361,7 @@ export function buildYearBook(db: DB, fy: FiscalYear): YearBook {
     clients: clients.sort((a, b) => b.net - a.net),
     suppliers: suppliers.sort((a, b) => b.net - a.net),
     factories: factories.sort((a, b) => b.owed - a.owed),
-    brokers, designers, lockers,
+    brokers, designers, lockers, employees,
     stock: stockAsAt(db, day),
     packets: packetsAsAt(db, day),
     readyStock: readyStockAsAt(db, day),
@@ -399,13 +410,13 @@ export function closeChecks(db: DB, fy: FiscalYear, book: YearBook): CloseCheck[
 
 /** The parts the Year book is stored in (one admin record each). */
 export function bookParts(book: YearBook): Record<string, unknown> {
-  const { clients, suppliers, factories, brokers, designers, lockers, stock, ...head } = book;
-  return { head, parties: { clients, suppliers, factories, brokers, designers, lockers }, stock: { stock } };
+  const { clients, suppliers, factories, brokers, designers, lockers, employees, stock, ...head } = book;
+  return { head, parties: { clients, suppliers, factories, brokers, designers, lockers, employees }, stock: { stock } };
 }
 export function bookFromParts(parts: Record<string, unknown>): YearBook | null {
   const head = parts.head as Partial<YearBook> | undefined;
   if (!head) return null;
   const p = (parts.parties ?? {}) as Partial<YearBook>;
   const s = (parts.stock ?? {}) as Partial<YearBook>;
-  return { ...(head as YearBook), clients: p.clients ?? [], suppliers: p.suppliers ?? [], factories: p.factories ?? [], brokers: p.brokers ?? [], designers: p.designers ?? [], lockers: p.lockers ?? [], stock: s.stock ?? [] };
+  return { ...(head as YearBook), clients: p.clients ?? [], suppliers: p.suppliers ?? [], factories: p.factories ?? [], brokers: p.brokers ?? [], designers: p.designers ?? [], lockers: p.lockers ?? [], employees: p.employees ?? [], stock: s.stock ?? [] };
 }

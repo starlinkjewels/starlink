@@ -514,6 +514,10 @@ function BookBody({ book }: { book: YearBook }) {
           href={r => (r.kind === "Broker" ? `/suppliers/brokers/${r.id}` : `/designers/${r.id}`)}
           figures={[{ key: "kind", header: "", get: () => 0, text: r => r.kind }, { key: "net", header: "Balance", get: r => r.net, fmt: inr }]} />
       )}
+      {book.employees.length > 0 && (
+        <PartyTable title="Employees — advance (upad)" sub="What each still owed back" rows={book.employees} id="yb-employees" exportName={`Year-book-employee-advances${suffix}`}
+          href={r => `/employees/${r.id}`} figures={[{ key: "owed", header: "Advance owed", get: r => Object.values(r.owed).reduce((s, v) => s + v, 0), text: r => Object.entries(r.owed).map(([c, v]) => fmtCcy(v, c)).join(" · ") }]} />
+      )}
       <PartyTable title="Cash & bank accounts" sub="Each in its own currency" rows={book.lockers} id="yb-lockers" exportName={`Year-book-accounts${suffix}`}
         href={() => "/locker"} figures={[{ key: "bal", header: "Balance", get: r => r.balance, text: r => fmtCcy(r.balance, r.currency) }]} />
 

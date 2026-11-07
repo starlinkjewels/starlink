@@ -37,6 +37,12 @@ import { ccy, ccyOrder, fmtCcyPdf, sumByCcy } from "@/lib/currency";
 import { StatementLedger, type StatementRow } from "@/components/StatementLedger";
 import { PhoneLink, EmailLink } from "@/components/ContactLink";
 import { CompaniesDialog, GiveLoginDialog } from "@/pages/Employees";
+import { AdvanceSheet, WriteOffSheet } from "@/components/EmployeeAdvanceSheets";
+import { ADVANCE_LABEL, advanceRows, advanceOwed, advanceChangeProblem, moveToAdvance, moveToAdvanceWhy, type AdvanceRow } from "@/lib/employeeAdvances";
+import { closedWhy } from "@/lib/yearLock";
+import { confirmBox } from "@/lib/confirm";
+import { updateDbAs } from "@/lib/db";
+import { HandCoins, Undo2, Eraser, ArrowRightLeft } from "lucide-react";
 
 export function EmployeeDetailPage() {
   const mayExport = useMayExport();
@@ -56,6 +62,9 @@ export function EmployeeDetailPage() {
   const [paying, setPaying] = useState(false);
   // A fresh form each time it opens (the payment panel keeps what was typed while mounted).
   const [payKey, setPayKey] = useState(0);
+  // Their advance (upad): give one, take a repayment (or correct either), write it off.
+  const [advSheet, setAdvSheet] = useState<{ mode: "give" | "repay"; editId?: string } | null>(null);
+  const [writingOff, setWritingOff] = useState(false);
   const can = useCan();
   const mayPay = can("payments", "add");
 
@@ -217,9 +226,70 @@ export function EmployeeDetailPage() {
     const x = db.expenses.find(e => e.id === r.id);
     if (!x) return [];
     const editWhy = expenseRight(x, "edit"), delWhy = expenseRight(x, "delete");
+    // An old payment that was really an advance (upad): it becomes one they owe —
+    // the same account entry, out of Expenses and Profit & Loss.
+    const moveWhy = editWhy ?? moveToAdvanceWhy(db, x);
     return [
-      { label: "Edit", icon: Pencil, hint: editWhy ?? "Its account entry moves with it", disabled: !!editWhy, onSelect: () => setEditingExpense(x.id) },
+      { label: "Edit", icon: Pencil, hint: editWhy ?? (x.advanceRecovery ? "Part of a salary cut from their advance" : "Its account entry moves with it"), disabled: !!editWhy, onSelect: () => setEditingExpense(x.id) },
+      { label: "Move to advances", icon: ArrowRightLeft, hint: moveWhy ?? "It was an advance (upad) — they owe it back", disabled: !!moveWhy,
+        show: !x.advanceRecovery && mayPay, onSelect: () => void moveOldToAdvance(x.id) },
       { label: "Delete", icon: Trash2, danger: true, hint: delWhy, disabled: !!delWhy, onSelect: () => confirmDeleteExpense(x) },
+    ];
+  };
+  const moveOldToAdvance = async (expenseId: string) => {
+    const x = loadDb().expenses.find(e => e.id === expenseId);
+    if (!x) return;
+    const why = closedWhy(x.createdAt, db.settings) ?? moveToAdvanceWhy(loadDb(), x);
+    if (why) { toast.error(why); return; }
+    if (!(await confirmBox(`Move this payment to ${employee.name}'s advances?\n\n${x.title} · ${fmtExpenseAmount(x.amount, x.currency)} · ${fmtDate(x.createdAt)}\n\nIt stops being an expense (out of Expenses and Profit & Loss) and becomes an advance they owe back. The account entry stays exactly as it is.`))) return;
+    updateDbAs({ summary: `Moved to advances: ${x.title} — ${employee.name}` }, d => { moveToAdvance(d, expenseId); });
+    toast.success("Moved to their advances");
+  };
+
+  // ── Advance (upad): given, repaid, cut from salary, written off — one account per currency ──
+  const advRows = advanceRows(db, employee);
+  const owedNow = advanceOwed(db, employee);
+  const advCcys = [...new Set(advRows.map(r => r.currency))].sort(ccyOrder);
+  const mainAdmin = isAdminEmail(auth.currentUser?.email);
+  const advStatement = (code: string): StatementRow[] => {
+    let running = 0;
+    return advRows.filter(r => r.currency === code).map(r => {
+      running = Math.round((running + r.amount) * 100) / 100;
+      return {
+        id: r.id, date: r.date, kind: ADVANCE_LABEL[r.kind],
+        particulars: [ADVANCE_LABEL[r.kind], r.note].filter(Boolean).join(" — "),
+        debit: r.amount > 0 ? r.amount : 0, credit: r.amount < 0 ? -r.amount : 0, balance: running, pinned: r.kind === "opening",
+      };
+    }).reverse();
+  };
+  const advRowOf = (id: string): AdvanceRow | undefined => advRows.find(r => r.id === id);
+  const advanceRowActions = (s: StatementRow): MoreAction[] => {
+    const r = advRowOf(s.id);
+    if (!r || r.kind === "opening") return [];
+    const closed = closedWhy(r.date, db.settings) ?? undefined;
+    if (r.kind === "given" || r.kind === "repaid") {
+      const mayEdit = can("payments", "edit"), mayDel = can("payments", "delete");
+      const delWhy = closed ?? (mayDel ? advanceChangeProblem(db, r.id, null) : "Your access doesn't let you delete payments");
+      return [
+        { label: "Edit", icon: Pencil, hint: closed ?? (mayEdit ? "Account, amount, date and note" : "Your access doesn't let you edit payments"), disabled: !!closed || !mayEdit,
+          onSelect: () => setAdvSheet({ mode: r.kind === "given" ? "give" : "repay", editId: r.id }) },
+        { label: "Delete", icon: Trash2, danger: true, hint: delWhy ?? "Out of the account and off their advance", disabled: !!delWhy,
+          onSelect: async () => {
+            const why = closedWhy(r.date, db.settings) ?? advanceChangeProblem(loadDb(), r.id, null);
+            if (why) { toast.error(why); return; }
+            if (!(await confirmBox(`Delete this ${r.kind === "given" ? "advance" : "repayment"}?\n\n${fmtExpenseAmount(Math.abs(r.amount), r.currency)} · ${fmtDate(r.date)}\n\nIt comes out of the account and off ${employee.name}'s advance.`))) return;
+            updateDbAs({ summary: `Deleted ${r.kind === "given" ? "an advance to" : "a repayment by"} ${employee.name}` }, d => { d.lockerTransactions = (d.lockerTransactions ?? []).filter(t => t.id !== r.id); });
+            toast.success("Deleted");
+          } },
+      ];
+    }
+    // A cut from salary, or a write-off: an expense with no account.
+    const x = db.expenses.find(e => e.id === r.id);
+    if (!x) return [];
+    const editWhy = expenseRight(x, "edit"), delWhy = expenseRight(x, "delete") ?? (r.kind === "writeoff" && !mainAdmin ? "Only the main admin can undo a write-off" : undefined);
+    return [
+      { label: "Edit", icon: Pencil, hint: editWhy ?? "Amount, date and note", disabled: !!editWhy, onSelect: () => setEditingExpense(x.id) },
+      { label: "Delete", icon: Trash2, danger: true, hint: delWhy ?? "It goes back on what they owe", disabled: !!delWhy, onSelect: () => confirmDeleteExpense(x) },
     ];
   };
 
@@ -275,7 +345,7 @@ export function EmployeeDetailPage() {
     subjectLines: [
       `Name: ${employee.name}`,
       employee.department ? `Department: ${employee.department}` : "",
-      `Total paid to date: ${pdfMix(salaryTotals.total)}`,
+      `Total paid to date: ${pdfMix(salaryTotals.total)}${salaryLedger.some(e => e.advanceRecovery) ? " (incl. salary cut from an advance)" : ""}`,
       `Report Generated: ${new Date().toLocaleDateString("en-IN", { month: "long", day: "numeric", year: "numeric" })}`,
     ].filter(Boolean),
     summary: [],
@@ -286,14 +356,44 @@ export function EmployeeDetailPage() {
     filename: `Salary-${employee.name.replace(/\s+/g, "_")}`,
   });
 
+  // Their advance account as a sheet — given, back, and what they owe, oldest first.
+  const advSheetRows = advRows.map(r => [fmtDate(r.date), ADVANCE_LABEL[r.kind] + (r.note ? ` — ${r.note}` : ""), r.amount > 0 ? r.amount : "", r.amount < 0 ? -r.amount : "", r.currency]);
+  const exportAdvanceCsv = () => downloadCsv(
+    `Advance-${employee.name.replace(/\s+/g, "_")}`,
+    ["Date", "Particulars", "Given", "Came back", "Currency"],
+    advSheetRows,
+  );
+  const exportAdvancePdf = () => downloadLedgerPdf({
+    title: "Advance (Upad) Sheet",
+    subjectLines: [
+      `Name: ${employee.name}`,
+      `Owed now: ${owedNow.size ? pdfMix(owedNow) : fmtCcyPdf(0, "INR")}`,
+      `Report Generated: ${new Date().toLocaleDateString("en-IN", { month: "long", day: "numeric", year: "numeric" })}`,
+    ],
+    summary: [],
+    columns: [{ header: "Date", x: 20 }, { header: "Particulars", x: 50 }, { header: "Given", x: 150 }, { header: "Came back", x: 180 }],
+    align: ["left", "left", "right", "right"],
+    rows: advRows.map(r => [fmtDate(r.date), (ADVANCE_LABEL[r.kind] + (r.note ? ` — ${r.note}` : "")).slice(0, 52), r.amount > 0 ? fmtCcyPdf(r.amount, r.currency) : "", r.amount < 0 ? fmtCcyPdf(-r.amount, r.currency) : ""]),
+    totalsRow: ["", "Owed now", "", owedNow.size ? pdfMix(owedNow) : "0"],
+    filename: `Advance-${employee.name.replace(/\s+/g, "_")}`,
+  });
+
   // The salary sheet's downloads and the opening amount sit in the page's ⋯
   // with the rest — the opening line is pinned, and a pinned line has no ⋯ of
   // its own.
   const hasSalary = salaryLedger.length > 0 || opening > 0;
+  const anyOwed = [...owedNow.values()].some(v => v > 0.005);
+  const advanceMenu: MoreAction[] = [
+    { label: "Give advance (upad)", icon: HandCoins, hint: "Money they owe back", onSelect: () => setAdvSheet({ mode: "give" }), show: mayPay },
+    { label: "Receive advance repayment", icon: Undo2, hint: anyOwed ? "Cash they hand back" : "They owe no advance", disabled: !anyOwed, onSelect: () => setAdvSheet({ mode: "repay" }), show: mayPay },
+    { label: "Write off advance", icon: Eraser, hint: !anyOwed ? "They owe no advance" : mainAdmin ? "They left — it won't come back" : "Only the main admin", disabled: !anyOwed || !mainAdmin, danger: true, onSelect: () => setWritingOff(true), show: mayPay },
+  ];
   const salaryMenu: MoreAction[] = [
     { label: opening > 0 ? "Edit opening amount" : "Add opening amount", icon: Wallet, hint: "Paid before this app", onSelect: () => setEditingSelf(true) },
     { label: "Salary sheet — PDF", icon: FileText, hint: "Every payment, with the total", onSelect: exportSalaryPdf, show: hasSalary && mayExport },
     { label: "Salary sheet — Excel", icon: FileSpreadsheet, hint: "Opens in Excel or Google Sheets", onSelect: exportSalaryCsv, show: hasSalary && mayExport },
+    { label: "Advance sheet — PDF", icon: FileText, hint: "Given, came back, owed now", onSelect: exportAdvancePdf, show: advRows.length > 0 && mayExport },
+    { label: "Advance sheet — Excel", icon: FileSpreadsheet, hint: "Opens in Excel or Google Sheets", onSelect: exportAdvanceCsv, show: advRows.length > 0 && mayExport },
   ];
 
   const taskBar = tasks.length ? Math.round((doneTasks / tasks.length) * 100) : 0;
@@ -306,7 +406,7 @@ export function EmployeeDetailPage() {
         title={employee.name}
         subtitle={employee.department || undefined}
         primary={{ label: "Assign / View Tasks", icon: ListTodo, onClick: () => setTasksOpen(true) }}
-        menu={[...profileActions, ...salaryMenu]}
+        menu={[...profileActions, ...salaryMenu, ...advanceMenu]}
       >
         <div className="mt-2"><StatusBadge status={employee.status} /></div>
       </PageHeader>
@@ -421,6 +521,52 @@ export function EmployeeDetailPage() {
         </div>
       )}
 
+      {/* Advance (upad) — what they owe back, line by line, one account per currency. */}
+      {advRows.length === 0 ? (
+        <div className="card-luxe overflow-hidden">
+          <SectionTitle title="Advance (upad)" className="px-5 py-4 border-b border-border/60"
+            info={<>Money given ahead of their pay. Not an expense — they owe it back: repaid in cash, cut from their salary when you pay it, or written off.</>} />
+          <div className="flex flex-col items-center justify-center py-10 text-muted-foreground px-5 text-center">
+            <HandCoins className="h-10 w-10 mb-2 opacity-20" />
+            <p className="text-sm">No advance given.</p>
+            {mayPay && <Button type="button" variant="outline" onClick={() => setAdvSheet({ mode: "give" })} className="rounded-xl h-9 mt-3 gap-1.5"><HandCoins className="h-4 w-4" /> Give advance</Button>}
+          </div>
+        </div>
+      ) : (
+        <div className="space-y-2">
+          {mayPay && (
+            <div className="flex justify-end gap-2 flex-wrap">
+              <Button type="button" variant="outline" onClick={() => setAdvSheet({ mode: "give" })} className="rounded-xl h-9 gap-1.5"><HandCoins className="h-4 w-4" /> Give advance</Button>
+              <Button type="button" variant="outline" disabled={!anyOwed} onClick={() => setAdvSheet({ mode: "repay" })} className="rounded-xl h-9 gap-1.5"><Undo2 className="h-4 w-4" /> Receive repayment</Button>
+            </div>
+          )}
+          {advCcys.map(code => {
+            const rows = advStatement(code);
+            const lines = advRows.filter(r => r.currency === code);
+            const given = lines.filter(r => r.amount > 0).reduce((s, r) => s + r.amount, 0);
+            const back = lines.filter(r => r.amount < 0).reduce((s, r) => s - r.amount, 0);
+            const owed = owedNow.get(code) ?? 0;
+            return (
+              <StatementLedger
+                key={`adv-${code}`}
+                title={advCcys.length === 1 ? "Advance (upad)" : `Advance (upad) — ${code}`}
+                caption={owed > 0.005 ? `Owes ${fmtExpenseAmount(owed, code)}` : "Nothing owed"}
+                rows={rows}
+                fmt={(v: number) => fmtExpenseAmount(v, code)}
+                debitLabel="Given"
+                creditLabel="Came back"
+                rowActions={advanceRowActions}
+                summary={[
+                  { label: "Owed now", value: fmtExpenseAmount(owed, code), tone: owed > 0.005 ? "due" : "neutral" },
+                  { label: "Given", value: fmtExpenseAmount(given, code), tone: "out" },
+                  { label: "Came back", value: fmtExpenseAmount(back, code), tone: "in", sub: "Repaid, cut from salary, written off" },
+                ]}
+              />
+            );
+          })}
+        </div>
+      )}
+
       {/* Assigned Clients — how many, and their orders, are the strip's above. */}
       <div className="card-luxe overflow-hidden">
         <SectionTitle title="Assigned Clients" sub={orders.length ? `${fmtMoney(totalValue)} in orders` : undefined} className="px-5 py-4 border-b border-border/60" />
@@ -478,6 +624,8 @@ export function EmployeeDetailPage() {
           Salary chosen and this person already picked. */}
       {mayPay && <PayExpense key={payKey} open={paying} onOpenChange={setPaying} forEmployee employeeId={employee.id} />}
       {managing && <ManageAccessDialog u={employee} onClose={() => setManaging(false)} />}
+      {advSheet && <AdvanceSheet employeeId={employee.id} mode={advSheet.mode} editId={advSheet.editId} onClose={() => setAdvSheet(null)} />}
+      {writingOff && <WriteOffSheet employeeId={employee.id} onClose={() => setWritingOff(false)} />}
       {givingLogin && <GiveLoginDialog u={employee} onClose={() => setGivingLogin(false)} />}
       {companiesOpen && <CompaniesDialog u={employee} onClose={() => setCompaniesOpen(false)} />}
     </div>

@@ -19,6 +19,7 @@ import { Switch } from "@/components/ui/switch";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import { confirmBox } from "@/lib/confirm";
+import { openMin } from "@/lib/openMin";
 
 // Departments: Settings → Dropdown lists.
 
@@ -100,6 +101,10 @@ export function EmployeeCreateDialog({ open, onOpenChange, onCreated }: {
   const [openingPaid, setOpeningPaid] = useState("");
   const [openingCurrency, setOpeningCurrency] = useState<"INR" | "USD">("INR");
   const [openingDate, setOpeningDate] = useState("");
+  // An advance (upad) they already owe from before the app — optional, as on Edit.
+  const [openingAdv, setOpeningAdv] = useState("");
+  const [advCurrency, setAdvCurrency] = useState<"INR" | "USD">("INR");
+  const [advDate, setAdvDate] = useState("");
 
   // Which step is showing, and whether Next was refused (marks the empty fields).
   const [step, setStep] = useState<StepKey>("person");
@@ -165,6 +170,7 @@ export function EmployeeCreateDialog({ open, onOpenChange, onCreated }: {
       if (asAdmin && !(await confirmBox(`Create ${f.name.trim()} as an admin?\n\nThey will be able to do everything — money, settings, employees, roles and other admins. Owners stay owners.`))) return;
       const authUid = needsLogin ? await createAuthUser(email, f.password) : undefined;
       const opAmt = Number(openingPaid);
+      const advAmt = Number(openingAdv);
       const at = new Date().toISOString();
       updateDb(d => {
         d.users.push({
@@ -177,6 +183,9 @@ export function EmployeeCreateDialog({ open, onOpenChange, onCreated }: {
         openingPaid: opAmt > 0 ? opAmt : undefined,
         openingPaidCurrency: opAmt > 0 ? openingCurrency : undefined,
         openingPaidDate: opAmt > 0 ? (openingDate || undefined) : undefined,
+        openingAdvance: advAmt > 0 ? advAmt : undefined,
+        openingAdvanceCurrency: advAmt > 0 ? advCurrency : undefined,
+        openingAdvanceDate: advAmt > 0 ? (advDate || undefined) : undefined,
         } as User);
         // Their access: the role on their profile, anything changed for them
         // and any temporary access in their own record.
@@ -197,6 +206,7 @@ export function EmployeeCreateDialog({ open, onOpenChange, onCreated }: {
       setDraft(draftFor(loadDb().roles ?? [], null));
       setCoIds([]);
       setOpeningPaid(""); setOpeningCurrency("INR"); setOpeningDate("");
+      setOpeningAdv(""); setAdvCurrency("INR"); setAdvDate("");
     } catch (e) {
       toast.error(authErrorMessage(e));
     } finally { setSaving(false); }
@@ -239,6 +249,10 @@ export function EmployeeCreateDialog({ open, onOpenChange, onCreated }: {
     { label: "Opening paid",
       value: opAmtNow > 0
         ? `${openingCurrency === "INR" ? "₹" : "$"}${opAmtNow.toLocaleString("en-IN", { maximumFractionDigits: 2 })}${openingDate ? ` · as of ${day(`${openingDate}T00:00`)}` : ""}`
+        : <span className="text-muted-foreground">None</span> },
+    { label: "Advance owed",
+      value: Number(openingAdv) > 0
+        ? `${advCurrency === "INR" ? "₹" : "$"}${Number(openingAdv).toLocaleString("en-IN", { maximumFractionDigits: 2 })}${advDate ? ` · as of ${day(`${advDate}T00:00`)}` : ""}`
         : <span className="text-muted-foreground">None</span> },
   ];
   const bad = (empty: boolean) => (tried && empty ? "border-destructive focus-visible:ring-destructive" : "");
@@ -376,6 +390,28 @@ export function EmployeeCreateDialog({ open, onOpenChange, onCreated }: {
                   <div className="col-span-2 sm:col-span-1 min-w-0">
                     <Field id="ec-opening-date" label="As of date">
                       <Input id="ec-opening-date" type="date" value={openingDate} onChange={e => setOpeningDate(e.target.value)} className="h-10 rounded-xl" />
+                    </Field>
+                  </div>
+                </div>
+              </section>
+
+              {/* An advance (upad) already owed before the app (optional, migration) — as on Edit */}
+              <section className="space-y-3">
+                <SectionHead icon={<Wallet className="h-4 w-4 text-amber-600" />} title="Advance (upad) owed before this app" optional
+                  hint="What they still owed back then — the first line of their advance." />
+                <div className="grid grid-cols-2 sm:grid-cols-[9rem_minmax(0,1fr)_minmax(0,1fr)] gap-3">
+                  <Field label="Currency">
+                    <Select value={advCurrency} onValueChange={v => setAdvCurrency(v as "INR" | "USD")}>
+                      <SelectTrigger className="h-10 rounded-xl" aria-label="Advance currency"><SelectValue /></SelectTrigger>
+                      <SelectContent><SelectItem value="INR">₹ INR</SelectItem><SelectItem value="USD">$ USD</SelectItem></SelectContent>
+                    </Select>
+                  </Field>
+                  <Field id="ec-advance" label="Amount">
+                    <Input id="ec-advance" type="number" min={0} step="0.01" value={openingAdv} onChange={e => setOpeningAdv(e.target.value)} placeholder="0.00" className="h-10 rounded-xl" />
+                  </Field>
+                  <div className="col-span-2 sm:col-span-1 min-w-0">
+                    <Field id="ec-advance-date" label="As of date">
+                      <Input id="ec-advance-date" type="date" min={openMin()} value={advDate} onChange={e => setAdvDate(e.target.value)} className="h-10 rounded-xl" />
                     </Field>
                   </div>
                 </div>

@@ -17,6 +17,9 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { advanceOwed } from "@/lib/employeeAdvances";
+import { closedWhy } from "@/lib/yearLock";
+import { openMin } from "@/lib/openMin";
 
 /** The departments the Create Employee form offers (EmployeeCreateDialog). */
 // Departments: Settings → Dropdown lists.
@@ -46,6 +49,10 @@ function EmployeeSheet({ u, onClose }: { u: User; onClose: () => void }) {
     openingPaid: u.openingPaid ? String(u.openingPaid) : "",
     openingCurrency: (u.openingPaidCurrency ?? "INR") as "INR" | "USD",
     openingDate: u.openingPaidDate?.slice(0, 10) ?? "",
+    // An advance (upad) they already owed before the app (lib/employeeAdvances.ts).
+    advance: u.openingAdvance ? String(u.openingAdvance) : "",
+    advanceCurrency: (u.openingAdvanceCurrency === "USD" ? "USD" : "INR") as "INR" | "USD",
+    advanceDate: u.openingAdvanceDate?.slice(0, 10) ?? "",
   });
   const [coIds, setCoIds] = useState<string[]>(u.companyIds ?? []);
   // Documents (the business's own papers) — an admin lets an employee in, one by one.
@@ -56,6 +63,17 @@ function EmployeeSheet({ u, onClose }: { u: User; onClose: () => void }) {
     if (!f.name.trim()) { toast.error("Enter a name"); return; }
     const op = Number(f.openingPaid);
     if (f.openingPaid.trim() && !(op >= 0)) { toast.error("Enter a valid opening amount"); return; }
+    const adv = Number(f.advance);
+    if (f.advance.trim() && !(adv >= 0)) { toast.error("Enter a valid advance amount"); return; }
+    // Lowering it may not leave less owed than has already come back against it.
+    const nextAdv = adv > 0 ? adv : 0;
+    if (Math.abs(nextAdv - (u.openingAdvance ?? 0)) > 0.005 || (nextAdv > 0 && f.advanceCurrency !== (u.openingAdvanceCurrency ?? "INR"))) {
+      const live = loadDb();
+      const probe = { ...u, openingAdvance: nextAdv || undefined, openingAdvanceCurrency: f.advanceCurrency, openingAdvanceDate: f.advanceDate || undefined };
+      if ([...advanceOwed(live, probe).values()].some(v => v < -0.005)) { toast.error(`More has come back against ${u.name}'s advance than that — lower the repayments or cuts first.`); return; }
+      const closed = closedWhy(f.advanceDate || u.openingAdvanceDate || u.createdAt, live.settings);
+      if (closed) { toast.error(closed); return; }
+    }
     updateDb(d => {
       const x = d.users.find(y => y.id === u.id);
       if (!x) return;
@@ -77,6 +95,14 @@ function EmployeeSheet({ u, onClose }: { u: User; onClose: () => void }) {
         x.openingPaidDate = f.openingDate || undefined;
       } else {
         delete x.openingPaid; delete x.openingPaidCurrency; delete x.openingPaidDate;
+      }
+      // Advance owed before the app: the first line of their advance account.
+      if (adv > 0) {
+        x.openingAdvance = adv;
+        x.openingAdvanceCurrency = f.advanceCurrency;
+        x.openingAdvanceDate = f.advanceDate || undefined;
+      } else {
+        delete x.openingAdvance; delete x.openingAdvanceCurrency; delete x.openingAdvanceDate;
       }
     });
     toast.success(`${f.name.trim()} updated`);
@@ -170,6 +196,30 @@ function EmployeeSheet({ u, onClose }: { u: User; onClose: () => void }) {
             <div className="col-span-2 sm:col-span-1">
               <Label htmlFor="ee-opening-date" className="text-xs">As of date</Label>
               <Input id="ee-opening-date" type="date" value={f.openingDate} onChange={e => setF({ ...f, openingDate: e.target.value })} className="h-10 rounded-xl mt-1" />
+            </div>
+          </div>
+        </section>
+
+        <section className="space-y-3">
+          <div>
+            <p className="text-sm font-semibold text-brand-dark flex items-center gap-1.5"><Wallet className="h-4 w-4 text-amber-600" />Advance (upad) owed before this app</p>
+            <p className="text-xs text-muted-foreground mt-0.5">What they still owed back then — the first line of their advance.</p>
+          </div>
+          <div className="grid grid-cols-2 sm:grid-cols-[8rem_minmax(0,1fr)_minmax(0,1fr)] gap-3">
+            <div>
+              <Label className="text-xs">Currency</Label>
+              <Select value={f.advanceCurrency} onValueChange={v => setF({ ...f, advanceCurrency: v as "INR" | "USD" })}>
+                <SelectTrigger className="h-10 rounded-xl mt-1" aria-label="Advance currency"><SelectValue /></SelectTrigger>
+                <SelectContent><SelectItem value="INR">₹ INR</SelectItem><SelectItem value="USD">$ USD</SelectItem></SelectContent>
+              </Select>
+            </div>
+            <div>
+              <Label htmlFor="ee-advance" className="text-xs">Amount</Label>
+              <Input id="ee-advance" type="number" min={0} step="0.01" value={f.advance} onChange={e => setF({ ...f, advance: e.target.value })} placeholder="0.00" className="h-10 rounded-xl mt-1" />
+            </div>
+            <div className="col-span-2 sm:col-span-1">
+              <Label htmlFor="ee-advance-date" className="text-xs">As of date</Label>
+              <Input id="ee-advance-date" type="date" min={openMin()} value={f.advanceDate} onChange={e => setF({ ...f, advanceDate: e.target.value })} className="h-10 rounded-xl mt-1" />
             </div>
           </div>
         </section>
