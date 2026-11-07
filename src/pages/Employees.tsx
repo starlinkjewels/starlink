@@ -31,6 +31,7 @@ import { usePagination } from "@/hooks/usePagination";
 import { PaginationBar } from "@/components/PaginationBar";
 import { EmployeeEditDialog } from "@/components/EmployeeEditDialog";
 import { confirmDeleteEmployee, employeeDeleteBlock } from "@/lib/employeeGuards";
+import { advanceOwed } from "@/lib/employeeAdvances";
 
 const PAGE_SIZE = 12;
 
@@ -127,7 +128,8 @@ export function EmployeesPage() {
    *  with what was already paid before this app (its opening line, dated as the details page dates it). */
   const salaryIn = (userId: string) => {
     const u = db.users.find(x => x.id === userId);
-    const lines: { amount: number; currency?: string }[] = (db.expenses ?? []).filter(e => e.paidToEmployeeId === userId && inPeriod(e.createdAt));
+    // An advance written off is not pay (lib/employeeAdvances.ts).
+    const lines: { amount: number; currency?: string }[] = (db.expenses ?? []).filter(e => e.paidToEmployeeId === userId && !e.advanceWriteOff && inPeriod(e.createdAt));
     if (u?.openingPaid && u.openingPaid > 0 && inPeriod(u.openingPaidDate || u.createdAt)) lines.push({ amount: u.openingPaid, currency: u.openingPaidCurrency ?? "INR" });
     return sumByCcy(lines, e => e.amount, e => e.currency);
   };
@@ -136,6 +138,9 @@ export function EmployeesPage() {
     return [...m.entries()].filter(([, v]) => v).sort(([a], [b]) => ccyOrder(a, b)).map(([c, v]) => fmtCcy(v, c)).join(" + ");
   };
   const salarySort = (userId: string) => [...salaryIn(userId).entries()].reduce((s, [c, v]) => s + (ccy(c) === "INR" ? v : v * 100), 0);
+  /** Advance (upad) they owe now, by currency. */
+  const advText = (u: User) => [...advanceOwed(db, u).entries()].filter(([, v]) => v > 0.005).sort(([a], [b]) => ccyOrder(a, b)).map(([c, v]) => fmtCcy(v, c)).join(" + ");
+  const advSort = (u: User) => [...advanceOwed(db, u).entries()].reduce((s, [c, v]) => s + (ccy(c) === "INR" ? v : v * 100), 0);
   /** The orders they took in the month shown — not cancelled or deleted — and from how many clients. */
   const takenBy = (userId: string) => {
     const list = db.orders.filter(o => o.assignedEmployeeId === userId && o.status !== "Rejected" && !o.deletedAt && inPeriod(o.createdAt));
@@ -202,6 +207,9 @@ export function EmployeesPage() {
     // For the month chosen above the table (or all time).
     { key: "salary", header: "Salary paid", align: "right", kind: "number", sortValue: u => salarySort(u.id), csv: u => salaryText(u.id),
       cell: u => { const t = salaryText(u.id); return grey(t ? 1 : 0, t || "—"); } },
+    // What they owe back of an advance (upad) now — whatever the month shown.
+    { key: "advance", header: "Advance owed", align: "right", kind: "number", sortValue: u => advSort(u), csv: u => advText(u),
+      cell: u => { const t = advText(u); return t ? <span className="font-medium text-amber-800 whitespace-nowrap">{t}</span> : grey(0, "—"); } },
     // How many orders they took, and from how many clients (companies) — one column, so the month's figures fit.
     { key: "orders", header: "Orders taken", align: "right", kind: "number", sortValue: u => takenBy(u.id).count,
       csv: u => `${takenBy(u.id).count} orders · ${takenBy(u.id).clients} clients`,

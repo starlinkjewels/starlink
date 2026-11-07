@@ -8,7 +8,7 @@ import { useEffect, useLayoutEffect, useState, type ReactNode } from "react";
 import { useSearchParams } from "react-router-dom";
 import { useAuth } from "@/lib/auth";
 import {
-  updateDb, fmtMoney,
+  updateDb, loadDb, fmtMoney,
   invoiceOrderIds, balanceDue, type Order, type Expense, type Locker, type LockerTransaction,
   DEFAULT_LOCKER_CATEGORIES, todayLocal, stampFor, dayOf,
   worksOnClientId,
@@ -37,6 +37,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import {
   CreditCard, Truck, Factory as FactoryIcon, Receipt, DollarSign, Landmark, BookOpen, Wallet,
   ArrowLeftRight, ArrowDownCircle, ArrowUpCircle, ListOrdered, Handshake, Users, Undo2,
+  HandCoins,
 } from "lucide-react";
 import { toast } from "sonner";
 import { confirmBox } from "@/lib/confirm";
@@ -47,6 +48,8 @@ import { notifyClientPayment, writeAccountEntry, writeExpense, writeFactoryPayme
 import { ReceiveFromBrokerSheet } from "@/components/ReceiveFromBrokerSheet";
 import { RefundClientSheet } from "@/components/RefundClientSheet";
 import { openMin } from "@/lib/openMin";
+import { owedIn, recoveryProblem, writeSalaryWithCut } from "@/lib/employeeAdvances";
+import { AdvanceSheet } from "@/components/EmployeeAdvanceSheets";
 
 /** Today as yyyy-mm-dd for a date input, in LOCAL time — toISOString() would
  *  roll back a day for anyone east of UTC after midday. */
@@ -56,7 +59,7 @@ import { openMin } from "@/lib/openMin";
 /** The ledgers the page reads — one at a time, under the tab bar. */
 type Book = "daybook" | "received" | "supplier" | "factory" | "expense" | "locker";
 /** The forms that slide in over it. */
-type Task = "client" | "supplier" | "factory" | "expense" | "employee" | "locker" | "broker" | "brokerIn" | "refund";
+type Task = "client" | "supplier" | "factory" | "expense" | "employee" | "locker" | "broker" | "brokerIn" | "refund" | "advance" | "advanceIn";
 
 const BOOKS = [
   { key: "daybook", label: "Day book", icon: BookOpen },
@@ -159,13 +162,15 @@ export function PaymentsPage() {
           { label: "From a client", icon: CreditCard, hint: "Against their invoices, or an advance", onSelect: () => setTask("client") },
           { label: "From a supplier", icon: Truck, hint: "A refund, or money back on returned goods", onSelect: () => openSupplier("receive") },
           { label: "From a broker", icon: Handshake, hint: "Money they collected for us", onSelect: () => setTask("brokerIn"), show: isAdmin },
+          { label: "Advance repaid by an employee", icon: Users, hint: "Upad they hand back", onSelect: () => setTask("advanceIn") },
           { label: "Other income", icon: ArrowDownCircle, hint: "Into an account — not a client or supplier", onSelect: () => openLocker("income") },
         ] } : null}
         secondary={mayAdd ? { label: "Pay", icon: Wallet, items: [
           { label: "Pay a supplier", icon: Truck, hint: "A bill, or an advance", onSelect: () => openSupplier("pay") },
           { label: "Pay a factory", icon: FactoryIcon, hint: "Making charges, or an advance", onSelect: () => setTask("factory") },
           { label: "Pay through broker", icon: Handshake, hint: "One payment — he pays the suppliers", onSelect: () => setTask("broker") },
-          { label: "Pay an employee", icon: Users, hint: "Salary, an advance, a bonus", onSelect: () => setTask("employee") },
+          { label: "Pay an employee", icon: Users, hint: "Salary or a bonus — an advance can be cut from it", onSelect: () => setTask("employee") },
+          { label: "Give an advance (upad)", icon: HandCoins, hint: "To an employee — they owe it back", onSelect: () => setTask("advance") },
           { label: "Pay an expense", icon: Receipt, hint: "Rent, courier, office…", onSelect: () => setTask("expense") },
           { label: "Refund to a client", icon: Undo2, hint: "Pay their held credit back", onSelect: () => setTask("refund") },
         ] } : null}
@@ -239,6 +244,8 @@ export function PaymentsPage() {
           <PayBrokerSheet {...sheet("broker")} />
           {isAdmin && <ReceiveFromBrokerSheet {...sheet("brokerIn")} />}
           <RefundClientSheet {...sheet("refund")} />
+          {task === "advance" && <AdvanceSheet mode="give" onClose={() => setTask(null)} />}
+          {task === "advanceIn" && <AdvanceSheet mode="repay" onClose={() => setTask(null)} />}
         </>
       )}
     </div>
@@ -800,6 +807,13 @@ export function PayExpense({ open, onOpenChange, lockerId: fixedLocker, frame = 
   // just because it isn't dollars.
   const curr = ccy(locker?.currency);
   const sym = ccySymbol(curr).trim();
+  // Salary with part of it cut from their advance (lib/employeeAdvances.ts): the
+  // full salary is the cost, only the rest leaves the account.
+  const [cut, setCut] = useState("");
+  const payeeUser = staff.find(u => u.id === paidToEmployeeId);
+  const owedHere = payeeUser && locker ? owedIn(db, payeeUser, curr) : 0;
+  const showCut = category === "Salary" && !!payeeUser && owedHere > 0.005;
+  const cutNum = showCut ? Number(cut) || 0 : 0;
 
   const submit = async () => {
     // Account FIRST — it decides the amount's currency.
@@ -811,16 +825,29 @@ export function PayExpense({ open, onOpenChange, lockerId: fixedLocker, frame = 
     const payee = staff.find(u => u.id === paidToEmployeeId)?.name;
     const titleText = title.trim() || (forEmployee && payee ? `${category} — ${payee}` : "");
     if (!titleText) { toast.error("Enter a title"); return; }
-    if (!(await confirmOverdraw(db.lockers, db.lockerTransactions, lockerId, amt))) return;
+    if (cutNum > 0) {
+      if (cutNum > amt + 0.005) { toast.error("The cut can't be more than the salary"); return; }
+      const problem = recoveryProblem(loadDb(), paidToEmployeeId, curr, cutNum);
+      if (problem) { toast.error(problem); return; }
+    }
+    const cash = Math.round((amt - cutNum) * 100) / 100;
+    if (cash > 0 && !(await confirmOverdraw(db.lockers, db.lockerTransactions, lockerId, cash))) return;
     setSaving(true);
     try {
       const now = stampFor(date);
-      updateDb(d => writeExpense(d, {
-        lockerId, amount: amt, title: titleText, category, note, userId: user!.id, at: now,
-        paidToEmployeeId: forEmployee || category === "Salary" ? paidToEmployeeId : undefined,
-      }));
-      toast.success("Expense recorded");
-      setTitle(""); setAmount(""); setNote(""); setLockerId(""); setPaidToEmployeeId(employeeId ?? ""); setDate(todayLocal());
+      if (cutNum > 0) {
+        updateDb(d => writeSalaryWithCut(d, {
+          employeeId: paidToEmployeeId, lockerId, salary: amt, cut: cutNum, at: now, title: titleText, category, note, userId: user!.id,
+        }));
+        toast.success(`Salary ${fmtCcy(amt, curr)} — ${fmtCcy(cutNum, curr)} cut from advance, ${fmtCcy(cash, curr)} paid`);
+      } else {
+        updateDb(d => writeExpense(d, {
+          lockerId, amount: amt, title: titleText, category, note, userId: user!.id, at: now,
+          paidToEmployeeId: forEmployee || category === "Salary" ? paidToEmployeeId : undefined,
+        }));
+        toast.success("Expense recorded");
+      }
+      setTitle(""); setAmount(""); setCut(""); setNote(""); setLockerId(""); setPaidToEmployeeId(employeeId ?? ""); setDate(todayLocal());
       onOpenChange(false);
     } finally { setSaving(false); }
   };
@@ -831,10 +858,11 @@ export function PayExpense({ open, onOpenChange, lockerId: fixedLocker, frame = 
   return frame({
     open, onOpenChange, size: "md", icon: Receipt,
     title: forEmployee ? "Pay an employee" : "Pay expense",
-    description: forEmployee ? "Salary, an advance or a bonus — on their salary ledger" : "From any account, in its currency",
+    description: forEmployee ? "Salary or a bonus — on their salary ledger. An advance (upad) is given from their page" : "From any account, in its currency",
     footer: (
         <PanelFooter onCancel={() => onOpenChange(false)} summary={typed > 0 && lockerId ? (
-          <MoveSummary label={category === "Salary" ? "Salary" : "Expense"} value={fmtCcy(typed, curr)} tone="out" lockerId={lockerId} change={-typed} />
+          <MoveSummary label={cutNum > 0 ? `Pay (salary ${fmtCcy(typed, curr)} − ${fmtCcy(cutNum, curr)} advance)` : category === "Salary" ? "Salary" : "Expense"}
+            value={fmtCcy(Math.max(0, typed - cutNum), curr)} tone="out" lockerId={lockerId} change={-Math.max(0, typed - cutNum)} />
         ) : undefined}>
           <AsyncButton onClick={submit} disabled={saving} className={SAVE_BTN}>{saving ? "Saving…" : forEmployee ? "Record Payment" : "Record Expense"}</AsyncButton>
         </PanelFooter>
@@ -869,7 +897,7 @@ export function PayExpense({ open, onOpenChange, lockerId: fixedLocker, frame = 
       </div>
       {/* 2. Amount — in the selected account's currency */}
       <div>
-        <Label className="text-xs">Amount ({curr})</Label>
+        <Label className="text-xs">{showCut ? `Salary — the full amount (${curr})` : `Amount (${curr})`}</Label>
         <div className="relative mt-1">
           <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground text-sm">{sym}</span>
           {/* Room for a longer symbol (A$, AED) than ₹ or $. */}
@@ -877,6 +905,23 @@ export function PayExpense({ open, onOpenChange, lockerId: fixedLocker, frame = 
             className="h-10 rounded-xl disabled:opacity-60" style={{ paddingLeft: `${Math.max(1.75, sym.length * 0.55 + 1.1)}rem` }} />
         </div>
       </div>
+      {/* Cut from their advance (upad): only for salary, only while they owe one in this currency. */}
+      {showCut && (
+        <div className="rounded-xl border border-border/70 bg-secondary/40 p-3">
+          <div className="flex items-center justify-between gap-2">
+            <Label className="text-xs">Cut from advance ({curr})</Label>
+            <button type="button" onClick={() => setCut(String(Math.min(owedHere, typed || owedHere)))} className="text-[11px] text-primary hover:underline">
+              Owes {fmtCcy(owedHere, curr)} — cut {typed > 0 && typed < owedHere ? "up to the salary" : "all"}
+            </button>
+          </div>
+          <Input type="number" min={0} step="0.01" value={cut} onChange={e => setCut(e.target.value)} placeholder="0.00" className="h-10 rounded-xl mt-1" aria-label="Cut from advance" />
+          {cutNum > 0 && typed > 0 && (
+            <p className="text-[11px] text-muted-foreground mt-1">
+              Salary {fmtCcy(typed, curr)} − {fmtCcy(cutNum, curr)} advance = <b className="text-brand-dark">{fmtCcy(Math.max(0, typed - cutNum), curr)} paid</b> from the account. They will owe {fmtCcy(Math.max(0, owedHere - cutNum), curr)}.
+            </p>
+          )}
+        </div>
+      )}
       {/* 3. Category */}
       <div>
         <Label className="text-xs">Category</Label>

@@ -89,7 +89,7 @@ const PAGE: Record<string, readonly LazyCol[]> = {
   "/messages": [],
   "/notifications": [],
   "/search": [],
-  "/employees": [],
+  "/employees": ["lockerTransactions"], // each one's advance owed (lib/employeeAdvances.ts)
   // Pay salary checks the account's balance before it pays.
   "/employees/:id": ["lockerTransactions"],
   "/profile": [],

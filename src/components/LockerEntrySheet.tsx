@@ -38,6 +38,7 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { AddNewItem, useAddNew } from "@/components/create/QuickCreate";
 import { openMin } from "@/lib/openMin";
+import { advanceOwed, recoveryProblem, writeAdvance, writeRepayment } from "@/lib/employeeAdvances";
 
 type Dir = "in" | "out" | "transfer";
 /**
@@ -54,12 +55,12 @@ const WHO: Record<Who, { in?: string; out?: string; name: string; rupees?: boole
   factory: { out: "Factory — making charges", name: "Factory", rupees: true },
   designer: { out: "Designer — a freelancer's designs", name: "Designer", rupees: true },
   broker: { in: "Broker — money he hands over", out: "Broker — pay through him", name: "Broker", rupees: true },
-  employee: { out: "Employee — salary, advance, bonus", name: "Employee" },
+  employee: { in: "Employee — advance (upad) repaid", out: "Employee — salary, bonus or an advance (upad)", name: "Employee" },
   expense: { out: "Expense — rent, courier, office…", name: "Expense" },
   other: { in: "Other — owner's deposit, extra income", out: "Other — owner's drawing, bank charges", name: "Other" },
 };
 const ORDER: Record<"in" | "out", Who[]> = {
-  in: ["client", "supplier", "broker", "other"],
+  in: ["client", "supplier", "broker", "employee", "other"],
   out: ["supplier", "factory", "designer", "employee", "expense", "broker", "client", "other"],
 };
 /** What each party's choices read beyond the Locker's own records. */
@@ -129,7 +130,10 @@ export function LockerEntrySheet({ open, onOpenChange, lockerId: startLocker }: 
     if (w === "broker" && dir === "in" && !isAdmin) return "admins only";
     return undefined;
   };
-  const pickDir = (d: Dir) => { setDir(d); setWho(""); setPartyId(""); setAgainst(""); setCategory(""); setRate(""); };
+  const pickDir = (d: Dir) => { setDir(d); setWho(""); setPartyId(""); setAgainst(""); setCategory(""); setRate(""); setEmpKind("pay"); };
+  // Money out to an employee: their pay (an expense) or an advance (upad) they owe back (lib/employeeAdvances.ts).
+  const [empKind, setEmpKind] = useState<"pay" | "advance">("pay");
+  const empAdvance = who === "employee" && (dir === "in" || empKind === "advance");
   const pickWho = (w: Who) => {
     setWho(w); setPartyId(""); setAgainst(w === "supplier" || w === "factory" ? "__fifo" : w === "broker" || w === "designer" ? "__oldest" : "");
     setTitle(""); setRate("");
@@ -236,7 +240,11 @@ export function LockerEntrySheet({ open, onOpenChange, lockerId: startLocker }: 
       const why = whyNot(who);
       if (why) { toast.error(`${WHO[who].name}: ${why}`); return; }
       if (who !== "expense" && who !== "other" && !partyId) { toast.error(`Choose the ${WHO[who].name.toLowerCase()}`); return; }
-      if ((who === "expense" || who === "other" || who === "employee") && !category) { toast.error("Choose a category"); return; }
+      if ((who === "expense" || who === "other" || (who === "employee" && !empAdvance)) && !category) { toast.error("Choose a category"); return; }
+      if (who === "employee" && dir === "in") {
+        const why = recoveryProblem(db, partyId, cur, amt);
+        if (why) { toast.error(why); return; }
+      }
       if (who === "expense" && !title.trim()) { toast.error("Say what it was for"); return; }
       if (needsUsdRate && !(Number(rate) > 0)) { toast.error("Enter the rate — the client's account is in USD"); return; }
       if (toRupeeParty && !(Number(rate) > 0)) { toast.error(`Enter the rate — ${WHO[who].name.toLowerCase()} accounts are kept in rupees`); return; }
@@ -289,6 +297,10 @@ export function LockerEntrySheet({ open, onOpenChange, lockerId: startLocker }: 
             if (dir === "in") writeBrokerReceipt(d, { ...base, brokerId: partyId });
             else writeBrokerPayment(d, { ...base, brokerId: partyId,
               lines: Object.entries(brokerAlloc).map(([purchaseId, v]) => ({ purchaseId, amount: v })) });
+          } else if (who === "employee" && dir === "in") {
+            writeRepayment(d, { employeeId: partyId, lockerId: account.id, amount: amt, at, note, userId: user!.id });
+          } else if (who === "employee" && empKind === "advance") {
+            writeAdvance(d, { employeeId: partyId, lockerId: account.id, amount: amt, at, note, userId: user!.id });
           } else if (who === "employee") {
             const name = db.users.find(u => u.id === partyId)?.name ?? "";
             writeExpense(d, { ...base, title: title.trim() || `${category} — ${name}`, category, paidToEmployeeId: partyId });
@@ -516,7 +528,29 @@ export function LockerEntrySheet({ open, onOpenChange, lockerId: startLocker }: 
             </div>
           </div>
         )}
-        {(who === "employee" || who === "expense" || who === "other") && (
+        {who === "employee" && dir === "out" && (
+          <div>
+            <Label className="text-xs">What is it</Label>
+            <div className="mt-1 grid grid-cols-2 gap-2" role="radiogroup" aria-label="What is it">
+              {([["pay", "Salary / bonus"], ["advance", "Advance (upad)"]] as const).map(([k, l]) => (
+                <button key={k} type="button" role="radio" aria-checked={empKind === k} onClick={() => setEmpKind(k)}
+                  className={`h-10 rounded-xl border text-sm px-3 text-left ${empKind === k ? "border-primary bg-primary/[0.06] text-primary font-medium" : "border-border hover:bg-secondary/60"}`}>{l}</button>
+              ))}
+            </div>
+          </div>
+        )}
+        {who === "employee" && !!partyId && (() => {
+          const u = db.users.find(x => x.id === partyId);
+          const owed = u ? advanceOwed(db, u) : new Map();
+          const txt = [...owed].filter(([, v]) => v > 0.005).map(([c, v]) => fmtCcy(v, c)).join(" · ");
+          return (
+            <p className="text-[11px] text-muted-foreground -mt-1">
+              {txt ? `Advance owed now: ${txt}.` : "No advance owed."}
+              {!empAdvance && txt ? " To cut it from this salary, use Pay salary on their page (or Payments → Pay an employee)." : ""}
+            </p>
+          );
+        })()}
+        {((who === "employee" && !empAdvance) || who === "expense" || who === "other") && (
           <div className={who === "other" ? "" : "grid grid-cols-1 sm:grid-cols-2 gap-3"}>
             <div>
               <Label className="text-xs">Category</Label>

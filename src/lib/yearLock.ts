@@ -97,8 +97,10 @@ const PLAIN: Record<string, { date: (r: Rec) => unknown; free?: string[] }> = {
 };
 
 /** The opening-balance fields of a party, which belong to the day they are "as of". */
-const OPENING = ["openingBalance", "openingDir", "openingDate", "openingFineGold", "openingFineGoldDate", "openingGoldFine", "openingGoldDate"];
-const PARTIES = new Set(["clients", "suppliers", "factories", "brokers", "designers"]);
+const OPENING = ["openingBalance", "openingDir", "openingDate", "openingFineGold", "openingFineGoldDate", "openingGoldFine", "openingGoldDate",
+  // An employee's advance owed before the app (lib/employeeAdvances.ts).
+  "openingAdvance", "openingAdvanceCurrency", "openingAdvanceDate"];
+const PARTIES = new Set(["clients", "suppliers", "factories", "brokers", "designers", "users"]);
 
 /** What an order holds of the closed years: payments and returns dated in them, and — for a
  *  sale made in them — what it was sold for, to whom, and that it was sold. */
@@ -198,7 +200,7 @@ export function lockedPart(col: string, r: Rec | null | undefined, until: string
       if (PARTIES.has(col)) {
         const o = pick(r, OPENING);
         if (empty(o)) return null;
-        return datedOrOld(r.openingDate || r.openingGoldDate || r.openingFineGoldDate || r.createdAt, until) ? o : null;
+        return datedOrOld(r.openingDate || r.openingGoldDate || r.openingFineGoldDate || r.openingAdvanceDate || r.createdAt, until) ? o : null;
       }
       return null;
   }
@@ -216,7 +218,7 @@ const NOUN: Record<string, string> = {
   invoices: "invoice", orders: "order", materialIssuances: "factory issue", cadJobs: "design charge",
   diamondPackets: "certified stone", lockers: "account's opening balance", clients: "client's opening balance",
   suppliers: "supplier's opening balance", factories: "factory's opening balance", brokers: "broker's opening balance",
-  designers: "designer's opening balance",
+  designers: "designer's opening balance", users: "employee's opening advance",
 };
 
 /**

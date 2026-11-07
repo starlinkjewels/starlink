@@ -3,13 +3,14 @@ import { collectionsFresh, loadDb, updateDb, type DB, type User } from "./db";
 import { isAdminEmail } from "./firebase";
 import { confirmBox } from "./confirm";
 import { CHECKING, STILL_LOADING, recordsReady } from "./actionHints";
+import { isAdvanceTxn } from "./employeeAdvances";
 
 const plural = (n: number, one: string) => `${n} ${one}${n === 1 ? "" : "s"}`;
 
 /** What the check reads beyond the people, clients and orders the app opens
  *  with. It arrives by itself in the first seconds after sign-in; until then
  *  it reads as empty — so Delete waits ("Checking…"). */
-const EMPLOYEE_REF_COLS = ["expenses"] as const;
+const EMPLOYEE_REF_COLS = ["expenses", "lockerTransactions"] as const;
 /** …and what the question names (their open tasks), so it says it right. */
 const EMPLOYEE_DELETE_COLS = [...EMPLOYEE_REF_COLS, "tasks"] as const;
 
@@ -29,6 +30,9 @@ export function employeeDeleteBlock(db: DB, u: User): string | undefined {
   if (!collectionsFresh(EMPLOYEE_REF_COLS)) return CHECKING;
   const paid = (db.expenses ?? []).filter(e => e.paidToEmployeeId === u.id).length;
   if (paid) return `Has ${plural(paid, "salary payment")} — deactivate instead`;
+  // An advance given or repaid (lib/employeeAdvances.ts) — their account must stay.
+  const adv = (db.lockerTransactions ?? []).filter(t => t.refId === u.id && isAdvanceTxn(t)).length + ((u.openingAdvance ?? 0) > 0 ? 1 : 0);
+  if (adv) return `Has an advance account (${plural(adv, "line")}) — deactivate instead`;
   return undefined;
 }
 

@@ -14,6 +14,7 @@ import { ccy, fmtCcy, rateFields, rateOf, roundCcy, type CurrencyCode } from "./
 import type { LazyCol } from "./pageData";
 import { undoClientRefund } from "./clientRefunds";
 import { closedWhy } from "./yearLock";
+import { advanceChangeProblem } from "./employeeAdvances";
 
 export type EntryKind = "supplier" | "factory" | "expense" | "locker";
 
@@ -513,7 +514,8 @@ function lockerEntries(db: DB): MoneyEntry[] {
     // A brokerage payment is the record itself — the broker's due is read from
     // it (lib/brokers.ts) — so it is corrected here like any entry of our own.
     // So is money a broker handed over to us (what they collected from a supplier for us).
-    } else if (ref && ref !== "manual" && ref !== "transfer" && ref !== "brokerPayment" && ref !== "brokerReceipt" && ref !== "designerPayment" && ref !== "clientRefund" && !t.pairedLockerId) {
+    } else if (ref && ref !== "manual" && ref !== "transfer" && ref !== "brokerPayment" && ref !== "brokerReceipt" && ref !== "designerPayment" && ref !== "clientRefund"
+      && ref !== "employeeAdvance" && ref !== "employeeRepay" && !t.pairedLockerId) {
       const why = unclaimedRow(db, t);
       if ("gone" in why) {
         orphan = `${why.gone}, so it is corrected here — that changes the account only.`;
@@ -839,6 +841,9 @@ export function entryEditRefusal(d: DB, entry: MoneyEntry, patch: EntryPatch): s
       : "This payment was not made from an account — giving it one here would show money leaving an account that never moved. If it was paid from one, cancel it and record it again from that account.";
   }
   if (entry.kind === "locker") {
+    // An employee's advance or repayment (lib/employeeAdvances.ts): never below nothing owed.
+    const adv = advanceChangeProblem(d, entry.id, { amount: patch.amount, lockerId: patch.lockerId });
+    if (adv) return adv;
     // A refund's amount is also what came off the client's credit: changed
     // here, the two would disagree. Its date, note or account can be corrected.
     if (entry.refundTo && patch.amount !== undefined && Math.abs(patch.amount - entry.amount) >= 0.005) {
@@ -1085,6 +1090,10 @@ export function deleteEntry(entry: MoneyEntry, opts: { unlinkedConfirmed?: boole
   if (entry.locked) return entry.locked;
   if (entry.unlinked && !opts.unlinkedConfirmed) return `${entry.unlinked}. Confirm that before deleting it.`;
   if (!collectionsFresh(ENTRY_COLS[entry.kind])) return "Still loading the account entries — try again in a moment.";
+  if (entry.kind === "locker") {
+    const adv = advanceChangeProblem(loadDb(), entry.id, null);
+    if (adv) return adv;
+  }
   updateDb(d => {
     if (entry.kind === "supplier") {
       const ids = new Set(entry.legIds ?? [entry.id]);
@@ -1196,6 +1205,13 @@ export function expenseMoneyLock(d: DB, e: Expense): string | undefined {
 export function expenseRefusal(d: DB, e: Expense, p: ExpensePatch): string | undefined {
   const closed = closedWhy(e.createdAt, d.settings) ?? closedWhy(p.date, d.settings);
   if (closed) return closed;
+  // A cut from salary or a write-off of an employee's advance (lib/employeeAdvances.ts):
+  // it stays theirs, and never takes more off than they owe.
+  if (e.advanceRecovery || e.advanceWriteOff) {
+    if (p.paidToEmployeeId !== e.paidToEmployeeId) return "This came off one team member's advance — it can't be moved to another. Delete it and record it again.";
+    const adv = advanceChangeProblem(d, e.id, { amount: p.amount });
+    if (adv) return adv;
+  }
   if (!p.title.trim()) return "Enter a title.";
   if (!(p.amount >= 0) || (p.lockerId && !(p.amount > 0))) return "Enter a valid amount.";
   if (p.category === "Salary" && !p.paidToEmployeeId) return "Choose which team member this salary is for.";
