@@ -16,6 +16,7 @@ import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { AddNewItem, useAddNew } from "@/components/create/QuickCreate";
+import { openMin } from "@/lib/openMin";
 
 /** Whether the signed-in person may edit / delete an expense — and why not.
  *  The one rule (src/lib/expenseRights.ts) for every list of expenses. */
@@ -161,7 +162,7 @@ function ExpenseSheet({ e, onClose }: { e: Expense; onClose: () => void }) {
         </div>
         <div>
           <Label className="text-xs">Date</Label>
-          <Input type="date" value={f.date} onChange={x => setF({ ...f, date: x.target.value })} disabled={!!moneyLock}
+          <Input type="date" min={openMin()} value={f.date} onChange={x => setF({ ...f, date: x.target.value })} disabled={!!moneyLock}
             className="rounded-xl h-10 mt-1 disabled:opacity-60" />
         </div>
 

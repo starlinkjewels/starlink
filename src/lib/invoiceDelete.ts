@@ -21,6 +21,7 @@ import {
 } from "./db";
 import { confirmBox } from "./confirm";
 import { STILL_LOADING, recordsReady } from "./actionHints";
+import { closedWhy } from "./yearLock";
 
 /** Who may delete an invoice: an admin only. Undefined when they may. */
 export function invoiceDeleteAccess(user: Pick<User, "role"> | null | undefined): string | undefined {
@@ -29,6 +30,8 @@ export function invoiceDeleteAccess(user: Pick<User, "role"> | null | undefined)
 
 /** Why this invoice can't be deleted; undefined when it can. */
 export function invoiceDeleteBlocker(db: DB, inv: Invoice): string | undefined {
+  const closed = closedWhy(inv.createdAt, db.settings);
+  if (closed) return closed;
   const orders = invoiceOrderIds(inv).map(id => db.orders.find(o => o.id === id)).filter((o): o is Order => !!o);
   if (orders.some(orderIsDispatched)) return "Dispatched and billed — record a return / credit note instead";
   const notes = [...new Set(orders.flatMap(o => (o.returns ?? []).map(r => r.creditNoteNo)))];

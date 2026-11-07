@@ -13,6 +13,7 @@ import { loadDb, updateDb, uid, collectionsFresh, ensureCollections, fmtDate, fm
 import { ccy, fmtCcy, rateFields, rateOf, roundCcy, type CurrencyCode } from "./currency";
 import type { LazyCol } from "./pageData";
 import { undoClientRefund } from "./clientRefunds";
+import { closedWhy } from "./yearLock";
 
 export type EntryKind = "supplier" | "factory" | "expense" | "locker";
 
@@ -549,6 +550,11 @@ export function listEntries(db: DB, kind: EntryKind): MoneyEntry[] {
     out = partyEntries(db, kind);
     pairEntries(out, indexTxns(db), new Set());
   }
+  // Dated in a closed year (lib/yearLock.ts): shown, never corrected from here.
+  for (const e of out) {
+    const closed = closedWhy(e.date, db.settings);
+    if (closed) e.locked = closed;
+  }
   return out.sort((a, b) => +new Date(b.date) - +new Date(a.date));
 }
 
@@ -806,6 +812,8 @@ function planTransfer(d: DB, out: LockerTransaction, inn: LockerTransaction, pat
  *  anything is written, so a refusal leaves every record exactly as it was. */
 export function entryEditRefusal(d: DB, entry: MoneyEntry, patch: EntryPatch): string | undefined {
   if (entry.locked) return entry.locked;
+  const closed = closedWhy(entry.date, d.settings) ?? (patch.date ? closedWhy(patch.date, d.settings) : null);
+  if (closed) return closed;
   if (patch.moveTo) {
     const why = placeRefusal(d, entry, patch.moveTo);
     if (why) return why;
@@ -1186,6 +1194,8 @@ export function expenseMoneyLock(d: DB, e: Expense): string | undefined {
 /** Why this expense cannot be saved like this, or nothing when it can.
  *  Checked before anything is written. */
 export function expenseRefusal(d: DB, e: Expense, p: ExpensePatch): string | undefined {
+  const closed = closedWhy(e.createdAt, d.settings) ?? closedWhy(p.date, d.settings);
+  if (closed) return closed;
   if (!p.title.trim()) return "Enter a title.";
   if (!(p.amount >= 0) || (p.lockerId && !(p.amount > 0))) return "Enter a valid amount.";
   if (p.category === "Salary" && !p.paidToEmployeeId) return "Choose which team member this salary is for.";

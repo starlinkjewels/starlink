@@ -2,6 +2,7 @@ import { companyOf } from "@/lib/companies";
 import { updateDb, type DB, type DiamondSale, type LockerTransaction } from "@/lib/db";
 import { increaseStock } from "@/lib/stock";
 import { fmtCcy } from "@/lib/currency";
+import { closedWhy } from "./yearLock";
 
 /** What the sale put in its account: dollars for a sale in dollars, else
  *  rupees — the sale's currency, which is the account's too, since a sale can
@@ -40,6 +41,8 @@ export function saleTxn(txns: LockerTransaction[] | undefined, sale: DiamondSale
  * All three are reversed together here, or none of them.
  */
 export function canVoidSale(db: DB, sale: DiamondSale): { ok: boolean; reason?: string } {
+  const closed = closedWhy(sale.createdAt, db.settings);
+  if (closed) return { ok: false, reason: closed };
   if (sale.kind === "certified") {
     const packet = (db.diamondPackets ?? []).find(p => p.id === sale.packetId);
     if (!packet) return { ok: false, reason: "That certified stone is no longer on file." };

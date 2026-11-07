@@ -114,6 +114,7 @@ import { ReturnDialog, OrderReturns, useMayReturn } from "@/components/SalesRetu
 import { returnBlocker } from "@/lib/salesReturn";
 import { zoomable } from "@/components/ImageViewer";
 import { RateInput } from "@/components/CurrencyFields";
+import { openMin } from "@/lib/openMin";
 
 const GOLD_PURITIES = ["9K", "14K", "18K", "22K", "24K"];
 
@@ -979,6 +980,7 @@ function OrderDetailPageBody() {
         const mi = d.materialIssuances.find(x => x.id === issuance.id);
         if (mi) {
           mi.status = "closed";
+          mi.closedAt = new Date().toISOString(); // when it was closed — the year-closing lock reads it
           mi.labour = labour;
           mi.makingCharges = { amountInr: value, payments: mi.makingCharges?.payments || [] };
           if (hasNet) {
@@ -1574,12 +1576,14 @@ function OrderDetailPageBody() {
           finish.finishedPieces = hasNet ? [{ id: uid("fp_"), quantityUsed: netW, piecesCount: 1, recordedAt: now, recordedBy: user!.id }] : [];
           finish.makingCharges = { amountInr: labourVal, payments: finish.makingCharges?.payments || [] };
           finish.status = "closed";
+          finish.closedAt = new Date().toISOString(); // when it was closed — the year-closing lock reads it
         }
         // Apply each diamond's disposition.
         for (const i of dias) {
           const mi = d.materialIssuances.find(x => x.id === i.id);
           if (!mi) continue;
           mi.status = "closed";
+          mi.closedAt = new Date().toISOString(); // when it was closed — the year-closing lock reads it
           if (i.diamondKind === "certified") {
             // Whole stones — used or returned. Ours are packets; a client's own
             // certified stone has none, but its Used / Returned counts just the same.
@@ -1606,6 +1610,7 @@ function OrderDetailPageBody() {
           if (!mi) continue;
           const returned = faXReturnedOf(i);
           mi.status = "closed";
+          mi.closedAt = new Date().toISOString(); // when it was closed — the year-closing lock reads it
           mi.finishReturnedQty = returned;
           const used = Math.round((i.quantityIssued - returned) * 1000) / 1000;
           mi.finishedPieces = [{ id: uid("fp_"), quantityUsed: used, piecesCount: 1, recordedAt: now, recordedBy: user!.id }];
@@ -3439,7 +3444,7 @@ It goes back to being our own build, and ${item ? item.name : "its piece"} goes 
                     <div className="space-y-1.5">
                       <Label className="text-xs">Dispatch Date</Label>
                       <Input
-                        type="date"
+                        type="date" min={openMin()}
                         value={dispatchDay}
                         max={todayLocal()}
                         onChange={e => setDispatchDay(e.target.value)}
@@ -4860,7 +4865,7 @@ The piece then takes ours — add them from stock or buy them, as for any order.
           </DialogHeader>
           <div>
             <Label className="text-xs">Delivery Date *</Label>
-            <Input type="date" value={deliverDay} max={todayLocal()} onChange={e => setDeliverDay(e.target.value)} className="rounded-xl h-10 mt-1" />
+            <Input type="date" min={openMin()} value={deliverDay} max={todayLocal()} onChange={e => setDeliverDay(e.target.value)} className="rounded-xl h-10 mt-1" />
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setDeliverModalIdx(null)} className="rounded-xl">Cancel</Button>
@@ -4884,7 +4889,7 @@ The piece then takes ours — add them from stock or buy them, as for any order.
             <div className="grid sm:grid-cols-2 gap-3 sm:[&>*:last-child]:col-span-2">
               <div><Label className="text-xs">Courier Company *</Label><Input value={courierName} onChange={e => setCourierName(e.target.value)} className="rounded-xl h-10 mt-1" placeholder="e.g. FedEx, DHL" /></div>
               <div><Label className="text-xs">Tracking Number *</Label><Input value={trackingNumber} onChange={e => setTrackingNumber(e.target.value)} className="rounded-xl h-10 mt-1" placeholder="e.g. 1234567890" /></div>
-              <div><Label className="text-xs">Dispatch Date *</Label><Input type="date" value={dispatchDay} max={todayLocal()} onChange={e => setDispatchDay(e.target.value)} className="rounded-xl h-10 mt-1" /></div>
+              <div><Label className="text-xs">Dispatch Date *</Label><Input type="date" min={openMin()} value={dispatchDay} max={todayLocal()} onChange={e => setDispatchDay(e.target.value)} className="rounded-xl h-10 mt-1" /></div>
               <div><Label className="text-xs">Tracking Link (optional)</Label><Input value={trackingLink} onChange={e => setTrackingLink(e.target.value)} className="rounded-xl h-10 mt-1" placeholder="https://..." /></div>
               <ShippingCostFields value={dispShipCost} onChange={setDispShipCost} pieces={1} />
             </div>

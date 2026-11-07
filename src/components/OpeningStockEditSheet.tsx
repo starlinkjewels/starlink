@@ -27,6 +27,7 @@ import { AsyncButton } from "@/components/AsyncButton";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { openMin } from "@/lib/openMin";
 
 const what = (db: DB, m: StockMovement) =>
   `${m.purityOrQuality}${m.material === "gold" || m.material === "diamond" ? ` ${m.material}` : ` ${materialName(db.settings, m.material)}`}`;
@@ -250,7 +251,7 @@ export function OpeningStockEditSheet({ movement, onClose }: { movement: StockMo
           </div>
           <div>
             <Label htmlFor="opening-date" className="text-xs">As of date</Label>
-            <Input id="opening-date" type="date" value={f.date} onChange={e => setF({ ...f, date: e.target.value })} className="rounded-xl h-10 mt-1" />
+            <Input id="opening-date" type="date" min={openMin()} value={f.date} onChange={e => setF({ ...f, date: e.target.value })} className="rounded-xl h-10 mt-1" />
           </div>
           <div>
             <Label htmlFor="opening-note" className="text-xs">Note</Label>

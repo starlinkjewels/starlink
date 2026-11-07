@@ -16,6 +16,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { openMin } from "@/lib/openMin";
 
 const r2 = (n: number) => Math.round(n * 100) / 100;
 
@@ -229,7 +230,7 @@ export function PayBrokerSheet({ open, onOpenChange, brokerId: fixedId, lockerId
           </div>
           <div>
             <Label htmlFor="pb-date" className="text-xs">Date</Label>
-            <Input id="pb-date" type="date" value={date} onChange={e => setDate(e.target.value)} className="rounded-xl h-10 mt-1" />
+            <Input id="pb-date" type="date" min={openMin()} value={date} onChange={e => setDate(e.target.value)} className="rounded-xl h-10 mt-1" />
           </div>
         </div>
         {(amt > 0 || fx.foreign) && !fixedLocker && (

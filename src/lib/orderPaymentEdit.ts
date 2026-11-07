@@ -19,6 +19,7 @@ import {
 } from "./db";
 import { ccy } from "./currency";
 import { UNLINKED_DEPOSIT, depositExcess, depositRows, followDate, receiptDeposit } from "./receipts";
+import { closedWhy } from "./yearLock";
 
 const r2 = (n: number) => Math.round(n * 100) / 100;
 const list = (xs: string[]) => (xs.length <= 2 ? xs.join(", ") : `${xs.slice(0, 2).join(", ")} and ${xs.length - 2} more`);
@@ -62,6 +63,8 @@ function blockerFor(db: EditDb, order: Order, a: AdvancePayment, rec: ClientRece
 
 /** Why this payment can't be corrected from the order page; undefined when it can. */
 export function orderPaymentEditBlocker(db: EditDb, order: Order, a: AdvancePayment): string | undefined {
+  const closed = closedWhy(a.createdAt, (db as { settings?: DB["settings"] }).settings);
+  if (closed) return closed;
   const { rec, why } = paymentReceipt(db, a);
   if (!rec) return why;
   if (!collectionLoaded("lockerTransactions")) return "Still loading the account entries — try again in a moment";

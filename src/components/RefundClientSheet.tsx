@@ -16,6 +16,7 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { AddNewItem, useAddNew } from "@/components/create/QuickCreate";
 import { sheetFrame, type Frame } from "@/components/SheetFrame";
+import { openMin } from "@/lib/openMin";
 
 /**
  * Pay a client's held credit back to them (lib/clientRefunds.ts): their credit
@@ -131,7 +132,7 @@ export function RefundClientSheet({ open, onOpenChange, clientId: fixedClient, l
           </div>
           <div>
             <Label className="text-xs">Date</Label>
-            <Input type="date" value={date} onChange={e => setDate(e.target.value)} className="rounded-xl h-10 mt-1" />
+            <Input type="date" min={openMin()} value={date} onChange={e => setDate(e.target.value)} className="rounded-xl h-10 mt-1" />
           </div>
         </div>
         {!fixedLocker && (

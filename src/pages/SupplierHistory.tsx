@@ -57,6 +57,8 @@ import { confirmBox } from "@/lib/confirm";
 import { fmtCcy } from "@/lib/currency";
 import { companiesOf, companyById, hasCompanies } from "@/lib/companies";
 import { filled, lockerLabel, noteText, recorded, userName, type Detail } from "@/components/rowDetails";
+import { cutPeriod } from "@/lib/periodStatement";
+import { openMin } from "@/lib/openMin";
 
 
 
@@ -492,28 +494,45 @@ function SupplierHistoryPageBody() {
     downloadCsv(
       `Supplier-${supplier.name.replace(/\s+/g, "_")}`,
       ["Date", "Bill No", "Order No", "Particulars", "Weight", "Rate (INR)", "GST (INR)", "Bill Amount (INR)", "Paid (INR)", "Balance (INR)"],
-      statementAsc.filter(r => inDateRange(r.date, from, to)).map(r => {
-        // A purchase's GST, inside its bill amount (lib/purchaseGst.ts).
-        const pur = r.kind === "Purchase" ? purchases.find(x => x.id === r.id) : undefined;
+      (() => {
+        // A period opens with the balance brought forward (lib/periodStatement.ts).
+        const per = cutPeriod(statementAsc, from, to);
         return [
-          r.id === "opening" ? "Opening" : fmtDate(r.date),
-          r.invoiceNo ?? "", r.orderNo ?? "", r.particulars,
-          r.qty ? `${r.qty}${r.unit ?? ""}` : "",
-          r.rate ?? "", pur && purchaseGstInr(pur) ? purchaseGstInr(pur) : "", r.debit || "", r.credit || "", r.balance,
+          ...(per.broughtForward !== null ? [[fmtDate(from!.toISOString()), "", "", "Opening balance — brought forward", "", "", "", "", "", per.broughtForward]] : []),
+          ...per.rows.map(r => {
+            // A purchase's GST, inside its bill amount (lib/purchaseGst.ts).
+            const pur = r.kind === "Purchase" ? purchases.find(x => x.id === r.id) : undefined;
+            return [
+              r.id === "opening" ? "Opening" : fmtDate(r.date),
+              r.invoiceNo ?? "", r.orderNo ?? "", r.particulars,
+              r.qty ? `${r.qty}${r.unit ?? ""}` : "",
+              r.rate ?? "", pur && purchaseGstInr(pur) ? purchaseGstInr(pur) : "", r.debit || "", r.credit || "", r.balance,
+            ];
+          }),
         ];
-      }),
+      })(),
     );
   };
 
   const exportPdf = (from: Date | null, to: Date | null) => {
+    // A period: brought forward, the period's entries and totals, its closing balance.
+    const per = cutPeriod(statementAsc, from, to);
+    const perBills = per.rows.reduce((t, r) => t + r.debit, 0), perPaid = per.rows.reduce((t, r) => t + r.credit, 0);
+    const periodOn = !!(from || to);
     downloadLedgerPdf({
       title: "Supplier Account Statement",
       subjectLines: [
         `Supplier: ${supplier.name}`,
         supplier.contactPerson ? `Contact: ${supplier.contactPerson}` : "",
+        periodOn ? `Period: ${from ? fmtDate(from.toISOString()) : "start"} – ${to ? fmtDate(to.toISOString()) : "today"}` : "",
         `Report Generated: ${new Date().toLocaleDateString("en-IN", { month: "long", day: "numeric", year: "numeric" })}`,
       ].filter(Boolean),
-      summary: [
+      summary: periodOn ? [
+        ...(per.broughtForward !== null ? [{ label: "Opening balance (brought forward)", value: fmtInrPlain(per.broughtForward) }] : []),
+        { label: "Bills in the period", value: fmtInrPlain(perBills) },
+        { label: "Paid in the period", value: fmtInrPlain(perPaid) },
+        { label: "Closing balance", value: fmtInrPlain(per.closing) },
+      ] : [
         { label: "Total Purchased", value: fmtInrPlain(account.totalPurchased) },
         // The GST inside those purchases (In bill).
         ...(purchases.some(x => purchaseGstInr(x) > 0) ? [{ label: "GST in bills", value: fmtInrPlain(purchases.reduce((t, x) => t + purchaseGstInr(x), 0)) }] : []),
@@ -543,7 +562,9 @@ function SupplierHistoryPageBody() {
         { header: "Balance", x: 264 },
       ],
       align: ["left", "left", "left", "left", "right", "right", "right", "right", "right"],
-      rows: statementAsc.filter(r => inDateRange(r.date, from, to)).map(r => [
+      rows: [
+        ...(per.broughtForward !== null ? [[fmtDate(from!.toISOString()), "", "", "Opening balance — brought forward", "", "", "", "", fmtInrPlain(per.broughtForward).replace("Rs. ", "")]] : []),
+        ...per.rows.map(r => [
         r.id === "opening" ? "Opening" : fmtDate(r.date),
         fit(r.invoiceNo ?? "", 22),
         fit(r.orderNo ?? "", 28),
@@ -553,13 +574,18 @@ function SupplierHistoryPageBody() {
         r.debit ? fmtInrPlain(r.debit).replace("Rs. ", "") : "",
         r.credit ? fmtInrPlain(r.credit).replace("Rs. ", "") : "",
         fmtInrPlain(r.balance).replace("Rs. ", ""),
-      ]),
+      ])],
       // A totals line so the columns prove themselves: bills less payments is
-      // the balance the last row closes on.
-      totalsRow: ["", "", "", "Totals", "", "",
-        fmtInrPlain(account.totalPurchased).replace("Rs. ", ""),
-        fmtInrPlain(account.totalPaid + account.received).replace("Rs. ", ""),
-        fmtInrPlain(account.net).replace("Rs. ", "")],
+      // the balance the last row closes on — the period's own, for a period.
+      totalsRow: periodOn
+        ? ["", "", "", "Totals for the period", "", "",
+          fmtInrPlain(perBills).replace("Rs. ", ""),
+          fmtInrPlain(perPaid).replace("Rs. ", ""),
+          fmtInrPlain(per.closing).replace("Rs. ", "")]
+        : ["", "", "", "Totals", "", "",
+          fmtInrPlain(account.totalPurchased).replace("Rs. ", ""),
+          fmtInrPlain(account.totalPaid + account.received).replace("Rs. ", ""),
+          fmtInrPlain(account.net).replace("Rs. ", "")],
       filename: `Supplier-${supplier.name.replace(/\s+/g, "_")}`,
     });
   };
@@ -593,13 +619,20 @@ function SupplierHistoryPageBody() {
         { header: "Balance", x: 270 },
       ],
       align: ["left", "left", "right", "left", "right", "right", "right"],
-      rows: gold.rows.filter(r => r.kind === "opening" || inDateRange(r.at, from, to)).map(r => [
+      // A period opens with the gold brought forward (lib/periodStatement.ts).
+      rows: (() => {
+        const per = cutPeriod(gold.rows.map(r => ({ ...r, date: r.at, pinned: r.kind === "opening" })), from, to);
+        return [
+          ...(per.broughtForward !== null ? [[fmtDate(from!.toISOString()), "Gold owed — brought forward", "", "", "", "", n(per.broughtForward) || "0"]] : []),
+          ...per.rows.map(r => [
         r.kind === "opening" ? "Opening" : fmtDate(r.at),
         // The PDF's font has no rupee sign.
         fit(r.particulars.replace(/₹/g, "Rs. "), 120),
         n(r.inGrams), r.kind === "opening" ? "" : r.purity, n(r.outGrams),
         `${r.fine > 0 ? "+" : "-"}${n(Math.abs(r.fine))}`, n(r.balance) || "0",
-      ]),
+          ]),
+        ];
+      })(),
       filename: `Supplier-${supplier.name.replace(/\s+/g, "_")}-Gold`,
     });
   };
@@ -921,7 +954,7 @@ function SupplierHistoryPageBody() {
             </div>
             <div>
               <Label className="text-xs">Date</Label>
-              <Input type="date" value={payDate} max={todayLocal()} onChange={e => setPayDate(e.target.value)} className="rounded-xl h-10 mt-1" aria-label="Date" />
+              <Input type="date" min={openMin()} value={payDate} max={todayLocal()} onChange={e => setPayDate(e.target.value)} className="rounded-xl h-10 mt-1" aria-label="Date" />
             </div>
           </div>
           {/* What is pending for what it is against: the one bill picked, or the

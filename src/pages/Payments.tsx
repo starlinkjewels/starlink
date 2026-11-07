@@ -46,6 +46,7 @@ import { useRupeePay } from "@/components/RupeePay";
 import { notifyClientPayment, writeAccountEntry, writeExpense, writeFactoryPayment, writeSupplierPayment, writeSupplierReceipt, writeTransfer } from "@/lib/partyPayments";
 import { ReceiveFromBrokerSheet } from "@/components/ReceiveFromBrokerSheet";
 import { RefundClientSheet } from "@/components/RefundClientSheet";
+import { openMin } from "@/lib/openMin";
 
 /** Today as yyyy-mm-dd for a date input, in LOCAL time — toISOString() would
  *  roll back a day for anyone east of UTC after midday. */
@@ -446,7 +447,7 @@ export function ReceiveFromClient({ open, onOpenChange, lockerId: fixedLocker, f
 
         <div>
           <Label className="text-xs">Date</Label>
-          <Input type="date" value={date} onChange={e => setDate(e.target.value)} className="rounded-xl h-10 mt-1" />
+          <Input type="date" min={openMin()} value={date} onChange={e => setDate(e.target.value)} className="rounded-xl h-10 mt-1" />
         </div>
         <div>
           <Label className="text-xs">Amount Received ($)</Label>
@@ -620,7 +621,7 @@ export function PaySupplier({ open, onOpenChange, preset, lockerId: fixedLocker,
       <div className="grid grid-cols-2 gap-3">
         <div>
           <Label className="text-xs">Date</Label>
-          <Input type="date" value={date} onChange={e => setDate(e.target.value)} className="rounded-xl h-10 mt-1" />
+          <Input type="date" min={openMin()} value={date} onChange={e => setDate(e.target.value)} className="rounded-xl h-10 mt-1" />
         </div>
         <div>
           <Label className="text-xs">Amount ({fx.foreign ? fx.cur : "₹"})</Label>
@@ -733,7 +734,7 @@ export function PayFactory({ open, onOpenChange, lockerId: fixedLocker, frame = 
       <div className="grid grid-cols-2 gap-3">
         <div>
           <Label className="text-xs">Date</Label>
-          <Input type="date" value={date} onChange={e => setDate(e.target.value)} className="rounded-xl h-10 mt-1" />
+          <Input type="date" min={openMin()} value={date} onChange={e => setDate(e.target.value)} className="rounded-xl h-10 mt-1" />
         </div>
         <div>
           <Label className="text-xs">Amount ({fx.foreign ? fx.cur : "₹"})</Label>
@@ -864,7 +865,7 @@ export function PayExpense({ open, onOpenChange, lockerId: fixedLocker, frame = 
       {/* Date first: an expense is often written up after the fact. */}
       <div>
         <Label className="text-xs">Date</Label>
-        <Input type="date" value={date} onChange={e => setDate(e.target.value)} className="rounded-xl h-10 mt-1" />
+        <Input type="date" min={openMin()} value={date} onChange={e => setDate(e.target.value)} className="rounded-xl h-10 mt-1" />
       </div>
       {/* 2. Amount — in the selected account's currency */}
       <div>
@@ -1065,7 +1066,7 @@ function LockerActions({ open, onOpenChange, preset }: SheetProps & { preset: Lo
       <div className="grid grid-cols-2 gap-3">
         <div>
           <Label className="text-xs">Date</Label>
-          <Input type="date" value={date} onChange={e => setDate(e.target.value)} className="rounded-xl h-10 mt-1" />
+          <Input type="date" min={openMin()} value={date} onChange={e => setDate(e.target.value)} className="rounded-xl h-10 mt-1" />
         </div>
         <div>
           <Label className="text-xs">Amount ({ccySymbol(cur).trim()})</Label>

@@ -14,6 +14,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { AddNewItem, useAddNew } from "@/components/create/QuickCreate";
 import { sheetFrame, type Frame } from "@/components/SheetFrame";
 import { writeBrokerReceipt } from "@/lib/partyPayments";
+import { openMin } from "@/lib/openMin";
 
 /**
  * Money a broker hands over to us — what they collected from suppliers for us
@@ -78,7 +79,7 @@ export function ReceiveFromBrokerSheet({ open, onOpenChange, brokerId: fixedBrok
           </p>
         )}
         <Field label="Amount (₹)">{id => <Input id={id} type="number" min={0} step="0.01" value={amount} placeholder={held > 0.5 ? String(held) : "0"} onChange={e => setAmount(e.target.value)} className="rounded-xl h-10" />}</Field>
-        <Field label="Date">{id => <Input id={id} type="date" value={date} onChange={e => setDate(e.target.value)} className="rounded-xl h-10" />}</Field>
+        <Field label="Date">{id => <Input id={id} type="date" min={openMin()} value={date} onChange={e => setDate(e.target.value)} className="rounded-xl h-10" />}</Field>
         {!fixedLocker && (
           <Field label="Into account" className="col-span-2">{id => (
             <Select value={lockerId} onValueChange={addNew("locker", setLockerId)}>

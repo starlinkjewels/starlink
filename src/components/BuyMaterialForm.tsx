@@ -46,6 +46,7 @@ import { confirmBox } from "@/lib/confirm";
 import { Field, Group, PanelActions, Stat, UnitInput } from "@/components/BillLayout";
 import { Checkbox } from "@/components/ui/checkbox";
 import { cleanGstPct, defaultPurchaseGstPct, gstFields, gstOn, pctText, usdWithGst } from "@/lib/purchaseGst";
+import { openMin } from "@/lib/openMin";
 
 const GOLD_PURITIES = ["9K", "10K", "14K", "18K", "22K", "24K"];
 /** Gold, loose or certified diamonds, any other material (Settings → Materials),
@@ -630,7 +631,7 @@ export function BuyMaterialForm({ open, onOpenChange, supplierId: fixedSupplier,
               <Input id={id} value={billNo} onChange={e => setBillNo(e.target.value)} className="rounded-xl h-10" placeholder="Optional" />
             )}</Field>
             <Field label="Date">{id => (
-              <Input id={id} type="date" value={date} onChange={e => setDate(e.target.value)} className="rounded-xl h-10" />
+              <Input id={id} type="date" min={openMin()} value={date} onChange={e => setDate(e.target.value)} className="rounded-xl h-10" />
             )}</Field>
             <Field label="Billed in" className="col-span-2 @md:col-span-1">{id => (
               <div className="flex gap-2">
@@ -1136,7 +1137,7 @@ export function OpeningStockForm({ open, onOpenChange }: { open: boolean; onOpen
         <Group title="Opening">
           <div className="grid grid-cols-2 gap-3">
             <Field label="As of date">{id => (
-              <Input id={id} type="date" value={asOf} onChange={e => setAsOf(e.target.value)} className="rounded-xl h-10" />
+              <Input id={id} type="date" min={openMin()} value={asOf} onChange={e => setAsOf(e.target.value)} className="rounded-xl h-10" />
             )}</Field>
             <Field label="Note">{id => (
               <Input id={id} value={note} onChange={e => setNote(e.target.value)} className="rounded-xl h-10" placeholder="e.g. carried forward" />

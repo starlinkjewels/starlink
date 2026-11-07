@@ -39,6 +39,7 @@ import { StatStrip, type TableFilter } from "@/components/TableToolbar";
 import { listOf } from "@/lib/optionLists";
 import { useStickyFilter } from "@/hooks/useStickyFilter";
 import { selList, selOn } from "@/lib/filterSel";
+import { openMin } from "@/lib/openMin";
 
 export function StockSectionPage() {
   const { section } = useParams<{ section: string }>();
@@ -979,7 +980,7 @@ function CertifiedSection() {
               {!editPacket.purchaseId ? (
                 <div>
                   <Label htmlFor="edit-pk-date" className="text-xs">As of date</Label>
-                  <Input id="edit-pk-date" type="date" value={dayOf(editPacket.createdAt)} onChange={e => {
+                  <Input id="edit-pk-date" type="date" min={openMin()} value={dayOf(editPacket.createdAt)} onChange={e => {
                     const day = e.target.value; if (!day) return;
                     const o = new Date(editPacket.createdAt); const [y, mo, dd] = day.split("-").map(Number);
                     setEditPacket({ ...editPacket, createdAt: new Date(y, (mo || 1) - 1, dd || 1, o.getHours(), o.getMinutes(), o.getSeconds(), o.getMilliseconds()).toISOString() });

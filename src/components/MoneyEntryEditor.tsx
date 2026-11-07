@@ -21,6 +21,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { openMin } from "@/lib/openMin";
 
 /**
  * Correcting or cancelling one money entry — the same panel and the same
@@ -271,7 +272,7 @@ function EntrySheet({ entry, onClose, mayDelete }: { entry: MoneyEntry; onClose:
           </div>
           <div>
             <Label className="text-xs">Date</Label>
-            <Input type="date" value={ef.date}
+            <Input type="date" min={openMin()} value={ef.date}
               onChange={e => setEf({ ...ef, date: e.target.value })} className="rounded-xl h-10 mt-1" />
           </div>
         </div>

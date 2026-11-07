@@ -1,7 +1,7 @@
 // Closing an order that will not be made — Reject on the order page, or Cancel
 // from the order page or the Orders list. Lifted out of the order page so the
 // list cancels exactly the way the page does, not with a copy of its own.
-import { loadDb, updateDb, uid, type MaterialIssuance, type Order, type User } from "./db";
+import { loadDb, updateDb, uid, releaseAdvances, type MaterialIssuance, type Order, type User } from "./db";
 import { increaseStock } from "./stock";
 import { companyOf } from "./companies";
 import { issuanceUsed } from "./manufacturing";
@@ -76,6 +76,7 @@ export async function returnIssuedMaterials(orderId: string, user: Who): Promise
           if (!used) mi.finishedPieces = [];
         }
         mi.status = "closed";
+        mi.closedAt = new Date().toISOString(); // when it was closed — the year-closing lock reads it
       }
     }
     for (const p of d.diamondPackets || []) {
@@ -101,7 +102,8 @@ export async function returnIssuedMaterials(orderId: string, user: Who): Promise
       if (o2 && paid > 0) {
         const c = d.clients.find(x => x.id === o2.clientId);
         if (c) c.creditBalance = Math.round(((c.creditBalance || 0) + paid) * 100) / 100;
-        o2.advances = [];
+        // Off the order — a payment in a closed year stays, with a "moved to credit" line now.
+        releaseAdvances(o2, paid, new Date().toISOString(), "Moved to the client's credit — order cancelled");
       }
     }
   });

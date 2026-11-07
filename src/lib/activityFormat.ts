@@ -148,7 +148,7 @@ export function docLabel(col: string, d: Record<string, unknown> | null | undefi
       return s(d.name) || s(d.title) || id;
     case "tasks": return s(d.title) || id;
     case "meta": return "settings";
-    case "adminRecords": return d.kind === "fx" ? "exchange rates" : d.kind === "stockCost" ? "a ready-stock cost" : id;
+    case "adminRecords": return d.kind === "fx" ? "exchange rates" : d.kind === "stockCost" ? "a ready-stock cost" : d.kind === "yearBook" ? `the Year book ${String(d.key ?? "")}` : id;
     default: return s(d.name) || s(d.title) || id;
   }
 }
@@ -224,6 +224,13 @@ export function summarise(changes: LoggedChange[]): { summary: string; module: M
 export function undoBlocker(changes: LoggedChange[], truncated: boolean): string | undefined {
   if (truncated) return "Too large to keep a full copy, so it cannot be put back automatically.";
   if (changes.length > 60) return "Too many records changed at once to undo as a single step.";
+  // Closing or reopening a year (lib/yearLock.ts) is done, with a reason, in Settings → Year closing.
+  if (changes.some(c => c.col === "meta" && ["booksClosedTo", "yearCloses", "fyStartMonth"].some(k => JSON.stringify(c.before?.[k] ?? null) !== JSON.stringify(c.after?.[k] ?? null)))) {
+    return "A year was closed or reopened. Use Settings → Year closing to reopen or close it again.";
+  }
+  if (changes.some(c => c.col === "adminRecords" && ((c.after ?? c.before) as { kind?: string } | null)?.kind === "yearBook")) {
+    return "A Year book. Use Settings → Year closing instead.";
+  }
   // A melt put stones (and perhaps gold) back in stock, which an undo here
   // cannot take out again.
   if (changes.some(c => c.col === "orders" && c.after?.melted && !c.before?.melted)) {

@@ -23,7 +23,7 @@
 import { coField, workCompanyOf } from "./companies";
 import { isOtherMaterial, type MaterialKey } from "./materials";
 import {
-  findInvoiceForOrder, toPureGold, pureFromPurity, uid, isDiamondOnlyOrder,
+  findInvoiceForOrder, toPureGold, pureFromPurity, uid, isDiamondOnlyOrder, releaseAdvances,
   type DB, type Order, type MaterialIssuance, type OrderMelt,
 } from "./db";
 import { issuanceUsed } from "./manufacturing";
@@ -188,7 +188,8 @@ export function applyMelt(d: DB, orderId: string, plan: MeltPlan, c: MeltChoice,
   if (paid > 0) {
     const cl = d.clients.find(x => x.id === o.clientId);
     if (cl) cl.creditBalance = Math.round(((cl.creditBalance || 0) + paid) * 100) / 100;
-    o.advances = [];
+    // Off the order — a payment in a closed year stays, with a "moved to credit" line now.
+    releaseAdvances(o, paid, at, "Moved to the client's credit — piece melted");
   }
   const rec: OrderMelt = {
     at, by: by.id, byName: by.name, reason: c.reason?.trim() || undefined,

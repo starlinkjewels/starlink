@@ -19,6 +19,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { openMin } from "@/lib/openMin";
 
 // Every way a payment is taken across the app (Payments, the client page), so
 // a receipt's own mode is always one of the choices.
@@ -266,7 +267,7 @@ export function ReceiptEditSheet({ receiptId, onClose }: { receiptId: string | n
             </div>
             <div>
               <Label className="text-xs" htmlFor="rcpt-edit-date">Date</Label>
-              <Input id="rcpt-edit-date" type="date" value={ef.date} disabled={!mayEdit}
+              <Input id="rcpt-edit-date" type="date" min={openMin()} value={ef.date} disabled={!mayEdit}
                 onChange={e => setEf({ ...ef, date: e.target.value })} className="rounded-xl h-10 mt-1" />
             </div>
           </div>

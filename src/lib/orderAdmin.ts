@@ -22,6 +22,7 @@ import { lotLabel } from "./diamondLots";
 import { confirmBox } from "./confirm";
 import { CHECKING, STILL_LOADING, recordsReady } from "./actionHints";
 import { coField, companyIdOfClient } from "./companies";
+import { orderClosedWhy } from "./yearLock";
 
 /** Everything the checks read beyond the orders the app opens with. */
 export const ORDER_ADMIN_COLS = [
@@ -71,6 +72,8 @@ function deleteStopper(db: DB, o: Order): string | undefined {
 /** Why this order can't be deleted; undefined when it can. Admin only. */
 export function orderDeleteBlocker(db: DB, user: Pick<User, "role"> | null | undefined, o: Order): string | undefined {
   if (user?.role !== "admin") return "Only the admin can delete an order";
+  const closed = orderClosedWhy(o, db.settings);
+  if (closed) return closed;
   if (!collectionsFresh(ORDER_ADMIN_COLS)) return CHECKING;
   return deleteStopper(db, o);
 }
@@ -195,6 +198,8 @@ export async function restoreOrderFlow(orderId: string, user: Pick<User, "role">
 
 /** Why this order can't move to another client now; undefined when it can. */
 export function clientChangeBlocker(db: DB, o: Order): string | undefined {
+  const closed = orderClosedWhy(o, db.settings);
+  if (closed) return closed;
   if (!collectionsFresh(ORDER_ADMIN_COLS)) return CHECKING;
   if ((o.advances ?? []).length) return "It has a payment from this client — delete it first, then record it under the right client";
   const inv = findInvoiceForOrder(db.invoices ?? [], o.id);

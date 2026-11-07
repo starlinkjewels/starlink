@@ -24,6 +24,7 @@ import {
 import { reserveReceiptNumber } from "./counters";
 import { ccy, roundCcy, type CurrencyCode } from "./currency";
 import { moveToDay } from "./moneyEntries";
+import { closedWhy } from "./yearLock";
 
 const r2 = (n: number) => Math.round(n * 100) / 100;
 /** Less than this is rounding, not money. */
@@ -401,6 +402,9 @@ type Plan = { why: string } | { apply: () => void };
 function planEdit(d: DB, receiptId: string, patch: ReceiptEdit): Plan {
   const rec = (d.clientReceipts ?? []).find(r => r.id === receiptId);
   if (!rec) return { why: "That receipt is no longer on record." };
+  // In a closed year (lib/yearLock.ts) — or being re-dated into one.
+  const closed = closedWhy(rec.date || rec.createdAt, d.settings) ?? (patch.date ? closedWhy(patch.date, d.settings) : null);
+  if (closed) return { why: closed };
   if (patch.clientId !== undefined && patch.clientId !== rec.clientId)
     return { why: `A receipt can't be moved to another client — cancel receipt ${rec.receiptNo} and record the payment again under the right one.` };
   if (patch.invoiceId !== undefined && (patch.invoiceId || undefined) !== rec.invoiceId)
@@ -649,6 +653,8 @@ export function editReceipt(receiptId: string, patch: ReceiptEdit): void {
 function planMoveClient(d: DB, receiptId: string, clientId: string, invoiceId: string | undefined, userId: string, at: string): Plan {
   const rec = (d.clientReceipts ?? []).find(r => r.id === receiptId);
   if (!rec) return { why: "That receipt is no longer on record." };
+  const closed = closedWhy(rec.date || rec.createdAt, d.settings);
+  if (closed) return { why: closed };
   if (clientId === rec.clientId) return { apply: () => {} };
   const to = d.clients.find(c => c.id === clientId);
   if (!to) return { why: "That client is no longer on file — pick again." };
@@ -734,6 +740,8 @@ function receiptLabel(receiptId: string): string {
 function planCancel(d: DB, receiptId: string, userId: string, at: string): Plan {
   const rec = (d.clientReceipts ?? []).find(r => r.id === receiptId);
   if (!rec) return { why: "That receipt is no longer on record." };
+  const closed = closedWhy(rec.date || rec.createdAt, d.settings);
+  if (closed) return { why: closed };
   const landed = landings(d, rec);
   const applied = r2(landed.reduce((s, x) => s + x.a.amount, 0));
   const client = d.clients.find(c => c.id === rec.clientId);

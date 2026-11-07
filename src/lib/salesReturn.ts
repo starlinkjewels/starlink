@@ -28,6 +28,7 @@ import {
   giftCardRemaining, findInvoiceForOrder, orderIsDispatched, uid, writeStockCost,
 } from "./db";
 import { pieceWeights } from "./weights";
+import { closedWhy } from "./yearLock";
 
 const r2 = (n: number) => Math.round(n * 100) / 100;
 const r3 = (n: number) => Math.round(n * 1000) / 1000;
@@ -272,6 +273,8 @@ export function cancelReturnBlocker(d: DB, orderId: string, returnId: string): s
   const o = d.orders.find(x => x.id === orderId);
   const r = o?.returns?.find(x => x.id === returnId);
   if (!o || !r) return "That return is not there any more.";
+  const closed = closedWhy(r.at, d.settings);
+  if (closed) return closed;
   if (r.status === "received" && r.readyStockId) {
     const item = d.readyStock.find(i => i.id === r.readyStockId);
     if (!item || item.quantity < r.qty) return "The piece has already left Ready Stock (sold or changed) — it can't be taken back out.";

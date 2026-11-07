@@ -60,6 +60,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { confirmBox } from "@/lib/confirm";
 import { otherMetalsOf } from "@/lib/weights";
+import { openMin } from "@/lib/openMin";
 
 /** An action on an issuance card: a light text button, icon and word. */
 const ISSUE_ACTION = "inline-flex items-center gap-1.5 h-9 px-2.5 rounded-lg text-sm font-medium text-primary hover:bg-primary/[0.07] transition-colors";
@@ -573,6 +574,7 @@ function FactoryHistoryPageBody() {
         const mi = d.materialIssuances.find(x => x.id === issuance.id);
         if (mi) {
           mi.status = "closed";
+          mi.closedAt = new Date().toISOString(); // when it was closed — the year-closing lock reads it
           // Whether the leftover went back to shared Stock or back to the
           // factory's own pool, it's no longer "at this factory" — shrink
           // quantityIssued either way, or factoryPoolBalance would keep
@@ -860,6 +862,25 @@ function FactoryHistoryPageBody() {
   };
 
 
+  /**
+   * The movement sheet for a period. Balances run over the WHOLE account first
+   * (they used to start again from nothing at the period's first line), then the
+   * period is cut out, opening with each material's balance brought forward.
+   */
+  const periodMovements = (all: MovementRow[], from: Date | null, to: Date | null): MovementRow[] => {
+    if (!from) return all.filter(r => !to || +new Date(r.date) <= +to);
+    const bf = new Map<string, MovementRow>();
+    const rows: MovementRow[] = [];
+    for (const r of all) {
+      if (r.id.startsWith("opening-") || +new Date(r.date) < +from) { bf.set(r.material, r); continue; }
+      if (to && +new Date(r.date) > +to) continue;
+      rows.push(r);
+    }
+    const carried = [...bf.values()].filter(r => Math.abs(r.balance) > 0.0005)
+      .map(r => ({ id: `bf-${r.material}`, date: from.toISOString(), ref: "", particular: "Brought forward", material: r.material, out: 0, in: 0, balance: r.balance, money: r.money }));
+    return [...carried, ...rows];
+  };
+
   const uniTotals = (rows: UniRow[]) => rows.reduce(
     (t, r) => ({ drGold: t.drGold + r.drGold, drSilver: t.drSilver + r.drSilver, drDia: t.drDia + r.drDia, drOther: t.drOther + r.drOther, drAmount: t.drAmount + r.drAmount, crGold: t.crGold + r.crGold, crSilver: t.crSilver + r.crSilver, crDia: t.crDia + r.crDia, crOther: t.crOther + r.crOther, crAmount: t.crAmount + r.crAmount }),
     { drGold: 0, drSilver: 0, drDia: 0, drOther: 0, drAmount: 0, crGold: 0, crSilver: 0, crDia: 0, crOther: 0, crAmount: 0 },
@@ -1030,9 +1051,7 @@ function FactoryHistoryPageBody() {
     const iss = issuancesForOrder(orderNo);
     // Advances settle the factory's account as a whole, not one order.
     const acct = factoryAccount(iss, orderNo ? undefined : factory, orderNo ? [] : advances);
-    const rows = flattenMovements(
-      buildUnifiedLedger(iss, !orderNo).filter(r => inDateRange(r.date, from, to)),
-    );
+    const rows = periodMovements(flattenMovements(buildUnifiedLedger(iss, !orderNo)), from, to);
     // One flowing table: Date, Ref, Particular, Material, Out, In, Balance. The
     // old two-block layout left the middle of the page empty for a factory that
     // only handles one material.
@@ -1072,9 +1091,7 @@ function FactoryHistoryPageBody() {
 
   const exportCombinedCsv = (from: Date | null, to: Date | null, orderNo?: string) => {
     const iss = issuancesForOrder(orderNo);
-    const rows = flattenMovements(
-      buildUnifiedLedger(iss, !orderNo).filter(r => inDateRange(r.date, from, to)),
-    );
+    const rows = periodMovements(flattenMovements(buildUnifiedLedger(iss, !orderNo)), from, to);
     downloadCsv(
       `Factory-${factory.name.replace(/\s+/g, "_")}${ordSuffix(orderNo)}-Movements`,
       ["Date", "Order / Ref", "Particular", "Material", "Out", "In", "Balance"],
@@ -1182,7 +1199,7 @@ function FactoryHistoryPageBody() {
                 </div>
                 <div>
                   <label className="text-[11px] text-muted-foreground">As of date</label>
-                  <Input type="date" value={ob.fineGoldDate} onChange={e => setOb({ ...ob, fineGoldDate: e.target.value })} className="rounded-lg mt-1 h-9" />
+                  <Input type="date" min={openMin()} value={ob.fineGoldDate} onChange={e => setOb({ ...ob, fineGoldDate: e.target.value })} className="rounded-lg mt-1 h-9" />
                 </div>
               </div>
             </div>
@@ -1522,7 +1539,7 @@ function FactoryHistoryPageBody() {
                 </div>
                 <div>
                   <Label className="text-xs">Date</Label>
-                  <Input type="date" value={payDate} max={todayLocal()} onChange={e => setPayDate(e.target.value)} className="rounded-xl h-10 mt-1" aria-label="Date" />
+                  <Input type="date" min={openMin()} value={payDate} max={todayLocal()} onChange={e => setPayDate(e.target.value)} className="rounded-xl h-10 mt-1" aria-label="Date" />
                 </div>
               </div>
               {(() => {

@@ -14,6 +14,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { AddNewItem, useAddNew } from "@/components/create/QuickCreate";
+import { openMin } from "@/lib/openMin";
 
 const NONE = "__none";
 
@@ -103,7 +104,7 @@ export function OrderPaymentEditDialog({ order, advance, onClose }: { order: Ord
           </div>
           <div className="space-y-1">
             <Label className="text-xs" htmlFor="pay_date">Date</Label>
-            <Input id="pay_date" type="date" value={date} onChange={e => setDate(e.target.value)} disabled={!!blocked} className="h-10 rounded-xl" />
+            <Input id="pay_date" type="date" min={openMin()} value={date} onChange={e => setDate(e.target.value)} disabled={!!blocked} className="h-10 rounded-xl" />
           </div>
           <div className="space-y-1 col-span-2">
             <Label className="text-xs" htmlFor="pay_note">Payment note</Label>

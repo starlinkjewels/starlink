@@ -23,6 +23,7 @@ import { AddNewItem, useAddNew } from "@/components/create/QuickCreate";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { openMin } from "@/lib/openMin";
 
 /** A line as the form holds it — every figure a string, as typed. */
 interface Draft {
@@ -183,7 +184,7 @@ export function SellToSupplierSheet({ open, onOpenChange, supplierId: fixedSuppl
               </Select>
             )}</Field>
             <Field label="Date" className="col-span-2 @md:col-span-1">{id => (
-              <Input id={id} type="date" value={date} onChange={e => setDate(e.target.value)} className="rounded-xl h-10" />
+              <Input id={id} type="date" min={openMin()} value={date} onChange={e => setDate(e.target.value)} className="rounded-xl h-10" />
             )}</Field>
             {multiCo && (
               <div className="col-span-2">
