@@ -208,7 +208,7 @@ export function TabBar<K extends string>({ tabs, value, onChange, label, classNa
   };
   const fade = s.over ? `${s.start ? "" : "fade-l"} ${s.end ? "" : "fade-r"}` : "";
   return (
-    <div className={`border-b border-border/80 ${className}`}>
+    <div className={`tabbar-wrap border-b border-border/80 ${className}`}>
       <div ref={ref} role="tablist" aria-label={label} onKeyDown={keys}
         className={`tabbar relative flex gap-1 overflow-x-auto no-scrollbar ${fade}`}>
         {tabs.map((t, i) => {
@@ -227,7 +227,7 @@ export function TabBar<K extends string>({ tabs, value, onChange, label, classNa
           );
         })}
         {bar && (
-          <span aria-hidden className="absolute bottom-0 h-[2.5px] rounded-full bg-primary transition-[transform,width] duration-300 ease-out"
+          <span aria-hidden className="tabbar-ink absolute bottom-0 h-[2.5px] rounded-full bg-primary transition-[transform,width] duration-300 ease-out"
             style={{ width: bar.w, transform: `translateX(${bar.x}px)`, left: 0 }} />
         )}
       </div>

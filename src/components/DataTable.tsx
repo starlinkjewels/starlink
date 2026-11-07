@@ -792,7 +792,7 @@ export function CellTag({ children, tone = "neutral" }: { children: ReactNode; t
     blue: "bg-primary/10 text-primary ring-primary/25",
     violet: "bg-violet-500/10 text-violet-700 ring-violet-500/25",
   }[tone];
-  return <span className={`inline-flex items-center whitespace-nowrap text-[11px] font-medium px-2 py-0.5 rounded-full ring-1 ${t}`}>{children}</span>;
+  return <span data-tone={tone} className={`ui-tag inline-flex items-center whitespace-nowrap text-[11px] font-medium px-2 py-0.5 rounded-full ring-1 ${t}`}>{children}</span>;
 }
 
 /** An amount: figures lined up; red for money out, green for money in. */
