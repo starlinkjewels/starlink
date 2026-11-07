@@ -69,3 +69,59 @@ export function fiscalYearSpan(fy: FiscalYear): string {
 export function onOrBefore(day: string, until: string | undefined): boolean {
   return !!day && !!until && day <= until;
 }
+
+/* ── Years on the business's own dates (Diwali to Diwali, say) ─────────────
+ * Some businesses close their books on a day of their own choosing — the eve
+ * of Diwali, which falls on a different date every year. Their years are not
+ * worked out from a month: each runs from the day after the last close to the
+ * last day chosen when it is closed (Settings → Year closing). */
+
+/** The day `n` days after a "YYYY-MM-DD" day. */
+export function addDays(day: string, n: number): string {
+  const d = new Date(`${day}T00:00:00`);
+  d.setDate(d.getDate() + n);
+  return dayOf(d);
+}
+
+/** A year on its own dates, named by the calendar years it spans ("2025-26",
+ *  or "2025" inside one calendar year). A name already taken gets " (2)". */
+export function customYear(from: string, to: string, taken: string[] = []): FiscalYear {
+  const a = Number(from.slice(0, 4)), b = Number(to.slice(0, 4));
+  let key = a === b ? String(a) : `${a}-${String(b).slice(-2)}`;
+  for (let i = 2; taken.includes(key) && i < 20; i++) key = `${a === b ? a : `${a}-${String(b).slice(-2)}`} (${i})`;
+  return { key, from, to, startYear: a };
+}
+
+/** The settings a year's dates are read from. */
+export interface YearSettings {
+  fyStartMonth?: number;
+  fyCustomDates?: boolean;
+  booksClosedTo?: string;
+  yearCloses?: { key: string; from: string; to: string; status: "closed" | "reopened" }[];
+}
+
+/** Ranges to offer in a date filter: this year (to today), then the years before
+ *  it — the business's own closed years when it keeps its own dates. */
+export function yearRanges(s: YearSettings | undefined | null, today = dayOf(new Date())): { key: string; label: string; from: string; to: string }[] {
+  const sm = s?.fyStartMonth || 4;
+  if (s?.fyCustomDates) {
+    const closed = (s.yearCloses ?? []).filter(e => e.status === "closed").sort((x, y) => y.to.localeCompare(x.to));
+    const start = s.booksClosedTo ? addDays(s.booksClosedTo, 1) : "";
+    return [
+      ...(start && start <= today ? [{ key: "fy", label: `This year (from ${fiscalDay(start)})`, from: start, to: today }] : []),
+      ...closed.slice(0, 4).map((e, i) => ({ key: `fyc${i}`, label: `Year ${e.key} (${fiscalDay(e.from)} – ${fiscalDay(e.to)})`, from: e.from, to: e.to })),
+    ];
+  }
+  const cur = fiscalYearOf(today, sm);
+  const out = [{ key: "fy", label: `This financial year (${cur.key})`, from: cur.from, to: today }];
+  for (let i = 1; i <= 3; i++) {
+    const fy = fiscalYear(cur.startYear - i, sm);
+    out.push({ key: i === 1 ? "lastfy" : `fy${i}`, label: i === 1 ? `Last financial year (${fy.key})` : `Financial year ${fy.key}`, from: fy.from, to: fy.to });
+  }
+  return out;
+}
+
+/** "21 Oct 2025". */
+export function fiscalDay(day: string): string {
+  return new Date(`${day}T00:00:00`).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" });
+}

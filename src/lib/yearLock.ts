@@ -20,7 +20,14 @@ import type { Settings } from "./db";
 import { dayOf, fiscalYearOf, onOrBefore } from "./fiscalYear";
 
 type Rec = Record<string, unknown>;
-type Settingsish = Pick<Settings, "booksClosedTo" | "fyStartMonth"> | undefined | null;
+type Settingsish = Partial<Pick<Settings, "booksClosedTo" | "fyStartMonth" | "fyCustomDates" | "yearCloses">> | undefined | null;
+
+/** The name of the closed year a day falls in — the year as it was closed
+ *  (its own dates, a Diwali year say), else the financial year by month. */
+export function closedYearKey(day: string, s: Settingsish): string {
+  const e = (s?.yearCloses ?? []).find(x => x.status === "closed" && x.from <= day && day <= x.to);
+  return e ? e.key : fiscalYearOf(day, s?.fyStartMonth || 4).key;
+}
 
 /** The last day of the last closed year, or undefined when no year is closed. */
 export function closedTo(s: Settingsish): string | undefined {
@@ -36,8 +43,7 @@ export function isClosedDate(iso: string | Date | undefined | null, s: Settingsi
 /** The words a screen shows when an entry is in a closed year, or null when it is not. */
 export function closedWhy(iso: string | Date | undefined | null, s: Settingsish): string | null {
   if (!isClosedDate(iso, s)) return null;
-  const fy = fiscalYearOf(dayOf(iso ?? ""), s?.fyStartMonth || 4);
-  return `In the closed year ${fy.key} — the main admin can reopen it in Settings → Year closing`;
+  return `In the closed year ${closedYearKey(dayOf(iso ?? ""), s)} — the main admin can reopen it in Settings → Year closing`;
 }
 
 /** The first day a new entry may be dated (the day after the closed years), or undefined. */
@@ -54,7 +60,7 @@ export function firstOpenDay(s: Settingsish): string | undefined {
 export function orderClosedWhy(o: object, s: Settingsish): string | null {
   const until = closedTo(s);
   if (!until || !lockedPart("orders", o as Rec, until)) return null;
-  return `It has entries in the closed year ${fiscalYearOf(until, s?.fyStartMonth || 4).key} — the main admin can reopen it in Settings → Year closing`;
+  return `It has entries in the closed year ${closedYearKey(until, s)} — the main admin can reopen it in Settings → Year closing`;
 }
 
 /* ── What of each record belongs to the closed years ───────────────────── */
@@ -201,7 +207,7 @@ export function lockedPart(col: string, r: Rec | null | undefined, until: string
 const same = (a: unknown, b: unknown) => JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
 
 /** The year-closing fields of the settings — only the main admin may change them. */
-const CLOSE_FIELDS = ["booksClosedTo", "fyStartMonth", "yearCloses"] as const;
+const CLOSE_FIELDS = ["booksClosedTo", "fyStartMonth", "fyCustomDates", "yearCloses"] as const;
 
 const NOUN: Record<string, string> = {
   lockerTransactions: "account entry", expenses: "expense", supplierReceipts: "money received from a supplier",
@@ -243,7 +249,7 @@ export function lockBreaches(
 /** The message shown when a save is refused. */
 export function breachMessage(breaches: string[], s: Settingsish): string {
   const to = closedTo(s);
-  const fy = to ? fiscalYearOf(to, s?.fyStartMonth || 4) : null;
+  const fy = to ? { key: closedYearKey(to, s) } : null;
   const first = breaches[0] ?? "Changing a closed year";
   if (first.startsWith("Only the main admin")) return `Not saved — ${first.toLowerCase()}.`;
   return `Not saved — ${first.charAt(0).toLowerCase()}${first.slice(1)}${fy ? ` (closed up to ${fy.key})` : ""}. The main admin can reopen the year in Settings → Year closing.`;
