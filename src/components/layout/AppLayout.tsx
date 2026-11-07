@@ -7,7 +7,7 @@ import { studioSidebarGroups, StudioTabBar, StudioBackButton, parentPath } from 
 import { applyAppearance, appearanceOf, rememberAppearance, type AppearanceUi } from "@/lib/appearance";
 import { QuickCreateProvider } from "@/components/create/QuickCreate";
 import { Outlet, NavLink, useNavigate, useLocation, useNavigationType } from "react-router-dom";
-import { LayoutDashboard, Webhook, Package, Users, Briefcase, MessageSquare, Bell, FileText, BarChart3, Settings, Search, LogOut, Plus, User, ChevronDown, UserCircle, ListTodo, MoreHorizontal, X, ChevronRight, Search as SearchIcon, Wallet, BookOpen, FolderOpen, Sparkles, Landmark, Truck, Boxes, Factory, Gem, CreditCard, ShoppingCart, Camera, Gift, ScanLine, History, Workflow, Megaphone, AlarmClock, PenTool, FolderLock } from "lucide-react";
+import { LayoutDashboard, Target, Webhook, Package, Users, Briefcase, MessageSquare, Bell, FileText, BarChart3, Settings, Search, LogOut, Plus, User, ChevronDown, UserCircle, ListTodo, MoreHorizontal, X, ChevronRight, Search as SearchIcon, Wallet, BookOpen, FolderOpen, Sparkles, Landmark, Truck, Boxes, Factory, Gem, CreditCard, ShoppingCart, Camera, Gift, ScanLine, History, Workflow, Megaphone, AlarmClock, PenTool, FolderLock } from "lucide-react";
 import { useAuth } from "@/lib/auth";
 import { motion, AnimatePresence } from "framer-motion";
 import { loadDb, collectionsLoaded, ensureCollections, summariesSettled } from "@/lib/db";
@@ -34,6 +34,7 @@ const NAV: NavItem[] = [
   { to: "/catalog", label: "Catalog", icon: FolderOpen, highlight: true },
   { to: "/product-photos", label: "Design Studio", icon: Camera },
   { to: "/", label: "Dashboard", icon: LayoutDashboard },
+  { to: "/targets", label: "Targets", icon: Target, roles: ["admin"] },
   { to: "/orders", label: "Orders", icon: Package },
   { to: "/clients", label: "Clients", icon: Users, roles: ["admin","employee"] },
   { to: "/employees", label: "Employees", icon: Briefcase, roles: ["admin"] },
@@ -67,6 +68,7 @@ const NAV: NavItem[] = [
 const NAV_GROUPS: { title: string; items: NavItem[] }[] = [
   { title: "Overview", items: [
     { to: "/", label: "Dashboard", icon: LayoutDashboard },
+    { to: "/targets", label: "Targets", icon: Target, roles: ["admin"] },
     { to: "/orders", label: "Orders", icon: Package },
   ] },
   { title: "Catalog", items: [
@@ -143,6 +145,7 @@ const MORE_NAV: NavItem[] = [
   { to: "/gift-cards", label: "Gift Cards", icon: Gift, roles: ["admin","employee"] },
   { to: "/payments", label: "Payments", icon: CreditCard, roles: ["admin","employee"] },
   { to: "/reports", label: "Reports", icon: BarChart3 },
+  { to: "/targets", label: "Targets", icon: Target, roles: ["admin"] },
   { to: "/autopilot", label: "Autopilot", icon: Workflow, roles: ["admin"] },
   { to: "/campaigns", label: "Campaigns", icon: Megaphone, roles: ["admin"] },
   { to: "/documents", label: "Documents", icon: FolderLock, roles: ["admin", "employee"] },
@@ -170,6 +173,7 @@ const PAGE_TITLES: Record<string, string> = {
   "/messages": "Messages",
   "/notifications": "Notifications",
   "/reports": "Reports",
+  "/targets": "Targets",
   "/settings": "Settings",
   "/search": "Search",
   "/profile": "My Profile",
@@ -204,6 +208,7 @@ const ICON_COLORS: Record<string, string> = {
   "/clients":    "bg-violet-500/15 text-violet-600",
   "/employees":  "bg-orange-500/15 text-orange-600",
   "/reports":    "bg-emerald-500/15 text-emerald-600",
+  "/targets":    "bg-primary/15 text-primary",
   "/settings":   "bg-slate-500/15 text-slate-600",
   "/search":     "bg-primary/15 text-primary",
   "/profile":    "bg-brand-dark/15 text-brand-dark",
