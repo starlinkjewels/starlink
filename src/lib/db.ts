@@ -1292,6 +1292,10 @@ export interface Settings {
   /** The month the financial year starts in, 1–12. Unset = 4 (April, India's).
    *  Fixed once the first year is closed. */
   fyStartMonth?: number;
+  /** The years run on the business's own dates (Diwali to Diwali, say): each
+   *  runs from the day after the last close to the last day the main admin
+   *  chooses when closing it. Unset = years by fyStartMonth. */
+  fyCustomDates?: boolean;
   /** Every year closed or reopened, newest last — the small public part of each
    *  close (the figures themselves are admin-only, in adminRecords). */
   yearCloses?: YearCloseEntry[];

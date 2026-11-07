@@ -225,7 +225,7 @@ export function undoBlocker(changes: LoggedChange[], truncated: boolean): string
   if (truncated) return "Too large to keep a full copy, so it cannot be put back automatically.";
   if (changes.length > 60) return "Too many records changed at once to undo as a single step.";
   // Closing or reopening a year (lib/yearLock.ts) is done, with a reason, in Settings → Year closing.
-  if (changes.some(c => c.col === "meta" && ["booksClosedTo", "yearCloses", "fyStartMonth"].some(k => JSON.stringify(c.before?.[k] ?? null) !== JSON.stringify(c.after?.[k] ?? null)))) {
+  if (changes.some(c => c.col === "meta" && ["booksClosedTo", "yearCloses", "fyStartMonth", "fyCustomDates"].some(k => JSON.stringify(c.before?.[k] ?? null) !== JSON.stringify(c.after?.[k] ?? null)))) {
     return "A year was closed or reopened. Use Settings → Year closing to reopen or close it again.";
   }
   if (changes.some(c => c.col === "adminRecords" && ((c.after ?? c.before) as { kind?: string } | null)?.kind === "yearBook")) {

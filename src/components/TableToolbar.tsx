@@ -8,7 +8,8 @@ import {
   DropdownMenuRadioGroup, DropdownMenuRadioItem, DropdownMenuSeparator, DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { todayLocal } from "@/lib/db";
+import { todayLocal, loadDb } from "@/lib/db";
+import { yearRanges } from "@/lib/fiscalYear";
 import { selJoin, selList, selOn, selText } from "@/lib/filterSel";
 
 /**
@@ -46,16 +47,10 @@ const BTN = "h-9 px-3 inline-flex items-center gap-2 rounded-xl border border-bo
 
 const iso = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 
-/** The first year of the financial year `back` years ago (April–March, India's). */
-function fyStart(back: number): number {
-  const d = new Date();
-  return (d.getMonth() >= 3 ? d.getFullYear() : d.getFullYear() - 1) - back;
-}
-/** "2025-26". */
-const fyKey = (back: number) => { const y = fyStart(back); return `${y}-${String(y + 1).slice(-2)}`; };
-
-/** The ranges people actually ask for — the Indian financial year included. */
-export const DATE_PRESETS: { key: string; label: string; range: () => [string, string] }[] = [
+/** The ranges people actually ask for. The years come from the business's own
+ *  setting (Settings → Year closing): April–March, another month, or its own
+ *  dates — a Diwali year — with each closed year offered by name. */
+const BASE_PRESETS: { key: string; label: string; range: () => [string, string] }[] = [
   { key: "today", label: "Today", range: () => [todayLocal(), todayLocal()] },
   { key: "yesterday", label: "Yesterday", range: () => { const d = new Date(); d.setDate(d.getDate() - 1); return [iso(d), iso(d)]; } },
   { key: "7d", label: "Last 7 days", range: () => { const d = new Date(); d.setDate(d.getDate() - 6); return [iso(d), todayLocal()]; } },
@@ -63,19 +58,18 @@ export const DATE_PRESETS: { key: string; label: string; range: () => [string, s
   { key: "month", label: "This month", range: () => { const d = new Date(); return [iso(new Date(d.getFullYear(), d.getMonth(), 1)), todayLocal()]; } },
   { key: "lastmonth", label: "Last month", range: () => { const d = new Date(); return [iso(new Date(d.getFullYear(), d.getMonth() - 1, 1)), iso(new Date(d.getFullYear(), d.getMonth(), 0))]; } },
   { key: "year", label: "This year", range: () => { const d = new Date(); return [iso(new Date(d.getFullYear(), 0, 1)), todayLocal()]; } },
-  { key: "fy", label: `This financial year (${fyKey(0)})`, range: () => { const y = fyStart(0); return [iso(new Date(y, 3, 1)), todayLocal()]; } },
-  { key: "lastfy", label: `Last financial year (${fyKey(1)})`, range: () => { const y = fyStart(1); return [iso(new Date(y, 3, 1)), iso(new Date(y + 1, 2, 31))]; } },
-  // The two years before that — a closed year's books, read from any table.
-  { key: "fy2", label: `Financial year ${fyKey(2)}`, range: () => { const y = fyStart(2); return [iso(new Date(y, 3, 1)), iso(new Date(y + 1, 2, 31))]; } },
-  { key: "fy3", label: `Financial year ${fyKey(3)}`, range: () => { const y = fyStart(3); return [iso(new Date(y, 3, 1)), iso(new Date(y + 1, 2, 31))]; } },
 ];
+export function datePresets(): { key: string; label: string; range: () => [string, string] }[] {
+  const years = yearRanges(loadDb().settings, todayLocal()).map(r => ({ key: r.key, label: r.label, range: (): [string, string] => [r.from, r.to] }));
+  return [...BASE_PRESETS, ...years];
+}
 
 const short = (s: string) => new Date(`${s}T00:00:00`).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" }).replace(/\bSept\b/, "Sep");
 
 /** "This month", or "1 Oct 2026 – 17 Oct 2026" for a range of one's own. */
 export function dateRangeText(from: string, to: string): string {
   if (!from && !to) return "Any date";
-  const p = DATE_PRESETS.find(x => { const [f, t] = x.range(); return f === from && t === to; });
+  const p = datePresets().find(x => { const [f, t] = x.range(); return f === from && t === to; });
   if (p) return p.label;
   if (from && to) return from === to ? short(from) : `${short(from)} – ${short(to)}`;
   return from ? `From ${short(from)}` : `Up to ${short(to)}`;
@@ -107,7 +101,7 @@ function FilterFields({ filters }: { filters: TableFilter[] }) {
     <div className="space-y-5">
       {filters.map((f, i) => {
         if (f.kind === "date") {
-          const preset = DATE_PRESETS.find(x => { const [a, b] = x.range(); return a === f.from && b === f.to; });
+          const preset = datePresets().find(x => { const [a, b] = x.range(); return a === f.from && b === f.to; });
           return (
             <section key={`d${i}`} className="space-y-2.5">
               <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">{f.label ?? "Date"}</p>
@@ -115,14 +109,14 @@ function FilterFields({ filters }: { filters: TableFilter[] }) {
               <Select value={!f.from && !f.to ? "__any" : preset?.key ?? "__custom"}
                 onValueChange={v => {
                   if (v === "__any") f.onChange("", "");
-                  else { const p = DATE_PRESETS.find(x => x.key === v); if (p) { const [a, b] = p.range(); f.onChange(a, b); } }
+                  else { const p = datePresets().find(x => x.key === v); if (p) { const [a, b] = p.range(); f.onChange(a, b); } }
                 }}>
                 <SelectTrigger className={`h-10 rounded-xl text-sm ${f.from || f.to ? "border-primary/50 bg-primary/[0.04] text-primary font-medium" : ""}`} aria-label={f.label ?? "Date"}>
                   <CalendarDays className="h-4 w-4 shrink-0 opacity-70 mr-2" /><span className="flex-1 min-w-0 text-left truncate"><SelectValue /></span>
                 </SelectTrigger>
                 <SelectContent className="max-h-80">
                   <SelectItem value="__any">Any date</SelectItem>
-                  {DATE_PRESETS.map(p => <SelectItem key={p.key} value={p.key}>{p.label}</SelectItem>)}
+                  {datePresets().map(p => <SelectItem key={p.key} value={p.key}>{p.label}</SelectItem>)}
                   {(f.from || f.to) && !preset && <SelectItem value="__custom">{dateRangeText(f.from, f.to)}</SelectItem>}
                 </SelectContent>
               </Select>

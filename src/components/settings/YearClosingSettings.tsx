@@ -33,8 +33,8 @@ import { fmtCcy } from "@/lib/currency";
 import { companyById } from "@/lib/companies";
 import { materialName } from "@/lib/materials";
 import { LAZY_COLS } from "@/lib/pageData";
-import { closedTo } from "@/lib/yearLock";
-import { fiscalYear, fiscalYearOf, fiscalYearsBetween, fiscalYearSpan, dayOf, type FiscalYear } from "@/lib/fiscalYear";
+import { closedTo, closedYearKey } from "@/lib/yearLock";
+import { fiscalYearOf, fiscalYearsBetween, fiscalYearSpan, dayOf, addDays, customYear, fiscalDay, type FiscalYear } from "@/lib/fiscalYear";
 import { buildYearBook, closeChecks, bookParts, bookFromParts, type YearBook, type CloseCheck, type StockLine } from "@/lib/yearEnd";
 
 const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
@@ -60,16 +60,23 @@ async function readyForBook(): Promise<boolean> {
   return collectionsReady(BOOK_COLS, 30000);
 }
 
-type YearRow = { fy: FiscalYear; entry?: YearCloseEntry; state: "closed" | "reopened" | "open" | "current" | "future" };
+/** `openEnd`: a year on the business's own dates still open — its last day is chosen when it is closed. */
+type YearRow = { fy: FiscalYear; entry?: YearCloseEntry; state: "closed" | "reopened" | "open" | "current" | "future"; openEnd?: boolean };
+
+/** The same day a year later, less one — the default last day of a year on own dates. */
+const yearAfter = (day: string) => addDays(`${Number(day.slice(0, 4)) + 1}${day.slice(4)}`, -1);
 
 export function YearClosingSettings() {
   const db = useDb();
   const { user } = useAuth();
   const mainAdmin = isAdminEmail(auth.currentUser?.email) || isAdminEmail(user?.email);
   const sm = db.settings.fyStartMonth || 4;
+  const custom = !!db.settings.fyCustomDates;
   const until = closedTo(db.settings);
   const entries = db.settings.yearCloses ?? [];
   const current = fiscalYearOf(new Date(), sm);
+  const today = dayOf(new Date());
+  const yesterday = addDays(today, -1);
 
   // Every year the business has records in, up to this one.
   const years: YearRow[] = useMemo(() => {
@@ -79,16 +86,32 @@ export function YearClosingSettings() {
       ...entries.map(e => e.from),
     ].map(d => dayOf(d)).filter(Boolean).sort();
     const first = days[0] || current.from;
+    if (custom) {
+      // On its own dates: the years closed so far, then the one running now —
+      // from the day after the last close (or the first record) to a last day
+      // chosen when it is closed.
+      const nextFrom = until ? addDays(until, 1) : first;
+      const again = entries.find(e => e.status === "reopened" && e.from === nextFrom);
+      const done: YearRow[] = entries.filter(e => e !== again)
+        .sort((a, b) => b.from.localeCompare(a.from))
+        .map(e => ({ fy: { key: e.key, from: e.from, to: e.to, startYear: Number(e.from.slice(0, 4)) }, entry: e,
+          state: e.status === "closed" && until && e.to <= until ? "closed" as const : "reopened" as const }));
+      if (nextFrom > yesterday) return done;
+      const end = again ? again.to : (yearAfter(nextFrom) < yesterday ? yearAfter(nextFrom) : yesterday);
+      const fy = again ? { key: again.key, from: again.from, to: again.to, startYear: Number(again.from.slice(0, 4)) } : customYear(nextFrom, end, entries.map(e => e.key));
+      return [{ fy, entry: again, state: again ? "reopened" as const : "open" as const, openEnd: true }, ...done];
+    }
     return fiscalYearsBetween(first, current.from, sm).reverse().map(fy => {
       const entry = entries.find(e => e.key === fy.key);
       const state: YearRow["state"] = until && fy.to <= until ? "closed" : entry?.status === "reopened" ? "reopened" : fy.key === current.key ? "current" : "open";
       return { fy, entry, state };
     });
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [db.orders.length, db.purchases?.length, db.lockerTransactions?.length, db.stockMovements?.length, db.lockers.length, db.expenses?.length, entries.length, until, sm]);
+  }, [db.orders.length, db.purchases?.length, db.lockerTransactions?.length, db.stockMovements?.length, db.lockers.length, db.expenses?.length, entries.length, until, sm, custom, JSON.stringify(entries.map(e => [e.key, e.status, e.to]))]);
 
-  // The next year to close: the oldest ended year after the closed ones.
-  const nextToClose = [...years].reverse().find(y => y.state !== "closed" && y.fy.to < dayOf(new Date()));
+  // The next year to close: the oldest ended year after the closed ones — on
+  // own dates, the year running now (its last day is chosen when closing).
+  const nextToClose = custom ? years.find(y => y.openEnd) : [...years].reverse().find(y => y.state !== "closed" && y.fy.to < today);
   // Only the last closed year can be reopened (the lock moves back one year at a time).
   const lastClosed = years.find(y => y.state === "closed");
 
@@ -98,7 +121,7 @@ export function YearClosingSettings() {
 
   const columns: DataColumn<YearRow>[] = [
     { key: "year", header: "Year", always: true, sortValue: r => r.fy.from, cell: r => <span className="font-semibold text-brand-dark whitespace-nowrap">{r.fy.key}</span> },
-    { key: "period", header: "Period", cell: r => fiscalYearSpan(r.fy) },
+    { key: "period", header: "Period", cell: r => (r.openEnd ? `From ${fiscalDay(r.fy.from)} — last day chosen when closing` : fiscalYearSpan(r.fy)) },
     { key: "status", header: "Status", sortValue: r => r.state, csv: r => r.state,
       cell: r => r.state === "closed" ? <CellTag tone="green">Closed</CellTag>
         : r.state === "reopened" ? <CellTag tone="amber">Reopened</CellTag>
@@ -116,20 +139,28 @@ export function YearClosingSettings() {
     { label: `Reopen ${r.fy.key}`, icon: LockOpen, onSelect: () => setReopening(r.fy), show: lastClosed?.fy.key === r.fy.key, disabled: !mainAdmin, hint: notMain ?? "With a reason — it is recorded" },
   ];
 
-  const setStartMonth = (m: number) => {
-    updateDbAs({ summary: `Financial year now starts in ${MONTHS[m - 1]}` }, d => { d.settings.fyStartMonth = m; });
+  const setYearType = (v: string) => {
+    if (v === "custom") {
+      updateDbAs({ summary: "Years now run on the business's own dates (e.g. Diwali to Diwali)" }, d => { d.settings.fyCustomDates = true; });
+      toast.success("Years now run on your own dates — choose each year's last day when you close it");
+      return;
+    }
+    const m = Number(v);
+    updateDbAs({ summary: `Financial year now starts in ${MONTHS[m - 1]}` }, d => { delete d.settings.fyCustomDates; d.settings.fyStartMonth = m; });
     toast.success(`The financial year now starts in ${MONTHS[m - 1]}`);
   };
 
   return (
     <div className="card-luxe p-6 space-y-6">
       <SectionTitle icon={CalendarCheck} title="Year closing"
-        sub={`Financial year ${MONTHS[sm - 1]} – ${MONTHS[(sm + 10) % 12]} · ${until ? `closed up to ${fmtDate(until)}` : "no year closed yet"}`} />
+        sub={`${custom ? "Years on your own dates (e.g. Diwali to Diwali)" : `Financial year ${MONTHS[sm - 1]} – ${MONTHS[(sm + 10) % 12]}`} · ${until ? `closed up to ${fmtDate(until)}` : "no year closed yet"}`} />
 
       <StatStrip items={[
-        { label: "This year", value: current.key, sub: fiscalYearSpan(current) },
-        { label: "Closed up to", value: until ? fiscalYearOf(until, sm).key : "—", sub: until ? `Locked to ${fmtDate(until)}` : "Nothing locked", icon: until ? Lock : LockOpen },
-        { label: "Next to close", value: nextToClose?.fy.key ?? "—", sub: nextToClose ? `Ended ${fmtDate(nextToClose.fy.to)}` : "Every ended year is closed" },
+        custom
+          ? { label: "This year", value: until ? `From ${fiscalDay(addDays(until, 1))}` : "Not closed yet", sub: "Ends on the day you close it" }
+          : { label: "This year", value: current.key, sub: fiscalYearSpan(current) },
+        { label: "Closed up to", value: until ? closedYearKey(until, db.settings) : "—", sub: until ? `Locked to ${fmtDate(until)}` : "Nothing locked", icon: until ? Lock : LockOpen },
+        { label: "Next to close", value: nextToClose?.fy.key ?? "—", sub: nextToClose ? (nextToClose.openEnd ? `From ${fiscalDay(nextToClose.fy.from)}` : `Ended ${fmtDate(nextToClose.fy.to)}`) : "Every ended year is closed" },
       ]} />
 
       <div className="rounded-xl border border-border/70 bg-secondary/40 p-4 text-sm text-foreground/80 flex gap-2">
@@ -141,16 +172,26 @@ export function YearClosingSettings() {
         </div>
       </div>
 
-      {mainAdmin && !until && (
+      {mainAdmin && !(custom && until) && (
         <div className="flex flex-wrap items-end gap-3">
-          <div className="min-w-[14rem]">
-            <Label className="text-xs text-muted-foreground">The financial year starts in</Label>
-            <Select value={String(sm)} onValueChange={v => setStartMonth(Number(v))}>
+          <div className="min-w-[16rem]">
+            <Label className="text-xs text-muted-foreground">The year runs</Label>
+            <Select value={custom ? "custom" : String(sm)} onValueChange={setYearType}>
               <SelectTrigger className="h-10 rounded-xl mt-1"><SelectValue /></SelectTrigger>
-              <SelectContent>{MONTHS.map((m, i) => <SelectItem key={m} value={String(i + 1)}>{m}{i + 1 === 4 ? " (India)" : ""}</SelectItem>)}</SelectContent>
+              <SelectContent>
+                {MONTHS.map((m, i) => (
+                  <SelectItem key={m} value={String(i + 1)} disabled={!!until && i + 1 !== sm}>
+                    {m} – {MONTHS[(i + 11) % 12]}{i + 1 === 4 ? " (India)" : ""}
+                  </SelectItem>
+                ))}
+                <SelectItem value="custom">On our own dates — e.g. Diwali to Diwali</SelectItem>
+              </SelectContent>
             </Select>
           </div>
-          <p className="text-xs text-muted-foreground pb-2.5">Fixed once the first year is closed.</p>
+          <p className="text-xs text-muted-foreground pb-2.5 max-w-md">
+            {custom ? "Each year ends on the day you choose when you close it — the eve of Diwali, say. The next year starts the day after."
+              : until ? "The month is fixed now that a year is closed; you can still move to your own dates." : "Fixed once the first year is closed."}
+          </p>
         </div>
       )}
 
@@ -182,7 +223,7 @@ export function YearClosingSettings() {
         </div>
       )}
 
-      {closing && <CloseYearSheet fy={closing} onClose={() => setClosing(null)} />}
+      {closing && <CloseYearSheet fy={closing} custom={custom && nextToClose?.fy.from === closing.from} taken={entries.filter(e => e.from !== closing.from).map(e => e.key)} onClose={() => setClosing(null)} />}
       {viewing && <YearBookSheet fy={viewing} onClose={() => setViewing(null)} />}
       {reopening && <ReopenSheet fy={reopening} onClose={() => setReopening(null)} />}
     </div>
@@ -194,8 +235,13 @@ function lastLog(e: YearCloseEntry | undefined, action: "closed" | "reopened") {
 }
 
 /* ── Close: checks → the figures → confirm ─────────────────────────────── */
-function CloseYearSheet({ fy, onClose }: { fy: FiscalYear; onClose: () => void }) {
+function CloseYearSheet({ fy: opened, custom = false, taken = [], onClose }: { fy: FiscalYear; custom?: boolean; taken?: string[]; onClose: () => void }) {
   const { user } = useAuth();
+  // On own dates the last day is chosen here (the eve of Diwali, say); the year's
+  // name follows from its dates. Otherwise the year is fixed.
+  const yesterday = addDays(dayOf(new Date()), -1);
+  const [end, setEnd] = useState(opened.to);
+  const fy = custom ? customYear(opened.from, end, taken) : opened;
   const [step, setStep] = useState<"loading" | "review" | "saving">("loading");
   const [book, setBook] = useState<YearBook | null>(null);
   const [checks, setChecks] = useState<CloseCheck[]>([]);
@@ -203,9 +249,13 @@ function CloseYearSheet({ fy, onClose }: { fy: FiscalYear; onClose: () => void }
   const [typed, setTyped] = useState("");
   const [note, setNote] = useState("");
 
-  // Work the year out once the panel is open: every record loaded first.
+  // Work the year out once the panel is open (and again when its last day is
+  // changed): every record loaded first.
   useEffect(() => {
     let live = true;
+    setStep("loading"); setTyped("");
+    if (custom && !(end >= fy.from && end <= yesterday)) { setFailed(`Choose a last day from ${fiscalDay(fy.from)} to ${fiscalDay(yesterday)}.`); return; }
+    setFailed(null);
     void (async () => {
       try {
         if (!(await readyForBook())) { if (live) setFailed("Still loading the records — close this and try again in a moment."); return; }
@@ -222,7 +272,7 @@ function CloseYearSheet({ fy, onClose }: { fy: FiscalYear; onClose: () => void }
     })();
     return () => { live = false; };
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [end]);
 
   const stops = checks.filter(c => c.level === "stop");
   const canClose = step === "review" && !!book && !stops.length && typed.trim() === fy.key;
@@ -247,19 +297,21 @@ function CloseYearSheet({ fy, onClose }: { fy: FiscalYear; onClose: () => void }
       const byName = user?.name || fb?.displayName || fb?.email || "Main admin";
       updateDbAs({ summary: `Closed the financial year ${fy.key}` }, d => {
         if (!d.adminRecords) d.adminRecords = [];
-        // The frozen book, replacing any from an earlier close of the same year.
-        d.adminRecords = d.adminRecords.filter(r => !(r.kind === "yearBook" && r.key === fy.key));
+        // The frozen book, replacing any from an earlier close of the same year
+        // (on own dates the year may have been closed before under another last day).
+        const sameYear = new Set([fy.key, ...(d.settings.yearCloses ?? []).filter(e => e.from === fy.from).map(e => e.key)]);
+        d.adminRecords = d.adminRecords.filter(r => !(r.kind === "yearBook" && sameYear.has(r.key)));
         for (const [part, body] of Object.entries(parts)) {
           d.adminRecords.push({ id: `year_${fy.key}_${part}`, kind: "yearBook", key: fy.key, part, book: body } as AdminRecord);
         }
         const list = d.settings.yearCloses ? [...d.settings.yearCloses] : [];
-        const i = list.findIndex(e => e.key === fy.key);
+        const i = list.findIndex(e => e.key === fy.key || e.from === fy.from);
         const prev = i >= 0 ? list[i] : { key: fy.key, from: fy.from, to: fy.to, status: "closed" as const, log: [] };
-        const entry: YearCloseEntry = { ...prev, status: "closed", log: [...prev.log, { action: "closed", at, by: user?.id || fb!.uid, byName, ...(note.trim() ? { note: note.trim() } : {}) }] };
+        const entry: YearCloseEntry = { ...prev, key: fy.key, from: fy.from, to: fy.to, status: "closed", log: [...prev.log, { action: "closed", at, by: user?.id || fb!.uid, byName, ...(note.trim() ? { note: note.trim() } : {}) }] };
         if (i >= 0) list[i] = entry; else list.push(entry);
         d.settings.yearCloses = list;
         d.settings.booksClosedTo = fy.to;
-        if (!d.settings.fyStartMonth) d.settings.fyStartMonth = Number(fy.from.slice(5, 7));
+        if (!d.settings.fyStartMonth && !custom) d.settings.fyStartMonth = Number(fy.from.slice(5, 7));
       });
       await flush();
       if (closedTo(loadDb().settings) !== fy.to) throw new Error("The close was not saved — check your connection and try again.");
@@ -285,6 +337,15 @@ function CloseYearSheet({ fy, onClose }: { fy: FiscalYear; onClose: () => void }
           </Button>
         </div>
       ) : undefined}>
+      {custom && (
+        <div className="mb-6 rounded-xl border border-border/70 p-4 flex flex-wrap items-end gap-3">
+          <div>
+            <Label htmlFor="fy-end" className="text-xs text-muted-foreground">Last day of this year</Label>
+            <Input id="fy-end" type="date" value={end} min={fy.from} max={yesterday} onChange={e => e.target.value && setEnd(e.target.value)} className="h-10 rounded-xl mt-1 w-auto" disabled={step === "saving"} />
+          </div>
+          <p className="text-xs text-muted-foreground pb-2.5 max-w-sm">From {fiscalDay(fy.from)}. Pick the day the books close — the eve of Diwali, say. The next year starts the day after.</p>
+        </div>
+      )}
       {failed ? <p className="text-sm text-destructive">{failed}</p>
         : step === "loading" || !book ? <p className="flex items-center gap-2 text-sm text-muted-foreground"><Loader2 className="h-4 w-4 animate-spin" />Working out every balance as on {fmtDate(fy.to)}…</p>
         : (
@@ -323,9 +384,8 @@ function ReopenSheet({ fy, onClose }: { fy: FiscalYear; onClose: () => void }) {
   const { user } = useAuth();
   const [reason, setReason] = useState("");
   const [busy, setBusy] = useState(false);
-  const sm = db.settings.fyStartMonth || 4;
-  const before = fiscalYear(fy.startYear - 1, sm);
-  const beforeClosed = (db.settings.yearCloses ?? []).some(e => e.key === before.key && e.status === "closed");
+  // The lock moves back to the close before this one — whatever its dates.
+  const before = (db.settings.yearCloses ?? []).filter(e => e.status === "closed" && e.to < fy.from).sort((a, b) => b.to.localeCompare(a.to))[0];
 
   const doReopen = async () => {
     const fb = auth.currentUser;
@@ -343,7 +403,7 @@ function ReopenSheet({ fy, onClose }: { fy: FiscalYear; onClose: () => void }) {
         if (i >= 0) list[i] = entry; else list.push(entry);
         d.settings.yearCloses = list;
         // The lock moves back to the year before — closed only if it was closed.
-        if (beforeClosed) d.settings.booksClosedTo = before.to; else delete d.settings.booksClosedTo;
+        if (before) d.settings.booksClosedTo = before.to; else delete d.settings.booksClosedTo;
       });
       await flush();
       toast.success(`${fy.key} is open again. Close it again when the corrections are done.`);

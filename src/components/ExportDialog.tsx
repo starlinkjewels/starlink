@@ -3,6 +3,8 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Download, FileText, FileSpreadsheet } from "lucide-react";
 import { useMayExport } from "@/hooks/useCan";
+import { loadDb } from "@/lib/db";
+import { yearRanges } from "@/lib/fiscalYear";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 
 export interface ExportOption {
@@ -37,13 +39,12 @@ export function ExportDialog({ open, onClose, title, options, extraFilter }: {
   if (!open || !mayExport) return null;
 
   const iso = (d: Date) => d.toISOString().slice(0, 10);
-  // Financial years run April–March (India's): this one, and the one before it.
-  const fyY = (back: number) => { const n = new Date(); return (n.getMonth() >= 3 ? n.getFullYear() : n.getFullYear() - 1) - back; };
-  const fyLabel = (back: number) => `FY ${fyY(back)}-${String(fyY(back) + 1).slice(-2)}`;
-  const setPreset = (kind: "month" | "lastMonth" | "year" | "fy" | "lastFy" | "all") => {
+  // This year and the one before, as the business keeps them (Settings → Year closing):
+  // April–March, another month, or its own dates — a Diwali year.
+  const years = yearRanges(loadDb().settings).slice(0, 2);
+  const setPreset = (kind: "month" | "lastMonth" | "year" | "all") => {
     const now = new Date();
     if (kind === "all") { setFrom(""); setTo(""); return; }
-    if (kind === "fy" || kind === "lastFy") { const y = fyY(kind === "fy" ? 0 : 1); setFrom(iso(new Date(y, 3, 1))); setTo(iso(new Date(y + 1, 2, 31))); return; }
     if (kind === "month") { setFrom(iso(new Date(now.getFullYear(), now.getMonth(), 1))); setTo(iso(new Date(now.getFullYear(), now.getMonth() + 1, 0))); }
     if (kind === "lastMonth") { setFrom(iso(new Date(now.getFullYear(), now.getMonth() - 1, 1))); setTo(iso(new Date(now.getFullYear(), now.getMonth(), 0))); }
     if (kind === "year") { setFrom(iso(new Date(now.getFullYear(), 0, 1))); setTo(iso(new Date(now.getFullYear(), 11, 31))); }
@@ -66,8 +67,13 @@ export function ExportDialog({ open, onClose, title, options, extraFilter }: {
         <div>
 
         <div className="flex flex-wrap gap-1.5 mb-3">
-          {([["month", "This month"], ["lastMonth", "Last month"], ["fy", fyLabel(0)], ["lastFy", fyLabel(1)], ["year", "This year"], ["all", "All time"]] as const).map(([k, l]) => (
+          {([["month", "This month"], ["lastMonth", "Last month"], ["year", "This year"], ["all", "All time"]] as const).map(([k, l]) => (
             <button key={k} onClick={() => setPreset(k)} className="px-2.5 h-7 rounded-lg text-xs font-medium bg-secondary hover:bg-secondary/70 transition-colors">{l}</button>
+          ))}
+          {years.map(y => (
+            <button key={y.key} onClick={() => { setFrom(y.from); setTo(y.to); }} title={y.label} className="px-2.5 h-7 rounded-lg text-xs font-medium bg-secondary hover:bg-secondary/70 transition-colors">
+              {y.key === "fy" ? "This FY" : y.label.replace(/^Last financial year \((.*)\)$/, "FY $1").replace(/ \(.*\)$/, "")}
+            </button>
           ))}
         </div>
         <div className="grid grid-cols-2 gap-2.5 mb-1">
