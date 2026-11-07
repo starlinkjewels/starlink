@@ -94,6 +94,7 @@ const PAGE: Record<string, readonly LazyCol[]> = {
   "/employees/:id": ["lockerTransactions"],
   "/profile": [],
   "/ai": [],
+  "/targets": [], // orders, settings and admin records — always here for an admin
   // Its folders, files and links are read straight from their own collections (lib/documents.ts).
   "/documents": [],
   // Its keys and counts are read straight from their own collections (lib/apiKeys.ts).

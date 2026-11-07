@@ -2300,7 +2300,9 @@ export type AdminRecord =
    *  the year, frozen when it was closed (lib/yearEnd.ts). Kept in parts, one
    *  record each (id "year_<key>_<part>"), so a big business never meets the
    *  one-megabyte limit of a single record. */
-  | { id: string; kind: "yearBook"; key: string; part: string; book: unknown };
+  | { id: string; kind: "yearBook"; key: string; part: string; book: unknown }
+  /** The company's sales target for a business year (lib/salesTargets.ts). id "target_<from>". */
+  | { id: string; kind: "salesTarget"; plan: import("./salesTargets").TargetPlan };
 
 const LEGACY_KEY = "starlink_db_v2"; // pre-Firebase localStorage blob (migrated on first run)
 

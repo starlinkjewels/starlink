@@ -4,6 +4,7 @@ import { SectionTitle } from "@/components/SectionTitle";
 import { PageHeader } from "@/components/PageHeader";
 import { StudioHome } from "@/components/home/StudioHome";
 import { HomeAnalysis } from "@/components/home/HomeAnalysis";
+import { TargetCard } from "@/pages/Targets";
 import { useStudio } from "@/lib/studio";
 import { factoryFigures, supplierFigures, lockerFigure } from "@/lib/partyTotals";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
@@ -239,6 +240,7 @@ export function Dashboard() {
         <>
           <StudioHome db={db} orders={orders} role={user!.role as "admin" | "employee" | "client"} firstName={first}
             isClient={user!.role === "client"} goldGrams={goldReserveGrams} />
+          {user!.role === "admin" && <TargetCard />}
           {user!.role !== "client" && <HomeAnalysis db={db} orders={orders} role={user!.role as "admin" | "employee"} />}
           {user!.role !== "client" && (
             <div className="border-b border-border/70 pb-2 pt-4">
@@ -250,6 +252,7 @@ export function Dashboard() {
       ) : (
         <>
           <PageHeader eyebrow={`Good day, ${client?.companyName || user?.name}`} title="Dashboard" />
+          {user!.role === "admin" && <TargetCard />}
           <div className="kpi-grid grid grid-cols-2 md:grid-cols-3 gap-3">
             {stats.map(([label, val, Icon, tone, to], i) => (
               <motion.div key={label} initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.04 }} className="h-full">

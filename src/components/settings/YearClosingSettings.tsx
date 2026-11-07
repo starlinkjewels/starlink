@@ -35,6 +35,7 @@ import { materialName } from "@/lib/materials";
 import { LAZY_COLS } from "@/lib/pageData";
 import { closedTo, closedYearKey } from "@/lib/yearLock";
 import { fiscalYearOf, fiscalYearsBetween, fiscalYearSpan, dayOf, addDays, customYear, fiscalDay, type FiscalYear } from "@/lib/fiscalYear";
+import { planFor, nextDiwali } from "@/lib/salesTargets";
 import { buildYearBook, closeChecks, bookParts, bookFromParts, type YearBook, type CloseCheck, type StockLine } from "@/lib/yearEnd";
 
 const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
@@ -97,7 +98,9 @@ export function YearClosingSettings() {
         .map(e => ({ fy: { key: e.key, from: e.from, to: e.to, startYear: Number(e.from.slice(0, 4)) }, entry: e,
           state: e.status === "closed" && until && e.to <= until ? "closed" as const : "reopened" as const }));
       if (nextFrom > yesterday) return done;
-      const end = again ? again.to : (yearAfter(nextFrom) < yesterday ? yearAfter(nextFrom) : yesterday);
+      // Its last day: as closed before, else the end its sales target was set to (Targets), else the next Diwali.
+      const planned = planFor(db, nextFrom)?.to ?? nextDiwali(nextFrom) ?? yearAfter(nextFrom);
+      const end = again ? again.to : (planned < yesterday ? planned : yesterday);
       const fy = again ? { key: again.key, from: again.from, to: again.to, startYear: Number(again.from.slice(0, 4)) } : customYear(nextFrom, end, entries.map(e => e.key));
       return [{ fy, entry: again, state: again ? "reopened" as const : "open" as const, openEnd: true }, ...done];
     }
