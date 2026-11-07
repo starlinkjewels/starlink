@@ -2,6 +2,9 @@ import { stageLabel } from "@/lib/stages";
 import { expensesInUsd, inrOn } from "@/lib/orderCost";
 import { SectionTitle } from "@/components/SectionTitle";
 import { PageHeader } from "@/components/PageHeader";
+import { StudioHome } from "@/components/home/StudioHome";
+import { HomeAnalysis } from "@/components/home/HomeAnalysis";
+import { useStudio } from "@/lib/studio";
 import { factoryFigures, supplierFigures, lockerFigure } from "@/lib/partyTotals";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { OrderThumb } from "@/components/OrderThumb";
@@ -32,10 +35,10 @@ function Kpi({ label, value, icon: Icon, tone, sub, to }: {
   label: string; value: ReactNode; icon?: LucideIcon; tone?: Tone; sub?: ReactNode; to?: string;
 }) {
   const body = (
-    <div className="@container h-full min-w-0 rounded-2xl border border-border/70 bg-white px-4 py-3.5 shadow-[0_1px_2px_rgb(15_23_42/0.04)]">
+    <div data-tone={tone ?? "none"} className="ui-kpi-tile @container h-full min-w-0 rounded-2xl border border-border/70 bg-white px-4 py-3.5 shadow-[0_1px_2px_rgb(15_23_42/0.04)]">
       <div className="flex items-center justify-between gap-2">
-        <p className="text-xs font-medium text-muted-foreground leading-snug line-clamp-2" title={label}>{label}</p>
-        {Icon && <Icon className="h-4 w-4 shrink-0 text-muted-foreground/60" />}
+        <p className="ui-kpi-label text-xs font-medium text-muted-foreground leading-snug line-clamp-2" title={label}>{label}</p>
+        {Icon && <span className="ui-kpi-ico contents"><Icon className="h-4 w-4 shrink-0 text-muted-foreground/60" /></span>}
       </div>
       <p className={`mt-1.5 text-[clamp(1rem,12cqi,1.5rem)] font-semibold tracking-tight tabular-nums leading-tight whitespace-nowrap ${tone ? TONE[tone] : "text-brand-dark"}`}>{value}</p>
       {sub && <p className="mt-0.5 text-[11px] text-muted-foreground leading-snug line-clamp-2">{sub}</p>}
@@ -59,6 +62,7 @@ export function Dashboard() {
   const { user } = useAuth();
   const db = useDb();
   const orders = useMemo(() => currentUserOrders(db, user!), [db, user]);
+  const studio = useStudio();
 
   const [stockLevels, setStockLevels] = useState<StockLevels | null>(null);
   // Stock levels are staff-only; a client's dashboard does not ask for them.
@@ -225,18 +229,36 @@ export function Dashboard() {
         ["Pending payment", fmtMoney(live.reduce((s, o) => s + balanceDue(o), 0)), TrendingUp, "warn", "/invoices"],
       ];
 
+  // The new look's greeting: the day, who, and what needs attention now.
+  const first = (client?.companyName || user?.name || "").trim().split(/\s+/)[0];
+
   return (
     <div className="space-y-6 max-w-7xl mx-auto">
       <PushPermissionBanner />
-      <PageHeader eyebrow={`Good day, ${client?.companyName || user?.name}`} title="Dashboard" />
-
-      <div className="kpi-grid grid grid-cols-2 md:grid-cols-3 gap-3">
-        {stats.map(([label, val, Icon, tone, to], i) => (
-          <motion.div key={label} initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.04 }} className="h-full">
-            <Kpi label={label} value={val} icon={Icon} tone={tone} to={to} />
-          </motion.div>
-        ))}
-      </div>
+      {studio ? (
+        <>
+          <StudioHome db={db} orders={orders} role={user!.role as "admin" | "employee" | "client"} firstName={first}
+            isClient={user!.role === "client"} goldGrams={goldReserveGrams} />
+          {user!.role !== "client" && <HomeAnalysis db={db} orders={orders} role={user!.role as "admin" | "employee"} />}
+          {user!.role !== "client" && (
+            <div className="border-b border-border/70 pb-2 pt-4">
+              <h2 className="text-lg font-semibold tracking-tight text-foreground">More figures</h2>
+              <p className="text-xs text-muted-foreground">Gift cards, certificates, stock and accounts.</p>
+            </div>
+          )}
+        </>
+      ) : (
+        <>
+          <PageHeader eyebrow={`Good day, ${client?.companyName || user?.name}`} title="Dashboard" />
+          <div className="kpi-grid grid grid-cols-2 md:grid-cols-3 gap-3">
+            {stats.map(([label, val, Icon, tone, to], i) => (
+              <motion.div key={label} initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.04 }} className="h-full">
+                <Kpi label={label} value={val} icon={Icon} tone={tone} to={to} />
+              </motion.div>
+            ))}
+          </div>
+        </>
+      )}
 
       {/* Gift Cards — all-time totals (staff). Issued = Redeemed + Pending + Expired. */}
       {user!.role !== "client" && gc.count > 0 && (
@@ -389,7 +411,7 @@ export function Dashboard() {
         </div>
       )}
 
-      {user!.role === "admin" && (
+      {user!.role === "admin" && !studio && (
         <div className="grid lg:grid-cols-3 gap-4">
           <div className="card-luxe p-5 lg:col-span-2">
             <SectionTitle className="mb-4" title="Monthly Orders" />

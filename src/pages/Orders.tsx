@@ -698,7 +698,7 @@ export function OrdersPage() {
                   </div>
                 ) : isDiamondOnlyOrder(o) ? <StoneTile o={o} /> : (
                   // No photo yet: the same square as the cards beside it, so the grid stays even.
-                  <div className="mx-3 aspect-square rounded-xl bg-secondary/50 ring-1 ring-border/60 grid place-items-center text-center">
+                  <div className="ui-nophoto mx-3 aspect-square rounded-xl bg-secondary/50 ring-1 ring-border/60 grid place-items-center text-center">
                     <div>
                       <Package className="mx-auto h-8 w-8 text-primary/35" />
                       <p className="mt-2 text-xs text-muted-foreground">No photo yet</p>

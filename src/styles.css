@@ -1085,7 +1085,8 @@ input[type="number"] { -moz-appearance: textfield; appearance: textfield; }
 /* Figures and rows: a soft lift, a coloured icon chip. */
 .ai-tile { position: relative; overflow: hidden; transition: transform 0.2s ease, box-shadow 0.2s ease; }
 .ai-tile:hover { transform: translateY(-2px); }
-.ai-tile::after { content: ""; position: absolute; inset: auto 0 0 0; height: 3px; background: var(--ai-accent, var(--color-primary)); opacity: 0.85; }
+/* No line under the tile: a soft glow of its colour in the corner. */
+.ai-tile { background: radial-gradient(14rem 7rem at 100% 0%, color-mix(in oklab, var(--ai-accent, var(--color-primary)) 9%, transparent), transparent 70%), var(--card-bg, var(--color-card)); }
 .ai-chip { display: grid; place-items: center; border-radius: 0.8rem; background: color-mix(in oklab, var(--ai-accent, var(--color-primary)) 13%, transparent); color: var(--ai-accent, var(--color-primary)); }
 .ai-shimmer { background: linear-gradient(90deg, var(--color-secondary) 0%, color-mix(in oklab, var(--color-primary) 12%, var(--color-secondary)) 50%, var(--color-secondary) 100%); background-size: 200% 100%; animation: ai-shine 1.4s linear infinite; border-radius: 0.5rem; }
 @keyframes ai-shine { to { background-position: -200% 0; } }
@@ -1116,3 +1117,7 @@ input[type="number"] { -moz-appearance: textfield; appearance: textfield; }
 @media (prefers-reduced-motion: reduce) {
   .ai-orb, .ai-orb *, .ai-orb-core::before, .ai-orb-core::after, .ai-hero::before, .ai-hero::after, .ai-shimmer { animation: none !important; }
 }
+
+/* The coloured header's white buttons stay white in dark mode (dark mode darkens .bg-white elsewhere). */
+:root.dark .ai-hero :is(.bg-white) { background-color: #fff; }
+:root.dark .ai-hero :is(.hover\:bg-white\/90):hover { background-color: rgb(255 255 255 / 0.9); }
