@@ -12,7 +12,7 @@ import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { OrderThumb } from "@/components/OrderThumb";
 import { useAuth } from "@/lib/auth";
 import { useHas } from "@/hooks/useCan";
-import { loadDb, fmtMoney, fmtDate, byNewestEntered, currentUserOrders, orderTotal, balanceDue, totalAdvance, giftCardStats, keptValue } from "@/lib/db";
+import { hiddenFromMe, loadDb, fmtMoney, fmtDate, byNewestEntered, currentUserOrders, orderTotal, balanceDue, totalAdvance, giftCardStats, keptValue } from "@/lib/db";
 import { useDb } from "@/hooks/useDb";
 import { motion } from "framer-motion";
 import { Package, Clock, CheckCircle2, Users, Briefcase, DollarSign, Factory, PackageCheck, TrendingUp, ArrowRight, Truck, Wallet, TrendingDown, Receipt, BadgeCheck, ClipboardCheck, Coins, Gem, Gift, AlertCircle, type LucideIcon } from "lucide-react";
@@ -292,7 +292,7 @@ export function Dashboard() {
       )}
 
       {/* ── Employee: My Profit Panel ── */}
-      {user!.role === "employee" && (
+      {user!.role === "employee" && !hiddenFromMe("expenses") && (
         <div className="card-luxe p-5">
           <SectionTitle className="mb-4" title="My Financial Summary"
             actions={<Link to="/expenses" className="text-sm text-primary flex items-center gap-1 hover:underline">Manage Expenses <ArrowRight className="h-3 w-3" /></Link>} />

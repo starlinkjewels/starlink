@@ -149,7 +149,7 @@ import type { ItemDesign, ItemSpecs } from "./pure/catalogMedia";
 export type { MaterialDef, MaterialKey } from "./materials";
 import { KARAT_PURITY, toPureGold, pureFromPurity, openingDebitAmt, openingCreditAmt, hasOpeningBalance } from "./pure/basics";
 import { closedTo, isClosedDate, lockBreaches, breachMessage, lockedPart } from "./yearLock";
-import { policyAllows, POLICY_NOUN, type Op as WriteOp } from "./pure/writePolicy";
+import { policyAllows, POLICY_NOUN, READ_LOCKED, readAllowed, type Op as WriteOp } from "./pure/writePolicy";
 export { KARAT_PURITY, toPureGold, pureFromPurity, openingDebitAmt, openingCreditAmt, hasOpeningBalance };
 
 export interface OpeningBalanceInfo {
@@ -3211,6 +3211,13 @@ function writeRefusal(changes: { col: string; id: string; before: Record<string,
 
 /** This session loads only its own orders, clients and invoices (Scope "full" with own). */
 let ownScope = false;
+/** The money records this person may not read (lib/pure/writePolicy.ts READ_POLICY): never asked
+ *  for, held empty — drawn as nothing, never trusted by a check ("does anything point at this?"). */
+let hiddenCols = new Set<string>();
+/** Whether this collection is one the signed-in person may not read. */
+export function hiddenFromMe(col: string): boolean { return hiddenCols.has(col); }
+/** Any of these hidden from the signed-in person. */
+export function anyHidden(cols: readonly string[]): boolean { return cols.some(c => hiddenCols.has(c)); }
 
 /**
  * "Who works on this" — each order's, client's and invoice's staffIds, kept at
@@ -3916,6 +3923,7 @@ export function collectionsLoaded(cols: readonly string[]): boolean {
  */
 export async function collectionsReady(cols: readonly string[], ms = 15000): Promise<boolean> {
   if (collectionsFresh(cols)) return true;
+  if (anyHidden(cols)) return false; // never coming: their access doesn't show them
   let timer: ReturnType<typeof setTimeout> | undefined;
   await Promise.race([
     // Here, then the server's own answer — a check is never made on the saved copy.
@@ -3931,7 +3939,7 @@ export async function collectionsReady(cols: readonly string[], ms = 15000): Pro
 /** Loaded, and the server's answer — not the device's saved copy. */
 export function collectionsFresh(cols: readonly string[]): boolean {
   // A client's messages come in two halves: "messages(from)", "messages(to)".
-  return cols.every(c => loadedCols.has(c) && ![...staleCols].some(s => s === c || s.startsWith(c + "(")));
+  return cols.every(c => loadedCols.has(c) && !hiddenCols.has(c) && ![...staleCols].some(s => s === c || s.startsWith(c + "(")));
 }
 
 /* ── Totals kept by the server (functions/src/summaries.ts), read-only ── */
@@ -4091,7 +4099,8 @@ export type Scope =
   /** Staff. `admin` decides whether the admin-only records are requested at
    *  all — an employee never asks for them, so never sees them. */
   | { kind: "full"; admin?: boolean; /** The person's own app id (User.id), when their index has it. */ appId?: string;
-      /** Limited to their own orders, clients and invoices (index `own`, no "every order" open now). */ own?: boolean }
+      /** Limited to their own orders, clients and invoices (index `own`, no "every order" open now). */ own?: boolean;
+      /** An employee's grants right now (index `g` + windows open now) — which money records they may read. */ grants?: string[] }
   | { kind: "client"; appId: string; clientId: string };
 
 /**
@@ -4181,7 +4190,8 @@ function scopeOfIndex(d: IndexDoc): Scope {
   // Limited to their own work, unless a temporary "every order" grant is open right now.
   const now = Date.now();
   const allNow = (d.g ?? []).includes("*all") || (d.w ?? []).some(x => now >= x.f && now < x.u && x.g.includes("*all"));
-  return { kind: "full", appId: d.appId || undefined, ...(d.own === true && !allNow && d.appId ? { own: true } : {}) };
+  const grants = d.g ? [...d.g, ...(d.w ?? []).filter(x => now >= x.f && now < x.u).flatMap(x => x.g)] : undefined;
+  return { kind: "full", appId: d.appId || undefined, ...(d.own === true && !allNow && d.appId ? { own: true } : {}), ...(grants ? { grants } : {}) };
 }
 async function resolveScopeOnline(authUid: string): Promise<Scope> {
   try {
@@ -4391,6 +4401,9 @@ function subscribeAll(scope: Scope): Promise<void> {
   messagesScopeIsFull = !client;
   clientAppId = client ? client.appId : null;
   ownScope = scope.kind === "full" && !!scope.own && !!scope.appId;
+  hiddenCols = new Set(scope.kind === "full" && !scope.admin && scope.grants
+    ? READ_LOCKED.filter(c => !readAllowed(c, new Set(scope.grants)))
+    : []);
 
   // Build the per-collection queries for this scope.
   const specs: { col: ArrayCol; q: Query<DocumentData> }[] = [];
@@ -4410,6 +4423,14 @@ function subscribeAll(scope: Scope): Promise<void> {
   summariesOn = false;
   summariesDone = false;
   for (const col of ARRAY_COLS) {
+    // Money records this person may not read: never asked for — empty, and counted as here
+    // (pages draw), but never as fresh (a check that needs them refuses: anyHidden).
+    if (hiddenCols.has(col)) {
+      (cache[col] as unknown) = [];
+      (remote[col] as unknown) = [];
+      loadedCols.add(col);
+      continue;
+    }
     // Requested by the admin and nobody else. The rules would refuse it to
     // anyone else anyway; not asking at all means there is nothing to refuse.
     if (col === "adminRecords" && !amAdminScope) continue;

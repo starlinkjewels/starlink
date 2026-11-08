@@ -117,6 +117,39 @@ export const WRITE_POLICY: Policy = {
   productPhotoItems: { create: [], update: [], delete: [] },
 };
 
+/**
+ * Who may READ the money records — every account entry (cash, balances,
+ * salaries), the expenses, and supplier and factory payments. Anyone else's
+ * device never loads them and the database refuses them. Everything not listed
+ * stays readable by any employee (their screens decide what is shown) — the
+ * order, stock and purchase records are read by too many working screens to
+ * be locked without restructuring them first.
+ *
+ * Inclusive like the write lists: every section whose pages use these records,
+ * and every action whose safety checks look into them ("does anything still
+ * point at this client?") — a check that can't see its records refuses, with
+ * the reason, rather than answer from nothing.
+ */
+const MONEY_PAGES = ["payments.view", "locker.view", "passbook.view", "expenses.view", "reports.view", "dashboard.business"];
+export const READ_POLICY: Record<string, string[]> = {
+  lockerTransactions: [...MONEY_PAGES,
+    "designers.view", "productPhotos.view",      // what each freelancer was paid, and is owed
+    "buyAssign.view", "suppliers.view", "factories.view", // sales paid in, brokers, the parties' books
+    "clients.delete", "orders.cancel"],           // their checks: refunds on record, undoing a sale
+  expenses: [...MONEY_PAGES,
+    "designers.view",                             // a designer's salary paid
+    "clients.delete", "orders.delete", "orders.cancel"], // their checks: an expense naming it
+  supplierPayments: [...MONEY_PAGES, "suppliers.view", "buyAssign.view"],
+  supplierReceipts: [...MONEY_PAGES, "suppliers.view", "buyAssign.view"],
+  factoryPayments: [...MONEY_PAGES, "factories.view"],
+};
+export const READ_LOCKED = Object.keys(READ_POLICY);
+/** May someone with these grants read this collection? Not locked: yes. */
+export function readAllowed(col: string, grants: ReadonlySet<string>): boolean {
+  const need = READ_POLICY[col];
+  return !need || need.some(g => grants.has(g));
+}
+
 /** What each collection holds, in words — for the reason a save is refused. */
 export const POLICY_NOUN: Record<string, string> = {
   suppliers: "suppliers", brokers: "brokers", designers: "designers", factories: "factories", lockers: "accounts",

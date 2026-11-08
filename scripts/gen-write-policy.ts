@@ -9,7 +9,7 @@
  * Run it whenever writePolicy.ts changes, and commit both files together.
  */
 import { readFileSync, writeFileSync } from "node:fs";
-import { WRITE_POLICY } from "../src/lib/pure/writePolicy";
+import { READ_POLICY, WRITE_POLICY } from "../src/lib/pure/writePolicy";
 
 const FILE = new URL("../firestore.rules", import.meta.url);
 const BEGIN = "    // ── BEGIN GENERATED: write policy";
@@ -23,12 +23,16 @@ const fn = (col: string, op: string) => `pol_${col}_${op}`;
 const body = Object.entries(WRITE_POLICY)
   .flatMap(([col, p]) => (["create", "update", "delete"] as const).map(op => `    function ${fn(col, op)}() { return ${list(p[op])}; }`))
   .join("\n");
+// Reading the money records: one list per locked collection, used as staffMay(rd_<collection>()).
+const reads = Object.entries(READ_POLICY).map(([col, need]) => `    function rd_${col}() { return ${list(need)}; }`).join("\n");
 
 const block = `${BEGIN} (scripts/gen-write-policy.ts, from src/lib/pure/writePolicy.ts) — do not edit by hand ──
     // Per collection and operation, the grants any one of which lets an employee
     // write — "*staff" any employee; an empty list, an admin only. Used as
     // staffMay(pol_<collection>_<operation>()).
 ${body}
+    // Who may READ the money records (READ_POLICY) — anyone else's device never loads them.
+${reads}
 ${END} ──`;
 
 const src = readFileSync(FILE, "utf8").replace(/\r\n/g, "\n");
