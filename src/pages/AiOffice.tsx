@@ -29,7 +29,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { useAuth } from "@/lib/auth";
 import { useDb } from "@/hooks/useDb";
 import { brandName, brandShort } from "@/lib/brand";
-import { loadDb, uid, type DB } from "@/lib/db";
+import { loadDb, uid, ensureCollections, type DB } from "@/lib/db";
+import { BOOKS } from "@/lib/aiOffice/health";
 import { useRates } from "@/lib/liveRates";
 import { askOffice, STEP_WORDS, type ChatMessage } from "@/lib/aiOffice/agent";
 import { runTool, setOfficeContext } from "@/lib/aiOffice/tools";
@@ -201,6 +202,8 @@ export function AiOfficePage() {
     if (briefing) return;
     setBriefing("Gathering today's figures…");
     try {
+      // Money owed and the factories read the books — fetched first so the brief never reads them empty.
+      await ensureCollections(BOOKS);
       const d = loadDb();
       // The day's figures go in as the answers to the tools that give them — the agent starts from them.
       const pre: [string, string][] = [["business_snapshot", '{"period":"thisMonth"}'], ["growth_signals", "{}"], ["client_pulse", '{"limit":8}'], ["money_due", '{"limit":10}'], ["margin_guard", '{"limit":8}'], ["factories", '{"period":"last30"}'], ["team", '{"period":"thisMonth"}']];

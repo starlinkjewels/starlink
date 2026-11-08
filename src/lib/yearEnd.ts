@@ -155,7 +155,7 @@ function cutForParties(db: DB, day: string) {
 /* ── Stock ──────────────────────────────────────────────────────────────── */
 export interface StockLine { companyId: string; material: string; bucket: string; qty: number; unit: string; fine?: number; rateInr: number | null; valueInr: number | null }
 
-function stockAsAt(db: DB, day: string): StockLine[] {
+export function stockAsAt(db: DB, day: string): StockLine[] {
   const moves = (db.stockMovements ?? []).filter(m => by(m.createdAt, day));
   const at = endOfDayIso(day);
   const mats = ["gold", "diamond", ...materialDefs(db.settings).map(m => m.id)];
@@ -179,7 +179,7 @@ function stockAsAt(db: DB, day: string): StockLine[] {
 }
 
 /** Certified stones held on the day: entered by then, and not yet issued or sold by then. */
-function packetsAsAt(db: DB, day: string) {
+export function packetsAsAt(db: DB, day: string) {
   const gone = new Map<string, string>(); // packet → the day it left
   for (const i of db.materialIssuances) for (const id of i.diamondPacketIds ?? []) if (!gone.has(id) || i.issuedAt < gone.get(id)!) gone.set(id, i.issuedAt);
   for (const s of db.diamondSales ?? []) if (s.packetId && (!gone.has(s.packetId) || s.createdAt < gone.get(s.packetId)!)) gone.set(s.packetId, s.createdAt);
@@ -199,7 +199,7 @@ function packetsAsAt(db: DB, day: string) {
 }
 
 /** Ready Stock pieces on the shelf on the day, at their cost (admin-only). */
-function readyStockAsAt(db: DB, day: string) {
+export function readyStockAsAt(db: DB, day: string) {
   const soldAfter = new Map<string, number>(); // pieces taken off after the day (they were still there)
   const backAfter = new Map<string, number>(); // pieces put back after the day (they were not there)
   for (const o of db.orders) {

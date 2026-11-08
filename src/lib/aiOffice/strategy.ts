@@ -188,7 +188,7 @@ export interface Move {
   why: string;
   /** What it is worth, roughly, in dollars (a year's buying at stake, money to collect, a lever's value). */
   usd: number;
-  kind: "keep" | "winback" | "grow" | "collect" | "risk" | "lever";
+  kind: "keep" | "winback" | "grow" | "collect" | "risk" | "lever" | "cash" | "stock" | "season" | "mix";
   clientId?: string; clientName?: string;
   priority: "high" | "medium" | "low";
   dueInDays: number;
