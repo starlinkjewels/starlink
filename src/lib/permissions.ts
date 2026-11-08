@@ -393,6 +393,63 @@ export function hasFeature(user: PermUser | null | undefined, docs: AccessDoc[],
   return effectiveFeatures(user, docs, now).has(key);
 }
 
+/* ── Grants: access compiled for the database rules (lib/pure/writePolicy.ts) ── */
+
+/** "orders.edit"-style grants of a set of permissions. Home is open to every employee. */
+function permGrants(p: PermMatrix): string[] {
+  const out = ["dashboard.view"];
+  for (const m of ROLE_MODULES) for (const a of MODULE_ACTIONS[m.key]) if (p[m.key]?.view && p[m.key]?.[a]) out.push(`${m.key}.${a}`);
+  return out;
+}
+/** The switches among `chosen` whose section and action `p` gives. */
+function liveSwitches(chosen: Iterable<string>, p: PermMatrix): string[] {
+  const out: string[] = [];
+  for (const k of chosen) {
+    const f = FEATURE_BY_KEY[k];
+    if (!f || f.later) continue;
+    if (f.module && f.module !== "dashboard" && !(p[f.module]?.view && p[f.module]?.[f.needs ?? "view"])) continue;
+    out.push(k);
+  }
+  return out;
+}
+
+/** A temporary grant as the rules read it: from and until (ms), and what it adds. */
+export interface GrantWindow { f: number; u: number; g: string[] }
+
+/**
+ * Everything an employee may do, as the database rules check it: their own
+ * access's grants ("*staff" — any employee — sections' actions and switches),
+ * and up to three temporary grants as time windows the rules open and close by
+ * the server's clock. Recomputed on every admin save, written into their
+ * sign-in record (userByAuth), which only an admin may write.
+ */
+export function compileGrants(user: PermUser, docs: AccessDoc[], now = Date.now()): { g: string[]; w: GrantWindow[] } {
+  const ua = accessOf(docs, user.id);
+  const base = applyOwn(roleOf(user, docs).perms, ua?.add, ua?.remove);
+  const g = ["*staff", ...permGrants(base), ...liveSwitches(chosenFeatures(ua, now, false), base)];
+  const w: GrantWindow[] = (ua?.temp ?? [])
+    .filter(t => tempState(t, now) !== "ended")
+    .sort((a, b) => +new Date(a.until) - +new Date(b.until))
+    .slice(0, 3)
+    .map(t => {
+      const both = applyOwn(base, undefined, undefined, [t.perms]);
+      const own = new Set(g);
+      const extra = [...permGrants(both), ...liveSwitches([...chosenFeatures(ua, now, false), ...(t.features ?? [])], both)].filter(x => !own.has(x));
+      return { f: t.from ? +new Date(t.from) : 0, u: +new Date(t.until), g: [...new Set(extra)] };
+    })
+    .filter(x => x.g.length > 0);
+  return { g, w };
+}
+
+/** The grants in force right now — as compiled, with the windows open now added. */
+export function grantsNow(user: PermUser | null | undefined, docs: AccessDoc[], now = Date.now()): Set<string> {
+  if (!user || user.role !== "employee") return new Set();
+  const { g, w } = compileGrants(user, docs, now);
+  const out = new Set(g);
+  for (const x of w) if (now >= x.f && now < x.u) for (const k of x.g) out.add(k);
+  return out;
+}
+
 /** The limits on this person's access — none for an admin or a client. */
 export function limitsOf(user: PermUser | null | undefined, docs: AccessDoc[]): AccessLimits {
   if (!user || user.role !== "employee") return {};

@@ -9,6 +9,7 @@ import { updateDbAs, uid, fmtDate, worksOnOrder } from "@/lib/db";
 import { useCan } from "@/hooks/useCan";
 import { useDb } from "@/hooks/useDb";
 import { useAuth } from "@/lib/auth";
+import { hasFeature } from "@/lib/permissions";
 import { uploadFile, deleteByUrl } from "@/lib/storage";
 import { fmtMoneyInr } from "@/lib/manufacturing";
 import { confirmBox } from "@/lib/confirm";
@@ -49,7 +50,8 @@ export function CadJobSheet({ jobId, onClose }: { jobId: string; onClose: () => 
   const can = useCan();
   const staff = user?.role === "admin" || user?.role === "employee";
   // Changing a design is changing the order: admin, or an employee who may edit this order.
-  const mayAct = !!user && (user.role === "admin" || (user.role === "employee" && can("orders", "edit") && !!order && worksOnOrder(db, user, order)));
+  // An admin, or an employee whose access includes CAD and designers (orders.design) on an order of theirs.
+  const mayAct = !!user && (user.role === "admin" || (user.role === "employee" && can("orders", "edit") && hasFeature(user, db.roles ?? [], "orders.design") && !!order && worksOnOrder(db, user, order)));
   const who = { id: user?.id ?? "", name: user?.name ?? "" };
   const fileRef = useRef<HTMLInputElement>(null);
   const [uploading, setUploading] = useState<{ done: number; total: number; pct: number } | null>(null);

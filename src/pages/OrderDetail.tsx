@@ -391,7 +391,8 @@ function OrderDetailPageBody() {
   useEffect(() => {
     if (!order || (nextStep !== "stock" && nextStep !== "buy")) return;
     setParams(p => { p.delete("next"); return p; }, { replace: true });
-    if (user!.role === "client" || order.materialSourcing === "readyStock") return;
+    // Only for someone who may plan this order's production — the link opens nothing for anyone else.
+    if (user!.role === "client" || order.materialSourcing === "readyStock" || !mayProduce()) return;
     const dOnly = isDiamondOnlyOrder(order);
     if (!order.assignedFactoryId && !dOnly) {
       toast.info("Choose the factory for this order first (Manufacturing → Factory) — then add its material.");
@@ -578,7 +579,7 @@ function OrderDetailPageBody() {
   // Why a linked purchase can't be corrected / removed from here (admin only,
   // as before) — shown on its greyed button rather than the button vanishing.
   const purchaseWhy = (p: Purchase, what: "edit" | "remove"): string | undefined => {
-    if (!sw("orders.fixPurchase")) return "Your access does not include correcting a purchase";
+    if (!canEditStage() || !sw("orders.fixPurchase")) return "Your access does not include correcting a purchase";
     const check = what === "edit" ? canEditPurchase(db, p) : canVoidPurchase(db, p);
     return check.ok ? undefined : check.reason;
   };
@@ -2542,7 +2543,7 @@ It goes back to being our own build, and ${item ? item.name : "its piece"} goes 
   // Melt opens when the piece is a finished, made, unsold piece; its dialog
   // then says anything else in the way. Otherwise the plan's own reason.
   const meltWhy = (): string | undefined => {
-    if (!sw("orders.melt")) return "Your access does not include melting a piece";
+    if (!canEditStage() || !sw("orders.melt")) return "Your access does not include melting a piece";
     if (order.melted) return "Already melted";
     if (order.returns?.length || !hasActuals || isDiamondOnlyOrder(order) || order.materialSourcing === "readyStock" || order.readyStockCreatedId)
       return meltPlan(db, order).blocked ?? "Record the factory's actual details (Final Approval) first";
@@ -4386,7 +4387,7 @@ The piece then takes ours — add them from stock or buy them, as for any order.
               if (l.repair || (!l.purchase && !mi)) return { ...l, actions: [] };
               if (l.purchase) return { ...l, actions: purchaseActs(l.purchase) };
               const check = isStockIssuance(mi!) && isStaffUser ? canEditIssuance(db, mi!) : undefined;
-              const issueWhy = check ? (orderEditAccess(db, user, can, order) ?? (check.ok ? undefined : check.reason)) : undefined;
+              const issueWhy = check ? (orderEditAccess(db, user, can, order) ?? (mayProduce() ? undefined : "Your access does not include planning production") ?? (check.ok ? undefined : check.reason)) : undefined;
               return { ...l, actions: check ? [
                 rowAct(Pencil, "Edit", "Wrong carat or shape taken from stock", issueWhy, false, () => openEditIssuance(mi!)),
                 rowAct(Trash2, "Cancel this issue", "The material goes back into stock", issueWhy, removingIssuanceId === mi!.id, () => removeIssuance(mi!), true),
