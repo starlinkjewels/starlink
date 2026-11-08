@@ -96,6 +96,8 @@ export function customYear(from: string, to: string, taken: string[] = []): Fisc
 export interface YearSettings {
   fyStartMonth?: number;
   fyCustomDates?: boolean;
+  fyOwnStart?: string;
+  fyOwnEnd?: string;
   booksClosedTo?: string;
   yearCloses?: { key: string; from: string; to: string; status: "closed" | "reopened" }[];
 }
@@ -106,7 +108,7 @@ export function yearRanges(s: YearSettings | undefined | null, today = dayOf(new
   const sm = s?.fyStartMonth || 4;
   if (s?.fyCustomDates) {
     const closed = (s.yearCloses ?? []).filter(e => e.status === "closed").sort((x, y) => y.to.localeCompare(x.to));
-    const start = s.booksClosedTo ? addDays(s.booksClosedTo, 1) : "";
+    const start = ownYear(s, today).from;
     return [
       ...(start && start <= today ? [{ key: "fy", label: `This year (from ${fiscalDay(start)})`, from: start, to: today }] : []),
       ...closed.slice(0, 4).map((e, i) => ({ key: `fyc${i}`, label: `Year ${e.key} (${fiscalDay(e.from)} – ${fiscalDay(e.to)})`, from: e.from, to: e.to })),
@@ -124,4 +126,39 @@ export function yearRanges(s: YearSettings | undefined | null, today = dayOf(new
 /** "21 Oct 2025". */
 export function fiscalDay(day: string): string {
   return new Date(`${day}T00:00:00`).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" });
+}
+
+/** Lakshmi Puja — the main day of Diwali; the usual close for a Diwali year. */
+export const DIWALI: string[] = ["2024-11-01", "2025-10-20", "2026-11-08", "2027-10-29", "2028-10-17", "2029-11-05", "2030-10-26"];
+
+/** The first Diwali at least a month after a day — the natural end of a Diwali year starting then. */
+export function nextDiwali(after: string): string | undefined {
+  const min = addDays(after, 30);
+  return DIWALI.find(d => d >= min);
+}
+
+/**
+ * The year running now for a business on its own dates (Diwali to Diwali, or any
+ * day it closes its books). One rule for every screen — Year closing, Targets,
+ * the date filters:
+ *   starts  "This year started on" (Settings → Year closing; set before the first
+ *           close — a business that began using the app mid-year), else the day
+ *           after the last close, else the day after the last Diwali;
+ *   ends    "This year ends on" (any day), else `plannedTo` (a target's year end),
+ *           else the next Diwali, else a year later.
+ */
+export function ownYear(s: YearSettings | undefined | null, today = dayOf(new Date()), plannedTo?: string): { from: string; to: string } {
+  const closed = s?.booksClosedTo;
+  let from: string;
+  if (s?.fyOwnStart && (!closed || s.fyOwnStart > closed)) from = s.fyOwnStart;
+  else if (closed) from = addDays(closed, 1);
+  else {
+    const last = [...DIWALI].reverse().find(d => d < today);
+    from = last ? addDays(last, 1) : `${today.slice(0, 4)}-01-01`;
+  }
+  const to = (s?.fyOwnEnd && s.fyOwnEnd > from ? s.fyOwnEnd : undefined)
+    ?? (plannedTo && plannedTo > from ? plannedTo : undefined)
+    ?? nextDiwali(from)
+    ?? addDays(`${Number(from.slice(0, 4)) + 1}${from.slice(4)}`, -1);
+  return { from, to };
 }

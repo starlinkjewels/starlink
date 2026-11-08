@@ -1307,6 +1307,13 @@ export interface Settings {
    *  runs from the day after the last close to the last day the main admin
    *  chooses when closing it. Unset = years by fyStartMonth. */
   fyCustomDates?: boolean;
+  /** On own dates: the day this year's books started — set before the first close
+   *  (a business that began using the app mid-year). Unset = the day after the
+   *  last close, or the day after the last Diwali (lib/fiscalYear.ts ownYear). */
+  fyOwnStart?: string;
+  /** On own dates: the day this year's books will close — Diwali or any day.
+   *  Unset = the next Diwali. Cleared when the year is closed. */
+  fyOwnEnd?: string;
   /** Every year closed or reopened, newest last — the small public part of each
    *  close (the figures themselves are admin-only, in adminRecords). */
   yearCloses?: YearCloseEntry[];
