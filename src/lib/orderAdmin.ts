@@ -20,7 +20,7 @@ import { cancelOrder, usedOnUndo } from "./orderCancel";
 import { materialName, materialUnit } from "./materials";
 import { lotLabel } from "./diamondLots";
 import { confirmBox } from "./confirm";
-import { CHECKING, STILL_LOADING, recordsReady } from "./actionHints";
+import { CHECKING, STILL_LOADING, checkingFor, recordsReady } from "./actionHints";
 import { coField, companyIdOfClient } from "./companies";
 import { orderClosedWhy } from "./yearLock";
 import { switchWhy } from "./access";
@@ -76,7 +76,7 @@ export function orderDeleteBlocker(db: DB, user: Pick<User, "role"> | null | und
   if (who) return who;
   const closed = orderClosedWhy(o, db.settings);
   if (closed) return closed;
-  if (!collectionsFresh(ORDER_ADMIN_COLS)) return CHECKING;
+  if (!collectionsFresh(ORDER_ADMIN_COLS)) return checkingFor(ORDER_ADMIN_COLS);
   return deleteStopper(db, o);
 }
 
@@ -203,7 +203,7 @@ export async function restoreOrderFlow(orderId: string, user: Pick<User, "role">
 export function clientChangeBlocker(db: DB, o: Order): string | undefined {
   const closed = orderClosedWhy(o, db.settings);
   if (closed) return closed;
-  if (!collectionsFresh(ORDER_ADMIN_COLS)) return CHECKING;
+  if (!collectionsFresh(ORDER_ADMIN_COLS)) return checkingFor(ORDER_ADMIN_COLS);
   if ((o.advances ?? []).length) return "It has a payment from this client — delete it first, then record it under the right client";
   const inv = findInvoiceForOrder(db.invoices ?? [], o.id);
   if (inv) return `It is on invoice ${inv.number} — delete the invoice first`;

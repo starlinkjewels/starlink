@@ -179,6 +179,12 @@ service cloud.firestore {
     function pol_productPhotoItems_create() { return []; }
     function pol_productPhotoItems_update() { return []; }
     function pol_productPhotoItems_delete() { return []; }
+    // Who may READ the money records (READ_POLICY) — anyone else's device never loads them.
+    function rd_lockerTransactions() { return ['payments.view', 'locker.view', 'passbook.view', 'expenses.view', 'reports.view', 'dashboard.business', 'designers.view', 'productPhotos.view', 'buyAssign.view', 'suppliers.view', 'factories.view', 'clients.delete', 'orders.cancel']; }
+    function rd_expenses() { return ['payments.view', 'locker.view', 'passbook.view', 'expenses.view', 'reports.view', 'dashboard.business', 'designers.view', 'clients.delete', 'orders.delete', 'orders.cancel']; }
+    function rd_supplierPayments() { return ['payments.view', 'locker.view', 'passbook.view', 'expenses.view', 'reports.view', 'dashboard.business', 'suppliers.view', 'buyAssign.view']; }
+    function rd_supplierReceipts() { return ['payments.view', 'locker.view', 'passbook.view', 'expenses.view', 'reports.view', 'dashboard.business', 'suppliers.view', 'buyAssign.view']; }
+    function rd_factoryPayments() { return ['payments.view', 'locker.view', 'passbook.view', 'expenses.view', 'reports.view', 'dashboard.business', 'factories.view']; }
     // ── END GENERATED: write policy ──
 
     // Role index — read by its owner + admin; written by staff (clients only)
@@ -368,7 +374,7 @@ service cloud.firestore {
     // the AI proposed — admins only; what an admin approves becomes a task above.
     match /aiOffice/{id} { allow read, write: if isAdmin(); }
     match /expenses/{id} {
-      allow read: if isStaff();
+      allow read: if staffMay(rd_expenses());
       allow create: if staffMay(pol_expenses_create()) && datedOk(request.resource.data.get('createdAt', null));
       allow update: if staffMay(pol_expenses_update());
       allow delete: if staffMay(pol_expenses_delete()) && datedOk(resource.data.get('createdAt', null));
@@ -378,15 +384,15 @@ service cloud.firestore {
     // Stock, Diamond packets. Purely internal business data; clients never see any of this.
     match /lockers/{id}            { allow read: if isStaff(); allow create: if staffMay(pol_lockers_create()); allow update: if staffMay(pol_lockers_update()); allow delete: if staffMay(pol_lockers_delete()); }
     match /lockerTransactions/{id} {
-      allow read: if isStaff();
+      allow read: if staffMay(rd_lockerTransactions());
       allow create: if staffMay(pol_lockerTransactions_create()) && datedOk(request.resource.data.get('createdAt', null)) && amountOk(request.resource.data);
       allow update: if staffMay(pol_lockerTransactions_update()) && (request.resource.data.get('amountInr', 0) <= resource.data.get('amountInr', 0) || amountOk(request.resource.data));
       allow delete: if staffMay(pol_lockerTransactions_delete()) && datedOk(resource.data.get('createdAt', null));
     }
     match /suppliers/{id}          { allow read: if isStaff(); allow create: if staffMay(pol_suppliers_create()); allow update: if staffMay(pol_suppliers_update()); allow delete: if staffMay(pol_suppliers_delete()); }
     match /purchases/{id}          { allow read: if isStaff(); allow create: if staffMay(pol_purchases_create()); allow update: if staffMay(pol_purchases_update()); allow delete: if staffMay(pol_purchases_delete()); }
-    match /supplierReceipts/{id}   { allow read: if isStaff(); allow create: if staffMay(pol_supplierReceipts_create()); allow update: if staffMay(pol_supplierReceipts_update()); allow delete: if staffMay(pol_supplierReceipts_delete()); }
-    match /supplierPayments/{id}   { allow read: if isStaff(); allow create: if staffMay(pol_supplierPayments_create()); allow update: if staffMay(pol_supplierPayments_update()); allow delete: if staffMay(pol_supplierPayments_delete()); }
+    match /supplierReceipts/{id}   { allow read: if staffMay(rd_supplierReceipts()); allow create: if staffMay(pol_supplierReceipts_create()); allow update: if staffMay(pol_supplierReceipts_update()); allow delete: if staffMay(pol_supplierReceipts_delete()); }
+    match /supplierPayments/{id}   { allow read: if staffMay(rd_supplierPayments()); allow create: if staffMay(pol_supplierPayments_create()); allow update: if staffMay(pol_supplierPayments_update()); allow delete: if staffMay(pol_supplierPayments_delete()); }
     // Brokers (dalals) who bring purchases — Suppliers → Brokers. Staff only.
     match /brokers/{id}            { allow read: if isStaff(); allow create: if staffMay(pol_brokers_create()); allow update: if staffMay(pol_brokers_update()); allow delete: if staffMay(pol_brokers_delete()); }
     // CAD designers and their design jobs (lib/designers.ts) — staff only for now.
@@ -396,7 +402,7 @@ service cloud.firestore {
     match /cadJobs/{id}            { allow read: if isStaff(); allow create: if staffMay(pol_cadJobs_create()); allow update: if staffMay(pol_cadJobs_update()); allow delete: if staffMay(pol_cadJobs_delete()); }
     // Bags of loose diamonds, one per lot (lib/diamondBags.ts). Staff only.
     match /diamondBags/{id}        { allow read: if isStaff(); allow create: if staffMay(pol_diamondBags_create()); allow update: if staffMay(pol_diamondBags_update()); allow delete: if staffMay(pol_diamondBags_delete()); }
-    match /factoryPayments/{id}    { allow read: if isStaff(); allow create: if staffMay(pol_factoryPayments_create()); allow update: if staffMay(pol_factoryPayments_update()); allow delete: if staffMay(pol_factoryPayments_delete()); }
+    match /factoryPayments/{id}    { allow read: if staffMay(rd_factoryPayments()); allow create: if staffMay(pol_factoryPayments_create()); allow update: if staffMay(pol_factoryPayments_update()); allow delete: if staffMay(pol_factoryPayments_delete()); }
     // Money received from a client, one numbered receipt per payment.
     match /clientReceipts/{id}     { allow read: if isStaff(); allow create: if staffMay(pol_clientReceipts_create()); allow update: if staffMay(pol_clientReceipts_update()); allow delete: if staffMay(pol_clientReceipts_delete()); }
     match /factories/{id}          { allow read: if isStaff(); allow create: if staffMay(pol_factories_create()); allow update: if staffMay(pol_factories_update()); allow delete: if staffMay(pol_factories_delete()); }

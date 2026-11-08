@@ -9,7 +9,7 @@
 import { toast } from "sonner";
 import { collectionsFresh, fmtMoney, hasOpeningBalance, loadDb, updateDbAs, type DB } from "./db";
 import { confirmBox } from "./confirm";
-import { CHECKING, STILL_LOADING, recordsReady } from "./actionHints";
+import { CHECKING, STILL_LOADING, checkingFor, recordsReady } from "./actionHints";
 
 const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
 
@@ -28,7 +28,7 @@ const CLIENT_DELETE_COLS = [...CLIENT_REF_COLS, "clientReceipts", "lockerTransac
 export function clientDeleteBlocker(db: DB, clientId: string): string | undefined {
   const c = db.clients.find(x => x.id === clientId);
   if (!c) return "That client is no longer there";
-  if (!collectionsFresh(CLIENT_REF_COLS)) return CHECKING;
+  if (!collectionsFresh(CLIENT_REF_COLS)) return checkingFor(CLIENT_REF_COLS);
   const orders = db.orders.filter(o => o.clientId === clientId).length;
   const invoices = (db.invoices ?? []).filter(i => i.clientId === clientId).length;
   const receipts = collectionsFresh(["clientReceipts"]) ? (db.clientReceipts ?? []).filter(r => r.clientId === clientId).length : 0;

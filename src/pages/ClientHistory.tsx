@@ -1,5 +1,5 @@
 import { stageLabel } from "@/lib/stages";
-import { isDiamondOnlyOrder, orderImage } from "@/lib/db";
+import { isDiamondOnlyOrder, orderImage, hiddenFromMe } from "@/lib/db";
 import { looseLabel } from "@/lib/orderText";
 import { ListCombo } from "@/components/ListCombo";
 import { AddNewItem, useAddNew } from "@/components/create/QuickCreate";
@@ -794,7 +794,7 @@ function ClientHistoryPageBody() {
 
       {/* Diamonds sold to them straight out of stock — paid at once, or on credit
           until their payments cover it (lib/diamondSalePay.ts). */}
-      {diamondSales.length > 0 && (
+      {diamondSales.length > 0 && !hiddenFromMe("lockerTransactions") && (
         <div className="card-luxe overflow-hidden">
           <SectionTitle title="Diamond sales" className="px-5 py-4 border-b border-border/60"
             sub={owedByCcy.length ? `Still owed: ${owedByCcy.join(" + ")}` : "Sold from stock — all paid"} />

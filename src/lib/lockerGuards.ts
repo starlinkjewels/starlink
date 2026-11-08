@@ -1,5 +1,5 @@
 import { collectionsFresh, type DB } from "./db";
-import { CHECKING } from "./actionHints";
+import { checkingFor } from "./actionHints";
 import type { LazyCol } from "./pageData";
 
 /** Everything that can name an account, on demand — loaded before a delete is
@@ -42,6 +42,6 @@ export function lockerUsage(db: DB, id: string): { count: number; complete: bool
 export function lockerDeleteBlock(db: DB, id: string): string | undefined {
   const { count } = lockerUsage(db, id);
   if (count > 0) return `Has ${count} entr${count === 1 ? "y" : "ies"} — deactivate instead`;
-  if (!collectionsFresh(["expenses"])) return CHECKING;
+  if (!collectionsFresh(["expenses"])) return checkingFor(["expenses"]);
   return undefined;
 }
