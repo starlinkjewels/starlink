@@ -70,6 +70,12 @@ service cloud.firestore {
       return isAdmin() || (isStaff() && (!('g' in idx()) || need.hasAny(grantsNow())));
     }
     function lim() { return isAdmin() ? {} : idx().get('lim', {}); }
+    // Their own work: an employee limited to it (index `own`, set once every order,
+    // client and invoice carries its "who works on this" list) reaches only records
+    // that list them — unless "every order" is theirs right now. Everyone else: all.
+    function ownOk(d) {
+      return isAdmin() || idx().get('own', false) != true || '*all' in grantsNow() || myAppId() in d.staffIds;
+    }
     // Limits: how many days back (on a dated money record), and the largest
     // money entry in each currency — the same figures the app checks with.
     function pad2(n) { return n < 10 ? '0' + string(n) : string(n); }
@@ -215,10 +221,10 @@ service cloud.firestore {
 
     // Client records — staff manage; a client may read ONLY their own record.
     match /clients/{id} {
-      allow read:  if isStaff() || (isClientRole() && id == myClientId());
-      allow create: if staffMay(pol_clients_create());
-      allow update: if staffMay(pol_clients_update());
-      allow delete: if staffMay(pol_clients_delete());
+      allow read:  if (isStaff() && ownOk(resource.data)) || (isClientRole() && id == myClientId());
+      allow create: if staffMay(pol_clients_create()) && ownOk(request.resource.data);
+      allow update: if staffMay(pol_clients_update()) && ownOk(resource.data);
+      allow delete: if staffMay(pol_clients_delete()) && ownOk(resource.data);
     }
 
     // Orders — staff see all; a client only their own (create/read/update).
@@ -227,11 +233,11 @@ service cloud.firestore {
     // fulfilled on Shopify. (An admin's device may write it back as it was — a restore.)
     // The same for `etsy` (an order brought in from an Etsy shop: what is shipped on Etsy).
     match /orders/{id} {
-      allow read:   if isStaff() || (isClientRole() && resource.data.clientId == myClientId());
-      allow create: if (isStaff() || (isClientRole() && request.resource.data.clientId == myClientId()))
+      allow read:   if (isStaff() && ownOk(resource.data)) || (isClientRole() && resource.data.clientId == myClientId());
+      allow create: if ((isStaff() && ownOk(request.resource.data)) || (isClientRole() && request.resource.data.clientId == myClientId()))
         && (!('shopify' in request.resource.data) || isAdmin())
         && (!('etsy' in request.resource.data) || isAdmin());
-      allow update: if (isStaff() || (isClientRole() && resource.data.clientId == myClientId()))
+      allow update: if ((isStaff() && ownOk(resource.data)) || (isClientRole() && resource.data.clientId == myClientId()))
         && (request.resource.data.get('shopify', null) == resource.data.get('shopify', null) || isAdmin())
         && (request.resource.data.get('etsy', null) == resource.data.get('etsy', null) || isAdmin());
       // An order is never deleted one by one — "Delete" marks it deleted (lib/orderAdmin.ts); only an admin removes one.
@@ -240,10 +246,10 @@ service cloud.firestore {
 
     // Invoices — staff manage; a client may read only their own.
     match /invoices/{id} {
-      allow read:  if isStaff() || (isClientRole() && resource.data.clientId == myClientId());
-      allow create: if staffMay(pol_invoices_create());
-      allow update: if staffMay(pol_invoices_update());
-      allow delete: if staffMay(pol_invoices_delete());
+      allow read:  if (isStaff() && ownOk(resource.data)) || (isClientRole() && resource.data.clientId == myClientId());
+      allow create: if staffMay(pol_invoices_create()) && ownOk(request.resource.data);
+      allow update: if staffMay(pol_invoices_update()) && ownOk(resource.data);
+      allow delete: if staffMay(pol_invoices_delete()) && ownOk(resource.data);
     }
 
     // Gift cards — staff issue/revoke; a client may READ only their own. Clients
