@@ -88,6 +88,9 @@ export interface User {
 
 export interface Client {
   id: string;
+  /** Who works on it — the employees it belongs to (lib/db.ts deriveStaffIds): what an employee
+   *  limited to their own work loads, and what the database rules let them read. Kept at save time. */
+  staffIds?: string[];
   companyName: string;
   ownerName: string;
   email: string;
@@ -574,6 +577,9 @@ export interface StockSaleRecord {
 
 export interface Order {
   id: string;
+  /** Who works on it — the employees it belongs to (lib/db.ts deriveStaffIds): what an employee
+   *  limited to their own work loads, and what the database rules let them read. Kept at save time. */
+  staffIds?: string[];
   orderNumber: string;
   // Set only when a duplicate order number was repaired (Settings -> Data).
   // Keeps the original visible so old paperwork can still be traced.
@@ -831,6 +837,9 @@ export interface Notification {
 
 export interface Invoice {
   id: string;
+  /** Who works on it — the employees it belongs to (lib/db.ts deriveStaffIds): what an employee
+   *  limited to their own work loads, and what the database rules let them read. Kept at save time. */
+  staffIds?: string[];
   // Legacy single-order link — kept for backward compatibility. New invoices set
   // `orderIds` (one or many); for those, `orderId` mirrors orderIds[0]. Always
   // read the orders via invoiceOrderIds() so both shapes work.
@@ -1319,6 +1328,9 @@ export interface Settings {
   /** Every year closed or reopened, newest last — the small public part of each
    *  close (the figures themselves are admin-only, in adminRecords). */
   yearCloses?: YearCloseEntry[];
+  /** Every order, client and invoice carries its "who works on this" list (staffIds) — set by an
+   *  admin's session once it has filled them all. Until then nobody is limited by it. */
+  ownScopeReady?: boolean;
 }
 
 /** One financial year's close, as every signed-in person may read it. */
@@ -2949,6 +2961,9 @@ interface IndexDoc {
   w?: GrantWindow[];
   /** Their limits as the rules check them: days back, and the largest money entry per currency. */
   lim?: { bd?: number; mx?: Record<string, number> };
+  /** Limited to their own orders, clients and invoices — set only once every record carries
+   *  its "who works on this" list (settings.ownScopeReady). Loading and the rules both read it. */
+  own?: true;
 }
 
 /**
@@ -2979,6 +2994,7 @@ function idxShape(v: IndexDoc): IndexDoc {
     role: v.role, clientId: v.clientId ?? null, appId: v.appId ?? "", status: v.status,
     ...(v.docs === true ? { docs: true as const } : {}),
     ...(v.g ? { g: v.g } : {}), ...(v.w?.length ? { w: v.w } : {}), ...(v.lim ? { lim: v.lim } : {}),
+    ...(v.own === true ? { own: true as const } : {}),
   };
 }
 // Last-known Firestore state of the index (uid → serialised IndexDoc), for diffing.
@@ -2995,6 +3011,7 @@ function indexOf(u: User, roles: AccessDoc[] = cache.roles ?? [], settings: Sett
     const { g, w } = compileGrants({ id: u.id, role: u.role, roleId: u.roleId }, roles);
     d.g = g;
     if (w.length) d.w = w;
+    if (!g.includes("*all") && settings.ownScopeReady) d.own = true;
     const lim = limitsOf({ id: u.id, role: u.role, roleId: u.roleId }, roles);
     const out: NonNullable<IndexDoc["lim"]> = {};
     if (lim.backDays != null) out.bd = lim.backDays;
@@ -3168,6 +3185,21 @@ function writeRefusal(changes: { col: string; id: string; before: Record<string,
   // Not before their access records have arrived — a Standard staff guess could refuse what they may do.
   if (!loadedCols.has("roles")) return null;
   const grants = grantsNow({ id: me.id, role: me.role, roleId: me.roleId }, cache.roles ?? []);
+  // Limited to their own work: an order, client or invoice they touch must be one of theirs
+  // ("who works on this") — before the change, or, for a new one, after it. The database
+  // rules hold them to exactly that.
+  if (ownScope) {
+    const listed = (r: Record<string, unknown> | null) => Array.isArray(r?.staffIds) && (r!.staffIds as string[]).includes(me.id);
+    for (const c of changes) {
+      if (c.col !== "orders" && c.col !== "clients" && c.col !== "invoices") continue;
+      if (c.before ? !listed(c.before) : !listed(c.after)) {
+        const what = c.col === "orders" ? "an order" : c.col === "clients" ? "a client" : "an invoice";
+        return c.before
+          ? `${what} that is not one of yours can't be changed — your access covers your own orders and clients`
+          : `${what} added like this would not be one of yours — assign it to yourself, or ask an admin`;
+      }
+    }
+  }
   for (const c of changes) {
     const op: WriteOp = !c.before ? "create" : !c.after ? "delete" : "update";
     if (!policyAllows(c.col, op, grants)) {
@@ -3176,6 +3208,59 @@ function writeRefusal(changes: { col: string; id: string; before: Record<string,
     }
   }
   return null;
+}
+
+/** This session loads only its own orders, clients and invoices (Scope "full" with own). */
+let ownScope = false;
+
+/**
+ * "Who works on this" — each order's, client's and invoice's staffIds, kept at
+ * save time, so an employee limited to their own work can load just theirs and
+ * the database rules can let them read just theirs:
+ *  • an order: whoever it is assigned to, and its client's handler;
+ *  • a client: its handler, and whoever has one of its orders;
+ *  • an invoice: the people of its orders, and its client's handler.
+ * Only a session that sees everything works the lists out afresh. One that sees
+ * part (an employee limited to their own, a client) would drop the people it
+ * cannot see — it fills in only the lists of records it is adding (and an
+ * employee's, their own orders', which it sees whole).
+ */
+function deriveStaffIds(d: DB, remoteHas: (col: ArrayCol, id: string) => boolean): void {
+  const client = !messagesScopeIsFull;
+  const full = !client && !ownScope;
+  const ids = (xs: (string | null | undefined)[]) => [...new Set(xs.filter((x): x is string => !!x))].sort();
+  const mgr = new Map(d.clients.map(c => [c.id, c.accountManagerId]));
+  const assignedByClient = new Map<string, Set<string>>();
+  for (const o of d.orders) {
+    if (o.assignedEmployeeId) {
+      const s = assignedByClient.get(o.clientId) ?? new Set<string>();
+      s.add(o.assignedEmployeeId);
+      assignedByClient.set(o.clientId, s);
+    }
+    if (client && remoteHas("orders", o.id)) continue;
+    const next = ids([o.assignedEmployeeId, mgr.get(o.clientId)]);
+    if (!eq(o.staffIds, next)) o.staffIds = next;
+  }
+  const orderStaff = new Map(d.orders.map(o => [o.id, o.staffIds ?? []]));
+  if (client) return;
+  for (const c of d.clients) {
+    if (!full && remoteHas("clients", c.id)) continue;
+    const next = ids([c.accountManagerId, ...(assignedByClient.get(c.id) ?? [])]);
+    if (!eq(c.staffIds, next)) c.staffIds = next;
+  }
+  for (const inv of d.invoices) {
+    if (!full && remoteHas("invoices", inv.id)) continue;
+    const oids = inv.orderIds?.length ? inv.orderIds : inv.orderId ? [inv.orderId] : [];
+    const next = ids([...oids.flatMap(id => orderStaff.get(id) ?? []), mgr.get(inv.clientId)]);
+    if (!eq(inv.staffIds, next)) inv.staffIds = next;
+  }
+}
+/** Two versions of a record that differ only in their "who works on this" list. */
+function onlyStaffIdsDiffer(a: Record<string, unknown>, b: Record<string, unknown>): boolean {
+  if (eq(a.staffIds, b.staffIds)) return false;
+  const { staffIds: _a, ...ra } = a;
+  const { staffIds: _b, ...rb } = b;
+  return eq(ra, rb);
 }
 
 async function persist() {
@@ -3199,6 +3284,10 @@ async function persist() {
   const ctx = pendingChangeContext;
   pendingChangeContext = null;
 
+  // "Who works on this" lists, kept up to date before comparing (deriveStaffIds).
+  deriveStaffIds(snap, (col, id) => ((remote[col] as unknown as Record<string, unknown>[]) ?? []).some(x => docId(col, x) === id));
+  let staffPatches = 0;
+
   for (const col of ARRAY_COLS) {
     // A collection the server refuses is not worth attempting again. A failed
     // write is never reconciled against the mirror, so the same documents are
@@ -3219,6 +3308,15 @@ async function persist() {
 
     for (const [id, item] of curMap) {
       const before = prevMap.get(id);
+      // Only its "who works on this" list changed: that one field, never the whole record
+      // (a full copy from this device could undo someone's newer change) — and nothing in
+      // the activity log: it is the app's own bookkeeping, not anybody's change.
+      if (before && onlyStaffIdsDiffer(before as Record<string, unknown>, item)) {
+        opsList.push({ kind: "patch", col, id, data: { staffIds: item.staffIds ?? deleteField() } });
+        touched.add(col);
+        staffPatches++;
+        continue;
+      }
       if (!before || !eq(before, item)) {
         opsList.push({ kind: "set", col, id, data: item });
         touched.add(col);
@@ -3261,6 +3359,19 @@ async function persist() {
       touched.add(col);
       logRaw.push({ col, id, before: prevItem as Record<string, unknown>, after: null });
     }
+  }
+
+  // Every order, client and invoice now carries its "who works on this" list on the server:
+  // say so, once — from an admin's session that sees them all, fresh. Only then are employees
+  // limited to their own work loaded (and read-limited) by it.
+  const adminNow = isAdminEmail(fbAuth.currentUser?.email)
+    || cache.users.some(u => u.authUid === fbAuth.currentUser?.uid && u.role === "admin" && u.status === "active");
+  const LISTED: ArrayCol[] = ["orders", "clients", "invoices"];
+  if (adminNow && !snap.settings.ownScopeReady && staffPatches === 0 && !ownScope
+    && LISTED.every(c => loadedCols.has(c) && !staleCols.has(c))
+    && LISTED.every(c => ((remote[c] as unknown as Record<string, unknown>[]) ?? []).every(x => Array.isArray(x.staffIds)))) {
+    snap.settings.ownScopeReady = true;
+    cache.settings.ownScopeReady = true;
   }
 
   if (!eq(snap.settings, remote.settings)) {
@@ -3455,6 +3566,9 @@ async function persist() {
         console.warn("[db] role-index sync skipped (not permitted for this account):", e);
       }
     }
+    // Lists were filled in: one more (empty) save from an admin's session marks them all
+    // done once the server has them (the ready mark above).
+    if (staffPatches > 0 && adminNow && !cache.settings.ownScopeReady) setTimeout(() => updateDb(() => {}), 1500);
     // These deletions are done — stop tracking them.
     for (const { col, id } of committedDeletes) intentDeletes[col]?.delete(id);
     // Reconcile only the collections we wrote — leaves remote copies that
@@ -3977,7 +4091,8 @@ let unsubscribers: Array<() => void> = [];
 export type Scope =
   /** Staff. `admin` decides whether the admin-only records are requested at
    *  all — an employee never asks for them, so never sees them. */
-  | { kind: "full"; admin?: boolean; /** The person's own app id (User.id), when their index has it. */ appId?: string }
+  | { kind: "full"; admin?: boolean; /** The person's own app id (User.id), when their index has it. */ appId?: string;
+      /** Limited to their own orders, clients and invoices (index `own`, no "every order" open now). */ own?: boolean }
   | { kind: "client"; appId: string; clientId: string };
 
 /**
@@ -4064,7 +4179,10 @@ async function readScope(authUid: string): Promise<Scope | "missing" | null> {
 function scopeOfIndex(d: IndexDoc): Scope {
   if (d.role === "client" && d.clientId) return { kind: "client", appId: d.appId, clientId: d.clientId };
   if (d.role === "admin" && d.status === "active") return { kind: "full", admin: true, appId: d.appId || undefined };
-  return { kind: "full", appId: d.appId || undefined };
+  // Limited to their own work, unless a temporary "every order" grant is open right now.
+  const now = Date.now();
+  const allNow = (d.g ?? []).includes("*all") || (d.w ?? []).some(x => now >= x.f && now < x.u && x.g.includes("*all"));
+  return { kind: "full", appId: d.appId || undefined, ...(d.own === true && !allNow && d.appId ? { own: true } : {}) };
 }
 async function resolveScopeOnline(authUid: string): Promise<Scope> {
   try {
@@ -4131,7 +4249,11 @@ export function startDb(scope: Scope = { kind: "full" }): Promise<void> {
     void (async () => {
       await whenFresh();
       if (gen !== subGeneration) return;
-      if (scope.kind === "full" && scope.admin) await reconcileRoleIndex();
+      if (scope.kind === "full" && scope.admin) {
+        await reconcileRoleIndex();
+        // The "who works on this" lists: filled in (and marked done) by an admin's session.
+        if (!cache.settings.ownScopeReady) updateDb(() => {});
+      }
       // Legacy localStorage migration only runs for staff (admin) sessions.
       if (scope.kind === "full") {
         const legacy = readLegacy();
@@ -4269,6 +4391,7 @@ function subscribeAll(scope: Scope): Promise<void> {
   const client = scope.kind === "client" ? scope : null;
   messagesScopeIsFull = !client;
   clientAppId = client ? client.appId : null;
+  ownScope = scope.kind === "full" && !!scope.own && !!scope.appId;
 
   // Build the per-collection queries for this scope.
   const specs: { col: ArrayCol; q: Query<DocumentData> }[] = [];
@@ -4331,6 +4454,10 @@ function subscribeAll(scope: Scope): Promise<void> {
       else if (col === "clients")
         specs.push({ col, q: query(c, where(documentId(), "==", client.clientId)) });
       else specs.push({ col, q: c }); // users, catalog* — shared / names
+    } else if (ownScope && scope.kind === "full" && (col === "orders" || col === "clients" || col === "invoices")) {
+      // Limited to their own work: only the records that list them (staffIds) — what the
+      // database rules let them read. Everything else as for any employee.
+      specs.push({ col, q: query(collection(fsdb, col), where("staffIds", "array-contains", scope.appId!)) });
     } else if (col === "notifications" && scope.kind === "full" && scope.appId) {
       // Every screen shows only the signed-in person's own alerts, yet staff
       // downloaded everyone's — the largest collection of all. Only their own

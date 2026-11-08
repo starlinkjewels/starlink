@@ -426,7 +426,9 @@ export interface GrantWindow { f: number; u: number; g: string[] }
 export function compileGrants(user: PermUser, docs: AccessDoc[], now = Date.now()): { g: string[]; w: GrantWindow[] } {
   const ua = accessOf(docs, user.id);
   const base = applyOwn(roleOf(user, docs).perms, ua?.add, ua?.remove);
-  const g = ["*staff", ...permGrants(base), ...liveSwitches(chosenFeatures(ua, now, false), base)];
+  // "*all": every order and client (their reach) — the rules and the loading read it.
+  const reachAll = (ua?.reach ?? roleOf(user, docs).reach ?? "own") === "all";
+  const g = ["*staff", ...(reachAll ? ["*all"] : []), ...permGrants(base), ...liveSwitches(chosenFeatures(ua, now, false), base)];
   const w: GrantWindow[] = (ua?.temp ?? [])
     .filter(t => tempState(t, now) !== "ended")
     .sort((a, b) => +new Date(a.until) - +new Date(b.until))
@@ -434,7 +436,7 @@ export function compileGrants(user: PermUser, docs: AccessDoc[], now = Date.now(
     .map(t => {
       const both = applyOwn(base, undefined, undefined, [t.perms]);
       const own = new Set(g);
-      const extra = [...permGrants(both), ...liveSwitches([...chosenFeatures(ua, now, false), ...(t.features ?? [])], both)].filter(x => !own.has(x));
+      const extra = [...(t.reach === "all" ? ["*all"] : []), ...permGrants(both), ...liveSwitches([...chosenFeatures(ua, now, false), ...(t.features ?? [])], both)].filter(x => !own.has(x));
       return { f: t.from ? +new Date(t.from) : 0, u: +new Date(t.until), g: [...new Set(extra)] };
     })
     .filter(x => x.g.length > 0);
