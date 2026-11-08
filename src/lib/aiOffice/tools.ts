@@ -12,6 +12,7 @@ import { growthSignals } from "./signals";
 import { allPulses, clientPulse } from "./pulse";
 import { marginGuard } from "./margin";
 import { topMoves, SEGMENT, type Segment } from "./strategy";
+import { booksHealth, seasonPlaybook, shelfHealth, MIX } from "./health";
 import { currentYear, planFor, progress } from "@/lib/salesTargets";
 
 /** What the tools need from outside the records: today's market rate for fine gold (₹/g). Set by the AI Office page. */
@@ -47,6 +48,13 @@ export const TOOL_DEFS: ToolDef[] = [
       name: "growth_strategy",
       description: "The strategist's facts, as a large company's strategy team would work them out: the growth plan (sales = active customers × orders per customer × average order, last 12 months against the 12 before, which lever moved and the weakest one, and what each lever is worth a year in $); the customer portfolio (every client placed as Champions, Loyal, New, Promising, Need attention, At risk, Can't lose or Lost — judged against each client's own buying rhythm — with the standard play for each segment); client concentration (top 1/3/10 share of sales, how many clients make 80%); the sales target's progress this month and this year if one is set; and the week's top moves ranked by the money each is worth. Start here for growth plans, strategy, 'how do we grow', 'which clients to focus on', 'are we too dependent on a few clients', 'how do we hit the target'.",
       parameters: { type: "object", properties: { segment: { type: "string", enum: ["champion", "loyal", "new", "promising", "attention", "atRisk", "cantLose", "lost"], description: "List the clients of one segment in full" } } },
+    },
+  },
+  {
+    type: "function", function: {
+      name: "business_health",
+      description: "The money machine behind the sales, as a large company's finance and planning teams read it: the cash cycle (days to get paid + days stock waits − days we take to pay, the cash tied up in clients, stock and factories less what we owe, what 10 days on each frees, client debts by age); stock health (Ready Stock by days on the shelf, pieces over a year, months of shelf at the sales pace, the oldest pieces; gold and diamonds as months of cover at the last year's use; lots untouched for a year); the product mix (each kind of piece by growth and margin: Grow, Protect, Fix the price, Rethink); and the season playbook (the business's own busy and quiet months as a seasonal index, the festivals and selling seasons ahead weighted by where its clients are, with the dates to show designs and take orders by from its own making time). Start here for cash, working capital, 'where is our money', old or dead stock, how much gold to hold, which products to push or stop, seasons, festivals, Diwali, wedding season, planning the coming months.",
+      parameters: { type: "object", properties: { part: { type: "string", enum: ["all", "cash", "stock", "mix", "season"], description: "One part only (default all)" } } },
     },
   },
   {
@@ -150,6 +158,64 @@ const live = (db: DB) => db.orders.filter(o => !o.deletedAt);
 const clientName = (db: DB, id?: string) => { const c = db.clients.find(x => x.id === id); return c ? c.companyName || c.ownerName || "—" : "—"; };
 const userName = (db: DB, id?: string) => db.users.find(u => u.id === id)?.name;
 const factoryName = (db: DB, id?: string) => db.factories.find(f => f.id === id)?.name;
+
+/** The cash cycle, stock health, product mix and seasons for the AI (lib/aiOffice/health.ts) — the Strategy tab's own figures. */
+function healthTool(db: DB, args: Record<string, unknown>) {
+  const part = String(args.part ?? "all");
+  const want = (p: string) => part === "all" || part === p;
+  const now = new Date();
+  const books = want("cash") || want("stock") || want("mix") ? booksHealth(db, now) : null;
+  const out: Record<string, unknown> = { basis: "Sales = dispatched sales (as Profit & Loss), $. Costs and margins as each order's Cost & Profit. Stock and what we owe in $ at today's rate on file. 12 months = the last 365 days." };
+  if (books && want("cash")) {
+    const c = books.cash;
+    out.cash_cycle = {
+      days_to_get_paid_dso: c.dso, days_stock_waits_dio: c.dio, days_we_take_to_pay_dpo: c.dpo, cash_cycle_days: c.ccc,
+      cash_tied_up_usd: c.tiedUpUsd, sales_12m_usd: c.salesUsd, cost_of_sales_12m_usd: c.cogsUsd,
+      owed_by_clients_usd: c.receivables.total, owed_by_age_usd: { up_to_30_days: c.receivables.current, d31_60: c.receivables.d30, d61_90: c.receivables.d60, over_90: c.receivables.d90 },
+      stock_usd: { materials: c.stock.materialsUsd, certified_stones: c.stock.certifiedUsd, our_gold_at_factories: c.stock.goldAtFactoriesUsd, ready_stock_at_cost: c.stock.readyStockUsd, total: c.stock.totalUsd, lines_without_cost: c.stock.unpriced },
+      we_owe_usd: { suppliers: c.payables.suppliersUsd, factories: c.payables.factoriesUsd, total: c.payables.totalUsd },
+      cash_freed_by_10_days_usd: { collecting_faster: c.per10.collect, holding_less_stock: c.per10.stock, paying_later: c.per10.pay },
+      ...(c.fx == null ? { note: "No dollar rate on file — stock and what we owe can't be put in dollars." } : {}),
+    };
+  }
+  if (want("stock")) {
+    const s = shelfHealth(db, now);
+    out.ready_stock = {
+      pieces: s.pieces, cost_usd: s.costUsd, price_usd: s.priceUsd, pieces_without_cost: s.unpriced,
+      by_days_on_shelf: s.buckets.map(b => ({ age: b.label, pieces: b.pieces, cost_usd: b.costUsd, price_usd: b.priceUsd })),
+      over_a_year: s.dead, sold_12m_pieces: s.sold12, months_of_shelf_at_this_pace: s.monthsOfShelf,
+      oldest: s.oldest.slice(0, 10).map(p => ({ piece: p.name, sku: p.sku, item: p.item, pcs: p.qty, days_on_shelf: p.days, cost_usd: p.costUsd, price_usd: p.priceUsd, where: p.location })),
+    };
+    if (books) {
+      const m = books.materials;
+      out.materials = {
+        gold: { fine_g_in_stock: m.gold.fineG, fine_g_used_12m: m.gold.usedFineG12, per_month_g: m.gold.perMonthG, months_of_cover: m.gold.monthsCover, value_usd: m.gold.valueUsd },
+        diamonds: { ct_in_stock: m.diamonds.ct, ct_used_12m: m.diamonds.usedCt12, per_month_ct: m.diamonds.perMonthCt, months_of_cover: m.diamonds.monthsCover, value_usd: m.diamonds.valueUsd },
+        untouched_for_a_year: { value_usd: Math.round(m.slowUsd), lots: m.slow.slice(0, 10).map(x => ({ lot: x.bucket, material: x.material, qty: x.qty, unit: x.unit, value_usd: x.valueUsd, last_used: x.lastUsed })) },
+      };
+    }
+  }
+  if (books && want("mix")) {
+    out.product_mix = {
+      average_margin_pct: books.mix.avgMargin,
+      items: books.mix.rows.slice(0, 20).map(r => ({ item: r.item, place: MIX[r.place].label, play: MIX[r.place].play, sales_12m_usd: r.sales12, sales_year_before_usd: r.yearBefore, growth_pct: r.growth, share_pct: r.share, margin_pct: r.marginPct, orders_12m: r.orders12 })),
+    };
+  }
+  if (want("season")) {
+    const s = seasonPlaybook(db, now);
+    const M = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+    out.season = {
+      months_of_history: s.months, making_days_median: s.leadDays, average_month_sales_usd: s.avgMonthUsd,
+      sales_index_by_month: s.salesIndex.some(v => v != null) ? Object.fromEntries(M.map((m, i) => [m, s.salesIndex[i]])) : "needs a year of sales",
+      bookings_index_by_month: s.bookingIndex.some(v => v != null) ? Object.fromEntries(M.map((m, i) => [m, s.bookingIndex[i]])) : undefined,
+      busiest: s.peaks, quietest: s.quiet,
+      next_6_months: s.ahead.map(m => ({ month: m.label, index: m.salesIndex, mood: m.mood, last_year_usd: m.lastYearUsd, events: m.events })),
+      events_ahead: s.events.map(e => ({ event: e.name, market: e.market, date: e.date, until: e.until, why: e.why, share_of_sales_pct: e.share, show_designs_by: e.showBy, orders_in_by: e.ordersBy, in_shops_by: e.inShopsBy, status: e.status })),
+      clients_by_market_pct: s.marketShare,
+    };
+  }
+  return out;
+}
 
 /** The strategist's facts for the AI (lib/aiOffice/strategy.ts) — the Strategy tab's own figures. */
 function strategyTool(db: DB, args: Record<string, unknown>) {
@@ -373,6 +439,7 @@ export function runTool(db: DB, name: string, rawArgs: string, proposed: Propose
       case "business_snapshot": return snapshot(db, args);
       case "growth_signals": return { signals: growthSignals(db, new Date(), context.fineNowInr).slice(0, 25) };
       case "growth_strategy": return strategyTool(db, args);
+      case "business_health": return healthTool(db, args);
       case "client_pulse": {
         const lim = Math.min(40, Math.max(1, Number(args.limit) || 12));
         const name = String(args.name ?? "").trim().toLowerCase();

@@ -2,25 +2,33 @@
 // week's top moves (each worth a figure, one tap to a task), the growth plan
 // (which lever moved, what each is worth), the customer portfolio (every client
 // in its segment, with the play), and how much rests on a few clients. Then
-// the questions to put to the strategist. The figures: lib/aiOffice/strategy.ts.
-import { useMemo, useState } from "react";
+// the questions to put to the strategist. The figures: lib/aiOffice/strategy.ts;
+// the cash cycle, stock health, product mix and seasons: lib/aiOffice/health.ts
+// (HealthSections) — the books they read are loaded when the tab opens.
+import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
-import { Compass, Crown, Flame, HandCoins, ListChecks, ShieldAlert, Sparkles, TrendingDown, TrendingUp, Users } from "lucide-react";
+import { CalendarDays, Compass, Crown, Flame, HandCoins, ListChecks, Package, PieChart, ShieldAlert, Sparkles, TrendingDown, TrendingUp, Users, Wallet } from "lucide-react";
 import { useDb } from "@/hooks/useDb";
+import { collectionsLoaded, ensureCollections } from "@/lib/db";
 import { SectionTitle } from "@/components/SectionTitle";
 import { StatStrip } from "@/components/TableToolbar";
 import { DataTable, CellTag, type DataColumn } from "@/components/DataTable";
 import { Button } from "@/components/ui/button";
-import { topMoves, SEGMENT, STRATEGY_QUESTIONS, type Move, type PortfolioRow, type Segment } from "@/lib/aiOffice/strategy";
+import { SEGMENT, STRATEGY_QUESTIONS, type Move, type PortfolioRow, type Segment } from "@/lib/aiOffice/strategy";
+import { allMoves, BOOKS, HEALTH_QUESTIONS } from "@/lib/aiOffice/health";
+import { CashSection, MixSection, SeasonSection, StockSection } from "./HealthSections";
 
 const usd = (n: number | null | undefined) => (n == null ? "—" : `$${Math.round(n).toLocaleString("en-US")}`);
 const sign = (n: number | null) => (n == null ? "—" : `${n >= 0 ? "+" : ""}${n}%`);
 const LEVER: Record<string, string> = { customers: "Active clients", ordersPerCustomer: "Orders per client", avgOrder: "Average order" };
-const KIND_ICON: Record<Move["kind"], typeof Crown> = { keep: Crown, winback: Flame, grow: TrendingUp, collect: HandCoins, risk: ShieldAlert, lever: Compass };
+const KIND_ICON: Record<Move["kind"], typeof Crown> = { keep: Crown, winback: Flame, grow: TrendingUp, collect: HandCoins, risk: ShieldAlert, lever: Compass, cash: Wallet, stock: Package, season: CalendarDays, mix: PieChart };
 
 export function StrategyTab({ onAsk, onTask, busy }: { onAsk: (q: string) => void; onTask: (m: Move) => Promise<void> | void; busy?: boolean }) {
   const db = useDb();
-  const t = useMemo(() => topMoves(db), [db]);
+  // The cash cycle, materials and product mix read the books: ask for them once the tab opens.
+  useEffect(() => { void ensureCollections(BOOKS); }, []);
+  const ready = collectionsLoaded(BOOKS);
+  const t = useMemo(() => allMoves(db), [db, ready]);
   const [seg, setSeg] = useState<Segment | "">("");
   const [added, setAdded] = useState<Set<string>>(new Set());
   const g = t.growth;
@@ -46,7 +54,7 @@ export function StrategyTab({ onAsk, onTask, busy }: { onAsk: (q: string) => voi
     <div className="space-y-5">
       {/* The week's moves — biggest money first. */}
       <section className="card-luxe p-5 sm:p-6 space-y-4">
-        <SectionTitle icon={ListChecks} title="Top moves this week" sub="Every finding below, as a step — the biggest money first" />
+        <SectionTitle icon={ListChecks} title="Top moves this week" sub={`Every finding below, as a step — the biggest money first${ready ? "" : " (cash and stock moves join when the books have loaded)"}`} />
         {t.moves.length === 0 ? <p className="text-sm text-muted-foreground">Nothing urgent — every client is buying on their rhythm.</p> : (
           <ol className="space-y-2">
             {t.moves.slice(0, 8).map((m, i) => {
@@ -124,16 +132,21 @@ export function StrategyTab({ onAsk, onTask, busy }: { onAsk: (q: string) => voi
         ]} />
       </section>
 
+      <CashSection books={t.books} />
+      <StockSection shelf={t.shelf} books={t.books} />
+      <MixSection books={t.books} />
+      <SeasonSection season={t.season} />
+
       {/* Ask the strategist. */}
       <section className="card-luxe p-5 sm:p-6 space-y-3">
         <SectionTitle icon={Sparkles} title="Ask the strategist" sub="Answered from these figures — every number checked" />
         <div className="flex flex-wrap gap-2">
-          {STRATEGY_QUESTIONS.map(q => (
+          {[...STRATEGY_QUESTIONS, ...HEALTH_QUESTIONS].map(q => (
             <Button key={q.label} type="button" variant="outline" size="sm" className="rounded-xl" disabled={busy} onClick={() => onAsk(q.q)}>{q.label}</Button>
           ))}
         </div>
       </section>
-      <p className="text-[11px] text-muted-foreground">Sales are dispatched sales, as in Reports → Profit &amp; Loss. A client&rsquo;s rhythm is their usual gap between orders (Clients tab).</p>
+      <p className="text-[11px] text-muted-foreground">Sales are dispatched sales, as in Reports → Profit &amp; Loss; costs and margins as each order&rsquo;s Cost &amp; Profit. Stock and what we owe are in dollars at today&rsquo;s rate on file. A client&rsquo;s rhythm is their usual gap between orders (Clients tab).</p>
     </div>
   );
 }
@@ -141,7 +154,8 @@ export function StrategyTab({ onAsk, onTask, busy }: { onAsk: (q: string) => voi
 /** Home, for admins: the week's three biggest moves, from the Strategy tab. */
 export function TopMovesCard() {
   const db = useDb();
-  const t = useMemo(() => topMoves(db), [db]);
+  // Home never waits for the books: their moves join once another page has loaded them.
+  const t = useMemo(() => allMoves(db), [db]);
   const top = t.moves.slice(0, 3);
   if (!top.length) return null;
   return (

@@ -4,7 +4,8 @@
 // writes its reply. Proposed tasks are gathered on the way.
 import { httpsCallable } from "firebase/functions";
 import { functions } from "@/lib/firebase";
-import { loadDb } from "@/lib/db";
+import { loadDb, ensureCollections } from "@/lib/db";
+import { BOOKS } from "./health";
 import { brandName } from "@/lib/brand";
 import { TOOL_DEFS, runTool, type ProposedAction } from "./tools";
 import { proveNumbers, type Proof } from "./verify";
@@ -56,6 +57,9 @@ export async function askOffice(history: ChatMessage[], opts: { mode?: "ask" | "
       return { text, actions, messages, tokens, cutOff: !!res.cutOff, toolsUsed, proof };
     }
     messages.push({ role: "assistant", content: res.content ?? "", tool_calls: res.toolCalls });
+    // These read the books (stock, purchases, issues, payments) — the AI page doesn't load them
+    // up front, so they are fetched before the tool runs rather than read as empty.
+    if (res.toolCalls.some(c => NEEDS_BOOKS.has(c.function.name))) await ensureCollections(BOOKS);
     const db = loadDb();
     for (const c of res.toolCalls) {
       opts.onStep?.(c.function.name);
@@ -66,9 +70,13 @@ export async function askOffice(history: ChatMessage[], opts: { mode?: "ask" | "
   return { text: "", actions, messages, tokens, cutOff: false, toolsUsed, proof: { checked: 0, matched: 0, unmatched: [] } };
 }
 
+/** Tools that read the books. */
+const NEEDS_BOOKS = new Set(["business_health", "stock", "factories", "money_due"]);
+
 /** What a tool is doing, in words, for the "looking up…" line. */
 export const STEP_WORDS: Record<string, string> = {
   business_snapshot: "the business overview", growth_signals: "today's signals", clients: "clients", client_detail: "the client",
   orders: "orders", sales_breakdown: "sales", factories: "factories", stock: "stock", money_due: "money due", team: "the team", propose_action: "next steps",
   client_pulse: "each client's rhythm", margin_guard: "gold rates against open orders", growth_strategy: "the growth plan and client portfolio",
+  business_health: "cash, stock, products and seasons",
 };
