@@ -58,12 +58,14 @@ export function TargetsPage() {
   const leftDays = Math.max(0, days - dayNo);
   // The next Diwali from today (on own dates, the year's end).
   const diwali = custom ? year.to : DIWALI.find(d => d >= today);
+  // On own dates the year may end on Diwali or on any day the business chose.
+  const onDiwali = custom && DIWALI.includes(year.to);
   const inDays = diwali ? Math.max(0, daysIn(today, diwali) - 1) : 0;
   const plural = (n: number, w: string) => `${n} ${w}${n === 1 ? "" : "s"}`;
 
   return (
     <div className="max-w-7xl mx-auto space-y-6">
-      <PageHeader title="Targets" subtitle={`${custom ? "Diwali year" : "Financial year"} ${year.label}`}
+      <PageHeader title="Targets" subtitle={`${!custom ? "Financial year" : onDiwali ? "Diwali year" : "Business year"} ${year.label}`}
         info="The company's sales target for the business year, and how it is going — sales dispatched (as Profit & Loss), with orders booked beside them."
         primary={{ label: plan ? "Edit target" : "Set target", icon: plan ? Pencil : Target, onClick: () => setEditing(true) }} />
 
@@ -71,7 +73,7 @@ export function TargetsPage() {
       <StatStrip items={[
         { label: "Day of the year", value: `${dayNo} of ${days}`, icon: CalendarDays, sub: `${fmtDay(year.from)} – ${fmtDay(year.to)}` },
         { label: "Left in the year", value: `${plural(left.months, "month")} ${plural(left.days, "day")}`, icon: Flag, sub: `${plural(leftDays, "day")} after today` },
-        diwali ? { label: custom ? "Year ends on Diwali" : "Next Diwali", value: fmtDay(diwali), icon: Sparkles, sub: inDays === 0 ? "Today" : inDays === 1 ? "Tomorrow" : `in ${inDays} days` }
+        diwali ? { label: !custom ? "Next Diwali" : onDiwali ? "Year ends on Diwali" : "Year ends on", value: fmtDay(diwali), icon: Sparkles, sub: inDays === 0 ? "Today" : inDays === 1 ? "Tomorrow" : `in ${inDays} days` }
           : { label: "Year ends", value: fmtDay(year.to), icon: Sparkles },
       ]} />
 
@@ -288,6 +290,8 @@ function SetTargetSheet({ from, to: yearTo, plan, custom, onClose }: { from: str
       setAt: new Date().toISOString(), setBy: user?.name ?? "Admin",
     };
     updateDbAs({ summary: `Sales target ${final.label}: ${fmtMoney(final.yearTarget)}` }, d => {
+      // On own dates the year's end is one setting (Settings → Year closing "This year ends on").
+      if (custom) d.settings.fyOwnEnd = to;
       if (!d.adminRecords) d.adminRecords = [];
       const id = `target_${from}`;
       const rec = { id, kind: "salesTarget", plan: final } as AdminRecord;
@@ -309,9 +313,9 @@ function SetTargetSheet({ from, to: yearTo, plan, custom, onClose }: { from: str
       <div className="space-y-5">
         {custom && (
           <div>
-            <Label className="text-xs">The year ends on (Diwali)</Label>
+            <Label className="text-xs">The year ends on</Label>
             <Input type="date" min={addDays(from, 1)} value={to} onChange={e => e.target.value && setTo(e.target.value)} className={`${field} w-auto`} />
-            <p className="text-[11px] text-muted-foreground mt-1">From {fmtDay(from)}{nextDiwali(from) ? ` · next Diwali ${fmtDay(nextDiwali(from)!)}` : ""}. When you close the year in Settings, pick this day.</p>
+            <p className="text-[11px] text-muted-foreground mt-1">From {fmtDay(from)}{nextDiwali(from) ? ` · next Diwali ${fmtDay(nextDiwali(from)!)}` : ""} — or any day you close your books. The same as Settings → Year closing "This year ends on".</p>
           </div>
         )}
         <div>

@@ -26,19 +26,12 @@
 import { orderTotal, type DB, type Order, type AdminRecord } from "./db";
 import { soldIn, receivedIn, type Period } from "./analytics";
 import { recognisedSale } from "./orderCost";
-import { addDays, dayOf, fiscalYearOf, type FiscalYear } from "./fiscalYear";
+import { addDays, dayOf, fiscalYearOf, ownYear, type FiscalYear } from "./fiscalYear";
 
 const r2 = (n: number) => Math.round(n * 100) / 100;
 const pad = (n: number) => String(n).padStart(2, "0");
 
-/** Lakshmi Puja — the main day of Diwali. Books on Diwali dates close on it. */
-export const DIWALI: string[] = ["2024-11-01", "2025-10-20", "2026-11-08", "2027-10-29", "2028-10-17", "2029-11-05", "2030-10-26"];
-
-/** The first Diwali at least a month after a day — the natural end of a Diwali year starting then. */
-export function nextDiwali(after: string): string | undefined {
-  const min = addDays(after, 30);
-  return DIWALI.find(d => d >= min);
-}
+export { DIWALI, nextDiwali } from "./fiscalYear";
 
 export interface TargetMonth {
   /** "2026-04". */
@@ -76,13 +69,10 @@ export type TargetRecord = Extract<AdminRecord, { kind: "salesTarget" }>;
 export function currentYear(db: Pick<DB, "settings" | "orders" | "adminRecords">, today = dayOf(new Date())): { from: string; to: string; label: string } {
   const s = db.settings;
   if (s.fyCustomDates) {
-    // From the day after the last close — or, before any close, the day after the last Diwali.
-    const from = s.booksClosedTo ? addDays(s.booksClosedTo, 1) : (() => {
-      const last = [...DIWALI].reverse().find(d => d < today);
-      return last ? addDays(last, 1) : `${today.slice(0, 4)}-01-01`;
-    })();
-    const plan = targetPlans(db).find(p => p.from === from);
-    const to = plan?.to ?? nextDiwali(from) ?? addDays(`${Number(from.slice(0, 4)) + 1}${from.slice(4)}`, -1);
+    // The one rule (lib/fiscalYear.ts ownYear): its start and end as set in
+    // Settings → Year closing — Diwali by default, any day the business chooses.
+    const { from } = ownYear(s, today);
+    const { to } = ownYear(s, today, targetPlans(db).find(p => p.from === from)?.to);
     return { from, to, label: `${fmtDay(from)} – ${fmtDay(to)}` };
   }
   const fy: FiscalYear = fiscalYearOf(today, s.fyStartMonth || 4);
