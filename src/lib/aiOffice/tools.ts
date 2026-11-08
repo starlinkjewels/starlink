@@ -11,6 +11,8 @@ import { recognisedSale, saleDate } from "@/lib/orderCost";
 import { growthSignals } from "./signals";
 import { allPulses, clientPulse } from "./pulse";
 import { marginGuard } from "./margin";
+import { topMoves, SEGMENT, type Segment } from "./strategy";
+import { currentYear, planFor, progress } from "@/lib/salesTargets";
 
 /** What the tools need from outside the records: today's market rate for fine gold (₹/g). Set by the AI Office page. */
 const context: { fineNowInr: number | null } = { fineNowInr: null };
@@ -38,6 +40,13 @@ export const TOOL_DEFS: ToolDef[] = [
       name: "business_snapshot",
       description: "The whole business at a glance for a period: sales ($), orders received and sold, money collected, cost, profit and margin, on-time %, days to make, the same for the period before (with % change), open orders by stage, late orders, money owed to us by age, and what we owe suppliers and factories (₹).",
       parameters: { type: "object", properties: { period: periodParam } },
+    },
+  },
+  {
+    type: "function", function: {
+      name: "growth_strategy",
+      description: "The strategist's facts, as a large company's strategy team would work them out: the growth plan (sales = active customers × orders per customer × average order, last 12 months against the 12 before, which lever moved and the weakest one, and what each lever is worth a year in $); the customer portfolio (every client placed as Champions, Loyal, New, Promising, Need attention, At risk, Can't lose or Lost — judged against each client's own buying rhythm — with the standard play for each segment); client concentration (top 1/3/10 share of sales, how many clients make 80%); the sales target's progress this month and this year if one is set; and the week's top moves ranked by the money each is worth. Start here for growth plans, strategy, 'how do we grow', 'which clients to focus on', 'are we too dependent on a few clients', 'how do we hit the target'.",
+      parameters: { type: "object", properties: { segment: { type: "string", enum: ["champion", "loyal", "new", "promising", "attention", "atRisk", "cantLose", "lost"], description: "List the clients of one segment in full" } } },
     },
   },
   {
@@ -141,6 +150,37 @@ const live = (db: DB) => db.orders.filter(o => !o.deletedAt);
 const clientName = (db: DB, id?: string) => { const c = db.clients.find(x => x.id === id); return c ? c.companyName || c.ownerName || "—" : "—"; };
 const userName = (db: DB, id?: string) => db.users.find(u => u.id === id)?.name;
 const factoryName = (db: DB, id?: string) => db.factories.find(f => f.id === id)?.name;
+
+/** The strategist's facts for the AI (lib/aiOffice/strategy.ts) — the Strategy tab's own figures. */
+function strategyTool(db: DB, args: Record<string, unknown>) {
+  const t = topMoves(db);
+  const seg = String(args.segment ?? "") as Segment;
+  const segs = Object.keys(SEGMENT) as Segment[];
+  const counts = Object.fromEntries(segs.map(s => [s, { clients: t.portfolio.filter(p => p.segment === s).length, sales_12m_usd: t.portfolio.filter(p => p.segment === s).reduce((a, p) => a + p.sales12, 0) }]));
+  const row = (p: (typeof t.portfolio)[number]) => ({ client: p.name, segment: SEGMENT[p.segment].label, sales_12m_usd: p.sales12, sales_year_before_usd: p.yearBefore, orders_12m: p.orders12, typical_order_usd: p.typicalOrder, days_since_last_order: p.daysSinceLast, usual_gap_days: p.usualGap, days_past_due: p.daysPastDue, risk: p.risk, reasons: p.reasons.slice(0, 3), owed_usd: p.owed || undefined });
+  const today = new Date().toISOString().slice(0, 10);
+  const year = currentYear(db, today);
+  const plan = planFor(db, year.from);
+  const pr = plan ? progress(db, plan, today) : null;
+  return {
+    basis: "Sales = dispatched sales (as Profit & Loss), in $. 12 months = the last 365 days; 'year before' = the 365 days before that. Segments judge recency against each client's own usual gap between orders.",
+    growth: {
+      last_12m: t.growth.now, previous_12m: t.growth.before, change_pct: t.growth.change,
+      explains_pct_of_change: t.growth.explains, weakest_lever: t.growth.weakest,
+      lever_values_per_year_usd: t.growth.whatIf.map(w => ({ lever: w.label, usd: w.usd, how: w.how })),
+    },
+    segments: Object.fromEntries(segs.map(s => [s, { ...counts[s], meaning: SEGMENT[s].meaning, play: SEGMENT[s].play }])),
+    ...(seg && SEGMENT[seg] ? { clients_in_segment: t.portfolio.filter(p => p.segment === seg).slice(0, 40).map(row) } : {
+      key_clients: t.portfolio.filter(p => ["cantLose", "atRisk", "champion"].includes(p.segment)).slice(0, 15).map(row),
+    }),
+    concentration: { top1_pct: t.concentration.top1, top3_pct: t.concentration.top3, top10_pct: t.concentration.top10, biggest_client: t.concentration.biggest, clients_making_80pct: t.concentration.clientsFor80, clients_buying_12m: t.concentration.buying },
+    ...(pr ? { target: {
+      year: plan!.label, year_target_usd: plan!.yearTarget, sold_so_far_usd: pr.year.sales, expected_by_today_usd: pr.year.expected, year_pace_pct: pr.year.ratio != null ? Math.round(pr.year.ratio * 100) : null, still_to_sell_usd: pr.year.toGo, per_day_needed_usd: pr.year.perDay, days_left: pr.year.left,
+      ...(pr.current ? { this_month: { month: pr.current.row.key, target_usd: pr.current.row.catchUp, sales_usd: pr.current.row.sales, pace_pct: pr.current.ratio != null ? Math.round(pr.current.ratio * 100) : null, needed_per_day_usd: pr.current.perDay, days_left: pr.current.daysLeft, forecast_usd: pr.current.forecast, due_to_ship_usd: pr.current.pipeline.value, next_month_needs: pr.current.nextNeeds } } : {}),
+    } } : { target: "No sales target set for this year (Targets page)." }),
+    top_moves: t.moves.slice(0, 10).map(m => ({ move: m.title, why: m.why, worth_usd: Math.round(m.usd), client: m.clientName, priority: m.priority })),
+  };
+}
 
 /** The usual gap between a client's orders (median days), from their orders. */
 export function usualGap(orders: Order[]): number | null {
@@ -332,6 +372,7 @@ export function runTool(db: DB, name: string, rawArgs: string, proposed: Propose
     switch (name) {
       case "business_snapshot": return snapshot(db, args);
       case "growth_signals": return { signals: growthSignals(db, new Date(), context.fineNowInr).slice(0, 25) };
+      case "growth_strategy": return strategyTool(db, args);
       case "client_pulse": {
         const lim = Math.min(40, Math.max(1, Number(args.limit) || 12));
         const name = String(args.name ?? "").trim().toLowerCase();

@@ -15,8 +15,9 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import type { FunctionsError } from "firebase/functions";
 import { toast } from "sonner";
-import { AlertTriangle, ArrowUp, AudioLines, BookOpen, Check, CheckCircle2, ChevronRight, ClipboardList, Clock, Headphones, Languages, Lightbulb, Loader2, MessageSquare, Mic, Package, Phone, Plus, RefreshCw, Settings2, ShieldCheck, Sparkles, SquarePen, Square, Sun, Trash2, TrendingUp, Users, Volume2, VolumeX, Wallet, X, type LucideIcon } from "lucide-react";
+import { AlertTriangle, ArrowUp, AudioLines, BookOpen, Compass, Check, CheckCircle2, ChevronRight, ClipboardList, Clock, Headphones, Languages, Lightbulb, Loader2, MessageSquare, Mic, Package, Phone, Plus, RefreshCw, Settings2, ShieldCheck, Sparkles, SquarePen, Square, Sun, Trash2, TrendingUp, Users, Volume2, VolumeX, Wallet, X, type LucideIcon } from "lucide-react";
 import { TabBar } from "@/components/PageHeader";
+import { StrategyTab } from "@/components/ai/StrategyTab";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { AgentOrb } from "@/components/ai/AgentVisuals";
 import { CallPanel, type CallLine } from "@/components/ai/CallPanel";
@@ -40,8 +41,8 @@ import { hear, speak, speechLanguage, useRecorder, VOICE_CHOICES } from "@/lib/a
 import { approveAction, dismissAction, keepActions, saveBrief, saveMemory, suggestAssignee, todayKey, useOffice, type MemoryNote, type OfficeAction } from "@/lib/aiOffice/store";
 import { kpis, lateOpen, presetPeriod, receivables } from "@/lib/analytics";
 
-type Tab = "today" | "ask" | "clients" | "actions" | "signals" | "memory";
-const TABS: Tab[] = ["today", "ask", "clients", "actions", "signals", "memory"];
+type Tab = "today" | "ask" | "strategy" | "clients" | "actions" | "signals" | "memory";
+const TABS: Tab[] = ["today", "ask", "strategy", "clients", "actions", "signals", "memory"];
 const PREF = "aiOffice.prefs", CHAT_KEY = "aiOffice.chat";
 const LANGS = [{ v: "auto", l: "Auto" }, { v: "English", l: "English" }, { v: "Gujarati", l: "ગુજરાતી" }, { v: "Hindi", l: "हिंदी" }, { v: "Marathi", l: "मराठी" }];
 /** The voice's language for a language chosen (Auto: from the answer's own script). */
@@ -372,6 +373,7 @@ export function AiOfficePage() {
         tabs={[
           { key: "today", label: "Today", icon: Sun },
           { key: "ask", label: "Ask", icon: MessageSquare },
+          { key: "strategy", label: "Strategy", icon: Compass },
           { key: "clients", label: "Clients", icon: Users, count: atRisk || undefined },
           { key: "actions", label: "Actions", icon: ClipboardList, count: proposed.length || undefined },
           { key: "signals", label: "Signals", icon: Lightbulb, count: highSignals || undefined },
@@ -577,6 +579,14 @@ export function AiOfficePage() {
           {office.actions.some(a => a.status !== "proposed") && <p className="pt-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Decided</p>}
           {office.actions.filter(a => a.status !== "proposed").slice(0, 40).map(a => <ActionCard key={a.id} a={a} db={db} me={{ id: user!.id, name: user!.name }} />)}
         </div>
+      )}
+
+      {/* Strategy: the week's moves, the growth plan, the client portfolio (lib/aiOffice/strategy.ts). */}
+      {tab === "strategy" && (
+        <StrategyTab busy={!!asking} onAsk={q => void ask(q)} onTask={async m => {
+          const n = await keepActions([{ title: m.title, why: m.why, ...(m.clientName ? { clientName: m.clientName } : {}), priority: m.priority, dueInDays: m.dueInDays }], "ask", user!.id, office.actions);
+          toast.success(n ? "Added to Actions — approve it to someone" : "It's already in Actions today");
+        }} />
       )}
 
       {tab === "signals" && (

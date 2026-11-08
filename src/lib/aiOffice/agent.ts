@@ -70,5 +70,5 @@ export async function askOffice(history: ChatMessage[], opts: { mode?: "ask" | "
 export const STEP_WORDS: Record<string, string> = {
   business_snapshot: "the business overview", growth_signals: "today's signals", clients: "clients", client_detail: "the client",
   orders: "orders", sales_breakdown: "sales", factories: "factories", stock: "stock", money_due: "money due", team: "the team", propose_action: "next steps",
-  client_pulse: "each client's rhythm", margin_guard: "gold rates against open orders",
+  client_pulse: "each client's rhythm", margin_guard: "gold rates against open orders", growth_strategy: "the growth plan and client portfolio",
 };
