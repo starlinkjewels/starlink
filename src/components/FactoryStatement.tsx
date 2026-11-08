@@ -2,6 +2,7 @@ import { useMemo, useState, type ReactNode } from "react";
 import { Link } from "react-router-dom";
 import { AlertTriangle, CheckCircle2 } from "lucide-react";
 import { fmtDate } from "@/lib/db";
+import { useHas } from "@/hooks/useCan";
 import { fmtMoneyInr } from "@/lib/manufacturing";
 import { DataTable, CellMain, type DataColumn } from "@/components/DataTable";
 import { SectionTitle } from "@/components/SectionTitle";
@@ -27,6 +28,7 @@ export function FactoryStatement({ lines, check, factoryName, orderNo, materialL
   /** Where a material comes in Settings → Materials — balances list them in that order. */
   order?: (key: string) => number;
 }) {
+  const has = useHas();
   const [q, setQ] = useState("");
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
@@ -115,7 +117,8 @@ export function FactoryStatement({ lines, check, factoryName, orderNo, materialL
           id="factory-statement"
           noun="line"
           rows={rows}
-          columns={columns}
+          // Labour in rupees only with fig.costs; what we owe only with fig.payables (an admin: both).
+          columns={columns.filter(c => (c.key !== "billed" && c.key !== "paid") || has("fig.costs")).filter(c => c.key !== "owed" || has("fig.payables"))}
           rowKey={l => l.id}
           search={{ value: q, onChange: setQ, placeholder: "Search voucher or bill no., particulars…", ariaLabel: "Search the statement" }}
           filters={filters}

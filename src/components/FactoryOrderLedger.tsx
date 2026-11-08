@@ -2,6 +2,7 @@ import { useMemo, useState, type ReactNode } from "react";
 import { metalLabel } from "@/lib/metals";
 import { Link } from "react-router-dom";
 import { fmtDate, toPureGold, pureFromPurity, type MaterialIssuance, type Order, type Factory, type Settings } from "@/lib/db";
+import { useHas } from "@/hooks/useCan";
 import { fmtMoneyInr, diamondFlow, otherFlow, minimumLabourApplies, lineAtMinimum, lineMaking, labourLineText, factoryMetalLines } from "@/lib/manufacturing";
 import { isOtherMaterial, materialName, materialUnit } from "@/lib/materials";
 import { Download, Coins, Gem, Hammer } from "lucide-react";
@@ -399,6 +400,9 @@ export function FactoryOrderLedger({
   account?: { chargesPending: number; chargesOverpaid: number };
   onExport?: () => void;
 }) {
+  // Labour billed, paid and quoted (fig.costs), and what is still owed (fig.payables) — an admin always.
+  const has = useHas();
+  const showCosts = has("fig.costs"), showOwed = has("fig.payables");
   const [q, setQ] = useState("");
   // The dates and the status stay as they were left until cleared — one
   // setting for every factory's ledger (the choices are the same on each).
@@ -559,8 +563,8 @@ export function FactoryOrderLedger({
       <StatStrip items={[
         { label: goldAtFactory < 0 ? "Gold we owe the factory" : "Gold still at factory", value: `${Math.abs(goldAtFactory).toFixed(3)} g fine`, icon: Coins },
         { label: "Diamond not accounted", value: `${(T.diaOut - T.diaIn).toFixed(2)} ct`, icon: Gem },
-        { label: "Labour billed", value: fmtMoneyInr(T.labour), icon: Hammer },
-        { label: credit > 0 ? "Paid in advance" : whole ? "Labour pending" : "Pending on these rows", value: fmtMoneyInr(credit > 0 ? credit : pending), tone: pending > 0 ? "out" as const : undefined },
+        ...(showCosts ? [{ label: "Labour billed", value: fmtMoneyInr(T.labour), icon: Hammer }] : []),
+        ...(!showOwed ? [] : [{ label: credit > 0 ? "Paid in advance" : whole ? "Labour pending" : "Pending on these rows", value: fmtMoneyInr(credit > 0 ? credit : pending), tone: pending > 0 ? "out" as const : undefined }]),
       ]} note={active ? "For the rows shown" : openingFineGold > 0 ? `Gold includes ${openingFineGold.toFixed(3)} g opening` : undefined} />
     );
   })() : undefined;
@@ -584,7 +588,7 @@ export function FactoryOrderLedger({
           id="factory-order-ledger"
           noun="order"
           rows={filtered}
-          columns={columns}
+          columns={columns.filter(c => (showCosts || !["labour", "paid", "quoted"].includes(c.key)) && (showOwed || c.key !== "pending"))}
           rowKey={r => r.rowId ?? (r.orderId || r.orderNo)}
           search={{ value: q, onChange: setQ, placeholder: searchLabel, ariaLabel: searchLabel }}
           filters={filters}
@@ -594,7 +598,7 @@ export function FactoryOrderLedger({
           details={false}
           expand={{
             render: r => (r.entries.length
-              ? <DataTable id="factory-ledger-entries" controls="none" noun="entry" plural="entries" rows={r.entries} columns={entryCols} rowKey={en => en.id} details={false} />
+              ? <DataTable id="factory-ledger-entries" controls="none" noun="entry" plural="entries" rows={showCosts ? r.entries : r.entries.filter(en => en.amount == null)} columns={entryCols} rowKey={en => en.id} details={false} />
               : <p className="text-xs text-muted-foreground">Nothing issued or paid yet — the figures are estimates.</p>),
           }}
           totalsLabel={`Totals${active ? " (filtered)" : ""}`}

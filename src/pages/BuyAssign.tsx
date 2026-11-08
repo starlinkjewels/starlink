@@ -1,6 +1,6 @@
 import { AddNewItem, useAddNew } from "@/components/create/QuickCreate";
 import { StatStrip } from "@/components/TableToolbar";
-import { useCan } from "@/hooks/useCan";
+import { useCan, useHas } from "@/hooks/useCan";
 import { useState, type ReactNode } from "react";
 import { useAuth } from "@/lib/auth";
 import { StockActivityLedger, type LedgerTotals } from "@/components/StockActivityLedger";
@@ -49,6 +49,7 @@ type PanelProps = { open: boolean; onOpenChange: (open: boolean) => void };
  */
 export function BuyAssignPage() {
   const can = useCan();
+  const has = useHas();
   const may = can("buyAssign", "add");
   const [panel, setPanel] = useState<Mode | null>(null);
   const panelFor = (m: Mode): PanelProps => ({ open: panel === m, onOpenChange: o => setPanel(o ? m : null) });
@@ -63,17 +64,17 @@ export function BuyAssignPage() {
         subtitle="Material into stock, out to factories"
         primary={may ? { label: "New purchase", icon: Plus, onClick: () => setPanel("buy") } : null}
         // Selling out of stock, in sight: to one of our suppliers, or a diamond to a client or any buyer.
-        secondary={may ? { label: "Sell", icon: Tag, items: [
+        secondary={may && has("buyAssign.sell") ? { label: "Sell", icon: Tag, items: [
           { label: "Sell to a supplier", icon: Truck, hint: "Diamonds, gold, a piece — off what we owe them", onSelect: () => setPanel("sellSupplier") },
           { label: "Sell a diamond", icon: Gem, hint: "To a client or any buyer — no order", onSelect: () => setPanel("sell") },
         ] } : null}
-        actions={may && !phone ? (
+        actions={may && has("buyAssign.assign") && !phone ? (
           <Button variant="outline" onClick={() => setPanel("assign")} className="h-10 rounded-xl px-3.5 gap-2">
             <ArrowRightLeft className="h-4 w-4" />Assign to factory
           </Button>
         ) : undefined}
         menu={may ? [
-          { label: "Assign to factory", icon: ArrowRightLeft, hint: "Stock gold or material to a factory", onSelect: () => setPanel("assign"), show: phone },
+          { label: "Assign to factory", icon: ArrowRightLeft, hint: "Stock gold or material to a factory", onSelect: () => setPanel("assign"), show: phone && has("buyAssign.assign") },
           { label: "Opening stock", icon: Boxes, hint: "From before the app — no dues", onSelect: () => setPanel("opening") },
         ] : undefined}
       >
@@ -105,6 +106,8 @@ export function BuyAssignPage() {
  */
 function MonthFigures({ ledger }: { ledger: LedgerTotals | null }) {
   const db = useDb();
+  // What was bought, in rupees: only with fig.costs — an admin always.
+  const showCosts = useHas()("fig.costs");
   const now = new Date();
   const month = now.toLocaleDateString("en-IN", { month: "long" });
   const inMonth = (iso?: string) => {
@@ -134,7 +137,7 @@ function MonthFigures({ ledger }: { ledger: LedgerTotals | null }) {
   const all = ledger && ledger.totalIn > 0 ? ledger : null;
   return (
     <StatStrip items={[
-      { label: `Bought in ${month}`, value: fmtMoneyInr(total(bought, p => p.totalInr)), icon: ShoppingCart, sub: `${bills} bill${bills !== 1 ? "s" : ""}` },
+      ...(showCosts ? [{ label: `Bought in ${month}`, value: fmtMoneyInr(total(bought, p => p.totalInr)), icon: ShoppingCart, sub: `${bills} bill${bills !== 1 ? "s" : ""}` }] : []),
       {
         label: "Assigned to factories", icon: ArrowRightLeft,
         value: goldG > 0 || diamondCt === 0 ? `${fmtQty(goldG, "g")}` : fmtQty(diamondCt, "ct"),
@@ -145,7 +148,7 @@ function MonthFigures({ ledger }: { ledger: LedgerTotals | null }) {
       { label: "Diamonds sold", value: fmtQty(total(sold, s => s.carat), "ct"), icon: Tag, sub: `${fmtMoneyInr(total(sold, s => s.totalInr))} · ${sold.length} sale${sold.length !== 1 ? "s" : ""}` },
       { label: `Sold to suppliers in ${month}`, value: fmtMoneyInr(total(toSuppliers, s => s.totalInr)), icon: Truck,
         sub: toSuppliers.length ? `${toSuppliers.length} sale${toSuppliers.length !== 1 ? "s" : ""} · ${supplierCount} supplier${supplierCount !== 1 ? "s" : ""}` : "none yet" },
-      ...(all ? [{
+      ...(all && showCosts ? [{
         label: all.filtered ? "Bought in · filtered" : "Bought in · all time", icon: ShoppingCart,
         value: fmtMoneyInr(all.totalIn),
         sub: [`${all.nBought} ${all.nBought === 1 ? "entry" : "entries"}`,

@@ -13,7 +13,7 @@ import { OrderBoard } from "@/components/OrderBoard";
 import { ProductionInfo } from "@/components/ProductionInfo";
 import { diamondsMissing, productionDelayDays, productionTrack, type ProductionTrack } from "@/lib/production";
 import { otherMetalsOf, pieceWeights } from "@/lib/weights";
-import { useCan, useMayExport } from "@/hooks/useCan";
+import { useCan, useHas, useMayExport } from "@/hooks/useCan";
 import { useMemo, useState } from "react";
 import { filled, when, userName, refLink, noteText, refNo, type Detail } from "@/components/rowDetails";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
@@ -126,6 +126,7 @@ export function OrdersPage() {
   const multiCo = hasCompanies(db.settings);
   const isStaff = user!.role !== "client";
   const can = useCan();
+  const has = useHas();
   const [trackingOrder, setTrackingOrder] = useState<Order | null>(null);
   // Pictures that would not load show the small icon tile instead of a blank square.
   const [brokenImg, setBrokenImg] = useState<Set<string>>(new Set());
@@ -163,7 +164,7 @@ export function OrdersPage() {
     // Several statuses ticked show an order matching any of them.
     const statuses = selList(status);
     // Deleted orders are off every list; the admin's "Deleted" filter is the one place they show (to restore one).
-    const withDeleted = statuses.includes("deleted") && user!.role === "admin";
+    const withDeleted = statuses.includes("deleted") && has("orders.delete");
     let list = withDeleted ? currentUserOrders(db, user!, { withDeleted: true }) : currentUserOrders(db, user!);
     const statusMatch = (o: Order, st: string): boolean => {
       if (st === "deleted") return !!o.deletedAt;
@@ -186,7 +187,7 @@ export function OrdersPage() {
     // Only while the Company filter is shown — a remembered one from when there were several never hides orders.
     if (isStaff && multiCo && selOn(companyFilter)) list = list.filter(o => selHas(companyFilter, companyOfOrder(db, o)));
     const people = selList(employeeFilter);
-    if (people.length && user!.role === "admin") {
+    if (people.length && has("orders.assign")) {
       const managedBy = new Map(db.clients.filter(c => c.accountManagerId).map(c => [c.id, c.accountManagerId!]));
       list = list.filter(o => people.some(p => o.assignedEmployeeId === p || managedBy.get(o.clientId) === p));
     }
@@ -272,7 +273,7 @@ export function OrdersPage() {
     // A deleted order: only seen, or brought back.
     if (o.deletedAt) return [
       { label: "View", icon: Eye, onSelect: () => nav(`/orders/${o.id}`) },
-      { label: "Restore", icon: Undo2, hint: "Back as a cancelled order — re-open it on its page", onSelect: () => { void restoreOrderFlow(o.id, user!); }, show: user!.role === "admin" },
+      { label: "Restore", icon: Undo2, hint: "Back as a cancelled order — re-open it on its page", onSelect: () => { void restoreOrderFlow(o.id, user!); }, show: has("orders.delete") },
     ];
     const editWhy = orderEditAccess(db, user, can, o) ?? orderSpecLocks(db, o).all;
     const cancelWhy = cancelAccess(user) ?? cancelBlocker(db, o);
@@ -388,7 +389,7 @@ export function OrdersPage() {
       ) : <span className="text-muted-foreground/50">—</span> },
     ...(isStaff ? [{ key: "invoice", header: "Invoice", sortValue: (o: Order) => findInvoiceForOrder(db.invoices, o.id)?.number ?? (needsInvoice(o) ? "" : null),
       cell: (o: Order) => <InvoiceBadge invoice={findInvoiceForOrder(db.invoices, o.id)} dispatched={needsInvoice(o)} onOpen={openInvoice} /> }] : []),
-    ...(user!.role === "admin" ? [{ key: "profit", header: "Profit", cell: (o: Order) => <OrderProfitBadge db={db} order={o} className="text-xs whitespace-nowrap" /> }] : []),
+    ...(has("fig.profit") ? [{ key: "profit", header: "Profit", cell: (o: Order) => <OrderProfitBadge db={db} order={o} className="text-xs whitespace-nowrap" /> }] : []),
     { key: "placed", header: "Placed", kind: "date", hidden: true, sortValue: o => o.createdAt, cell: o => <CellDate>{fmtDate(o.createdAt)}</CellDate> },
     { key: "amount", header: "Amount", align: "right", kind: "number", sortValue: o => o.returns?.length ? keptValue(o) : o.amount,
       cell: o => (
@@ -486,7 +487,7 @@ export function OrdersPage() {
           { value: "delayed", label: `Delayed — ${delayLimit}+ days in production` },
           { value: "nodiamonds", label: "In production — diamonds not issued" },
         ] : []),
-        ...(user!.role === "admin" ? [{ value: "deleted", label: "Deleted (to restore)" }] : []),
+        ...(has("orders.delete") ? [{ value: "deleted", label: "Deleted (to restore)" }] : []),
         // "Waiting" is the one for approval (an old ?status=Pending link still lands there).
         ...["Waiting", "Approved", "In Production", "Ready", "Dispatched", "Delivered", "Rejected"].map(s => ({ value: s, label: s === "Waiting" ? "Waiting — for approval" : s })),
       ] },
@@ -494,7 +495,7 @@ export function OrdersPage() {
       options: db.clients.filter(c => worksOnClientId(db, user, c.id)).sort((a, b) => a.companyName.localeCompare(b.companyName)).map(c => ({ value: c.id, label: c.companyName })) }] : []),
     ...(isStaff && multiCo ? [{ kind: "select" as const, label: "Company", multi: true, value: companyFilter === "all" ? "" : companyFilter, onChange: pick(setCompanyFilter), allLabel: "All companies",
       options: companiesOf(db.settings).map(c => ({ value: c.id, label: c.name })) }] : []),
-    ...(user!.role === "admin" ? [{ kind: "select" as const, label: "Employee", multi: true, value: employeeFilter === "all" ? "" : employeeFilter, onChange: pick(setEmployeeFilter), allLabel: "All employees",
+    ...(has("orders.assign") ? [{ kind: "select" as const, label: "Employee", multi: true, value: employeeFilter === "all" ? "" : employeeFilter, onChange: pick(setEmployeeFilter), allLabel: "All employees",
       options: db.users.filter(u => (u.role === "employee" || u.role === "admin") && u.status !== "inactive")
         .sort((a, b) => a.name.localeCompare(b.name))
         .map(u => ({ value: u.id, label: `${u.name}${u.role === "admin" ? " (admin)" : ""}` })) }] : []),
@@ -504,12 +505,12 @@ export function OrdersPage() {
   // sheet says it is the admin's own — the others go to customers for a bulk
   // sale, and cost must never be one forward away from one.
   const exports: TableExport[] = isStaff && orders.length > 0 ? [
-    { label: "Share — product PDF or link", icon: Share2, hint: "Photos, video, details, the price you set — a page a piece or a line sheet",
-      onSelect: () => { if (exportRows.length > 150) { toast.error("Tick up to 150 pieces to share at once"); return; } setSharing(exportRows); } },
+    ...(has("orders.share") ? [{ label: "Share — product PDF or link", icon: Share2, hint: "Photos, video, details, the price you set — a page a piece or a line sheet",
+      onSelect: () => { if (exportRows.length > 150) { toast.error("Tick up to 150 pieces to share at once"); return; } setSharing(exportRows); } }] : []),
     { label: "PDF", icon: FileText, hint: "Order sheet — weights, totals, paid, due", onSelect: () => exportProductsPdf(db, exportRows, exportName(), exportSubject()) },
     // Real Excel workbooks (.xlsx), styled, with a photo of each piece (lib/xlsxExport.ts).
     { label: "Excel", icon: FileSpreadsheet, hint: "Photos, details, weights, totals — no cost on it", onSelect: () => { void exportOrdersXlsx(db, exportRows, exportName(), exportSubject()); } },
-    ...(user!.role === "admin" ? [{ label: "Profit — Excel", icon: TrendingUp, hint: "Admin only — every cost, profit, margin · never send out", onSelect: () => { void exportOrdersXlsx(db, exportRows, exportName(), exportSubject(), { withProfit: true }); } }] : []),
+    ...(has("fig.profit") ? [{ label: "Profit — Excel", icon: TrendingUp, hint: "Admin only — every cost, profit, margin · never send out", onSelect: () => { void exportOrdersXlsx(db, exportRows, exportName(), exportSubject(), { withProfit: true }); } }] : []),
   ] : [];
   const mayExport = useMayExport();
   const countText = `${total} order${total !== 1 ? "s" : ""}`;
@@ -532,7 +533,7 @@ export function OrdersPage() {
       <div className="ml-auto flex items-center gap-2">
         {chosen.length > 0 && (
           <>
-            {can("orders", "edit") && (<>
+            {can("orders", "edit") && has("orders.dispatch") && (<>
             <button onClick={() => setBulkDispatch(true)}
               className="flex items-center gap-1.5 h-8 px-3 rounded-lg bg-blue-500/10 border border-blue-500/30 text-xs font-semibold text-blue-700 hover:bg-blue-500/20">
               <Truck className="h-3.5 w-3.5" /> Dispatch
@@ -542,7 +543,7 @@ export function OrdersPage() {
               <PackageCheck className="h-3.5 w-3.5" /> Delivered
             </button>
             </>)}
-            {user!.role === "admin" && (
+            {has("orders.assign") && (
               <button onClick={() => setBulkAssign(true)}
                 className="flex items-center gap-1.5 h-8 px-3 rounded-lg bg-violet-500/10 border border-violet-500/30 text-xs font-semibold text-violet-700 hover:bg-violet-500/20">
                 <UserCog className="h-3.5 w-3.5" /> Assign
@@ -729,7 +730,7 @@ export function OrdersPage() {
                       {!!o.returns?.length && <CellTag tone="amber">{returnTag(o)}</CellTag>}
                     </div>
                   )}
-                  {user!.role === "admin" && <OrderProfitBadge db={db} order={o} className="mt-1.5 text-xs" />}
+                  {has("fig.profit") && <OrderProfitBadge db={db} order={o} className="mt-1.5 text-xs" />}
                   {isStaff && (() => {
                     const wp = pieceWeights(o, db.materialIssuances).problem;
                     return wp ? <p title={wp} className="text-[10px] font-semibold text-destructive truncate mt-1">⚠ Check weights</p> : null;

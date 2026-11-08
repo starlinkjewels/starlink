@@ -7,6 +7,7 @@ import {
   type DB, type Order, type User,
 } from "./db";
 import { CHECKING, needsAccess } from "./actionHints";
+import { switchWhy } from "./access";
 import { isMetalMaterial, materialName, materialUnit } from "./materials";
 
 type Can = (module: "orders", action: "edit") => boolean;
@@ -43,9 +44,9 @@ export function cancelBlocker(db: DB, o: Order): string | undefined {
   return undefined;
 }
 
-/** Who may cancel: the admin only, as before. */
+/** Who may cancel: an admin, or an employee whose access includes it (orders.cancel). */
 export function cancelAccess(user: Pick<User, "role"> | null | undefined): string | undefined {
-  return user?.role === "admin" ? undefined : "Only the admin can cancel an order";
+  return switchWhy(user, "orders.cancel", "cancelling orders");
 }
 
 /**

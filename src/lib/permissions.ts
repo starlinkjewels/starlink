@@ -1,4 +1,5 @@
 import { MODULES, type ModuleKey } from "./modules";
+import { FEATURES, FEATURE_BY_KEY, STD_FEATURES, type AccessLimits } from "./accessFeatures";
 
 /**
  * Who may do what — roles for staff, section by section.
@@ -49,6 +50,9 @@ export interface StaffRole {
   reach?: RoleReach;
   /** Shipped with the app and not editable — Standard staff. */
   builtIn?: boolean;
+  /** A saved template's finer switches and limits (accessFeatures.ts); unset = Standard staff's. */
+  features?: string[];
+  limits?: AccessLimits;
   createdAt: string;
   updatedAt?: string;
 }
@@ -71,12 +75,46 @@ export const MODULE_ACTIONS: Record<ModuleKey, PermAction[]> = {
   productPhotos: ["view", "add", "edit", "delete", "export"],
   orders: ["view", "add", "edit", "export"],
   clients: ["view", "add", "edit", "delete", "export"],
+  // Deleting an invoice is its own switch (accessFeatures: invoices.delete) —
+  // the old Delete box here never did anything: the admin alone could.
+  invoices: ["view", "add", "edit", "export"],
+  readyStock: ["view", "add", "edit", "delete", "export"],
+  giftCards: ["view", "export"],
+  // Since 2026-11: suppliers, factories, designers and stock can be changed by
+  // an employee given it — before, only an admin could, whatever the access.
+  suppliers: ["view", "add", "edit", "delete", "export"],
+  factories: ["view", "add", "edit", "delete", "export"],
+  designers: ["view", "add", "edit", "delete", "export"],
+  stock: ["view", "add", "edit", "delete", "export"],
+  buyAssign: ["view", "add", "edit", "delete"],
+  payments: ["view", "add", "edit", "delete", "export"],
+  passbook: ["view", "export"],
+  locker: ["view", "add", "edit", "delete", "export"],
+  expenses: ["view", "add", "edit", "delete", "export"],
+  messages: ["view", "add"],
+  reports: ["view", "export"],
+  employees: [], settings: [], activity: [],
+};
+
+/**
+ * The actions each section had for employees before 2026-11 — FROZEN.
+ *
+ * Standard staff (an employee with no access of their own) and every person's
+ * saved access (kept as what differs from Standard staff) are read against
+ * this, so adding an action above can never hand it to anyone: a new box
+ * starts empty for everyone until an admin ticks it for someone. Never edit.
+ */
+const LEGACY_ACTIONS: Record<ModuleKey, PermAction[]> = {
+  dashboard: ["view"],
+  catalog: ["view", "add", "edit", "delete", "export"],
+  productPhotos: ["view", "add", "edit", "delete", "export"],
+  orders: ["view", "add", "edit", "export"],
+  clients: ["view", "add", "edit", "delete", "export"],
   invoices: ["view", "add", "edit", "delete", "export"],
   readyStock: ["view", "add", "edit", "delete", "export"],
   giftCards: ["view", "export"],
   suppliers: ["view", "export"],
   factories: ["view", "export"],
-  // CAD designers: staff see their work and what they are owed; adding one and paying them is the admin's.
   designers: ["view", "export"],
   stock: ["view", "export"],
   buyAssign: ["view", "add", "edit", "delete"],
@@ -100,6 +138,10 @@ export const ROLE_MODULES = MODULES.filter(m => !ADMIN_ONLY_MODULES.includes(m.k
 export function fullSet(m: ModuleKey): PermSet {
   return Object.fromEntries(MODULE_ACTIONS[m].map(a => [a, true])) as PermSet;
 }
+/** Everything a section allowed an employee before 2026-11 (LEGACY_ACTIONS). */
+function legacyFull(m: ModuleKey): PermSet {
+  return Object.fromEntries(LEGACY_ACTIONS[m].map(a => [a, true])) as PermSet;
+}
 
 /** Standard staff — exactly what an employee could do before roles existed. */
 export const STANDARD_STAFF: StaffRole = {
@@ -108,7 +150,7 @@ export const STANDARD_STAFF: StaffRole = {
   description: "Everything an employee could do before roles — every section except Employees, Settings and Activity.",
   builtIn: true,
   createdAt: "2026-10-11T00:00:00.000Z",
-  perms: Object.fromEntries(ROLE_MODULES.map(m => [m.key, fullSet(m.key)])) as PermMatrix,
+  perms: Object.fromEntries(ROLE_MODULES.map(m => [m.key, legacyFull(m.key)])) as PermMatrix,
   reach: "own",
 };
 
@@ -119,10 +161,10 @@ export const ROLE_TEMPLATES: { name: string; description: string; perms: PermMat
     description: "Their own clients and orders, and the catalog; sees invoices and payments but does not touch money.",
     reach: "own",
     perms: {
-      dashboard: { view: true }, catalog: fullSet("catalog"), productPhotos: fullSet("productPhotos"),
+      dashboard: { view: true }, catalog: legacyFull("catalog"), productPhotos: legacyFull("productPhotos"),
       orders: { view: true, add: true, edit: true, export: true }, clients: { view: true, add: true, edit: true, export: true },
       invoices: { view: true, export: true }, readyStock: { view: true, export: true },
-      payments: { view: true }, messages: fullSet("messages"), reports: { view: true },
+      payments: { view: true }, messages: legacyFull("messages"), reports: { view: true },
     },
   },
   {
@@ -131,10 +173,10 @@ export const ROLE_TEMPLATES: { name: string; description: string; perms: PermMat
     reach: "all",
     perms: {
       dashboard: { view: true }, orders: { view: true, export: true }, clients: { view: true, export: true },
-      invoices: fullSet("invoices"), payments: fullSet("payments"), passbook: fullSet("passbook"),
-      locker: fullSet("locker"), expenses: fullSet("expenses"),
-      suppliers: fullSet("suppliers"), factories: fullSet("factories"),
-      giftCards: { view: true }, reports: fullSet("reports"), messages: fullSet("messages"),
+      invoices: legacyFull("invoices"), payments: legacyFull("payments"), passbook: legacyFull("passbook"),
+      locker: legacyFull("locker"), expenses: legacyFull("expenses"),
+      suppliers: legacyFull("suppliers"), factories: legacyFull("factories"),
+      giftCards: { view: true }, reports: legacyFull("reports"), messages: legacyFull("messages"),
     },
   },
   {
@@ -143,16 +185,16 @@ export const ROLE_TEMPLATES: { name: string; description: string; perms: PermMat
     reach: "all",
     perms: {
       dashboard: { view: true }, orders: { view: true, edit: true }, factories: { view: true },
-      stock: { view: true }, buyAssign: fullSet("buyAssign"), suppliers: { view: true },
+      stock: { view: true }, buyAssign: legacyFull("buyAssign"), suppliers: { view: true },
       readyStock: { view: true, add: true, edit: true }, catalog: { view: true }, productPhotos: { view: true, add: true, edit: true },
-      messages: fullSet("messages"),
+      messages: legacyFull("messages"),
     },
   },
   {
     name: "Order updates",
     description: "Moves every order along — stages, factory details, dispatch; adds nothing, sees no money.",
     reach: "all",
-    perms: { dashboard: { view: true }, orders: { view: true, edit: true }, readyStock: { view: true }, catalog: { view: true }, productPhotos: { view: true, add: true, edit: true }, messages: fullSet("messages") },
+    perms: { dashboard: { view: true }, orders: { view: true, edit: true }, readyStock: { view: true }, catalog: { view: true }, productPhotos: { view: true, add: true, edit: true }, messages: legacyFull("messages") },
   },
   {
     name: "View only",
@@ -183,6 +225,8 @@ export interface PermUser {
 export interface TempAccess {
   id: string;
   perms: PermMatrix;
+  /** Finer switches given for the time (accessFeatures.ts). */
+  features?: string[];
   /** Also every order and client, for the time. */
   reach?: "all";
   from?: string;
@@ -204,6 +248,11 @@ export interface UserAccess {
   reach?: RoleReach;
   add?: PermMatrix;
   remove?: PermMatrix;
+  /** Finer switches (accessFeatures.ts) turned on or off for them, against Standard staff's. */
+  featuresOn?: string[];
+  featuresOff?: string[];
+  /** Where and how much (accessFeatures.ts AccessLimits). */
+  limits?: AccessLimits;
   temp?: TempAccess[];
   createdAt: string;
   updatedAt?: string;
@@ -302,6 +351,52 @@ export function nextAccessChange(user: PermUser | null | undefined, docs: Access
   const times = (accessOf(docs, user.id)?.temp ?? []).filter(t => !t.endedAt)
     .flatMap(t => [t.from ? +new Date(t.from) : NaN, +new Date(t.until)]).filter(x => x > now);
   return times.length ? Math.min(...times) : null;
+}
+
+/* ── The finer switches and the limits (accessFeatures.ts) ─────────────── */
+
+/** The switches ticked for a person — Standard staff's, with their own
+ *  changes and any temporary ones running now — before the grid is consulted. */
+export function chosenFeatures(ua: UserAccess | undefined, now = Date.now(), withTemp = true): Set<string> {
+  const on = new Set(STD_FEATURES);
+  for (const k of ua?.featuresOff ?? []) on.delete(k);
+  for (const k of ua?.featuresOn ?? []) on.add(k);
+  if (withTemp) for (const t of activeTemp(ua, now)) for (const k of t.features ?? []) on.add(k);
+  return on;
+}
+
+/**
+ * Every switch this person has right now. An admin has all of them; a client
+ * none (their portal decides); an employee those chosen for them whose
+ * section and action their access also gives — a switch in a section they
+ * cannot reach does nothing — and never one that is not grantable yet.
+ */
+export function effectiveFeatures(user: PermUser | null | undefined, docs: AccessDoc[], now = Date.now()): Set<string> {
+  if (!user) return new Set();
+  if (user.role === "admin") return new Set(FEATURES.map(f => f.key));
+  if (user.role !== "employee") return new Set();
+  const out = new Set<string>();
+  for (const k of chosenFeatures(accessOf(docs, user.id), now)) {
+    const f = FEATURE_BY_KEY[k];
+    if (!f || f.later) continue;
+    if (f.module && !can(user, docs, f.module, f.needs ?? "view", now)) continue;
+    out.add(k);
+  }
+  return out;
+}
+
+/** The one question for a finer switch: may this person do it right now? */
+export function hasFeature(user: PermUser | null | undefined, docs: AccessDoc[], key: string, now = Date.now()): boolean {
+  if (!user) return false;
+  if (user.role === "admin") return true;
+  if (user.role !== "employee") return false;
+  return effectiveFeatures(user, docs, now).has(key);
+}
+
+/** The limits on this person's access — none for an admin or a client. */
+export function limitsOf(user: PermUser | null | undefined, docs: AccessDoc[]): AccessLimits {
+  if (!user || user.role !== "employee") return {};
+  return accessOf(docs, user.id)?.limits ?? {};
 }
 
 /** What chosen permissions differ by from the role, cell by cell — the

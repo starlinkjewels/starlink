@@ -3,6 +3,7 @@ import { Link, useParams } from "react-router-dom";
 import { Handshake, Pencil, Wallet, Truck, Receipt, Coins, ArrowDownRight, Tag, ArrowDownCircle } from "lucide-react";
 import { fmtDate, type Purchase, type SupplierSale } from "@/lib/db";
 import { useDb } from "@/hooks/useDb";
+import { useCan, useHas } from "@/hooks/useCan";
 import { useAuth } from "@/lib/auth";
 import { brokerAccount, brokerCollected, brokerHandovers, brokerPassed, brokerPayments, brokerSuppliers, brokerageWePay, saleBrokerageWePay } from "@/lib/brokers";
 import { fmtMoneyInr, purchasePending, purchasePaid } from "@/lib/manufacturing";
@@ -26,7 +27,10 @@ export function BrokerHistoryPage() {
   const { id } = useParams<{ id: string }>();
   const db = useDb();
   const { user } = useAuth();
-  const isAdmin = user?.role === "admin";
+  const can = useCan();
+  const has = useHas();
+  // Paying is Payments → Add; changing the broker, Suppliers → Edit; money a broker collected, its own switch.
+  const mayPay = can("payments", "add"), mayEdit = can("suppliers", "edit"), mayReceive = has("payments.broker");
   const [tab, setTab] = useState<Tab>("bills");
   const [paying, setPaying] = useState(false);
   const [editing, setEditing] = useState(false);
@@ -130,14 +134,15 @@ export function BrokerHistoryPage() {
         back={{ label: "Brokers", to: "/suppliers" }}
         title={broker.name}
         subtitle={[broker.phone, broker.brokeragePct != null ? `${broker.brokeragePct}% usual brokerage` : null, broker.active === false ? "switched off" : null].filter(Boolean).join(" · ") || "Broker"}
-        primary={{ label: "Pay through broker", icon: Wallet, onClick: () => setPaying(true) }}
-        secondary={isAdmin ? { label: "Edit", icon: Pencil, onClick: () => setEditing(true) } : null}
+        primary={mayPay ? { label: "Pay through broker", icon: Wallet, onClick: () => setPaying(true) } : null}
+        secondary={mayEdit ? { label: "Edit", icon: Pencil, onClick: () => setEditing(true) } : null}
         menu={[
-          { label: "Receive from broker", icon: ArrowDownCircle, hint: acc.held > 0.5 ? `They hold ${fmtMoneyInr(acc.held)} of ours` : "Money they collected for us", onSelect: () => setReceiving(true), show: isAdmin },
+          { label: "Receive from broker", icon: ArrowDownCircle, hint: acc.held > 0.5 ? `They hold ${fmtMoneyInr(acc.held)} of ours` : "Money they collected for us", onSelect: () => setReceiving(true), show: mayReceive },
         ]}
       />
 
-      <StatStrip items={[
+      {/* What we owe through the broker: only with fig.payables — an admin always. */}
+      {has("fig.payables") && <StatStrip items={[
         { label: "Bills pending", value: fmtMoneyInr(acc.billsPending), icon: Receipt, tone: acc.billsPending > 0.5 ? "out" : undefined,
           sub: `${bills.filter(p => purchasePending(p) > 0.5).length} of ${bills.length} bill${bills.length === 1 ? "" : "s"}` },
         { label: "Brokerage owed", value: fmtMoneyInr(weOwe), icon: Coins, tone: weOwe > 0.5 ? "out" : undefined,
@@ -145,7 +150,7 @@ export function BrokerHistoryPage() {
         { label: "Held by broker", value: fmtMoneyInr(acc.held), icon: Handshake,
           sub: acc.held > 0.5 ? (acc.collected - acc.handedOver > 0.5 ? "Given or collected, not passed on yet" : "Given, not passed on yet") : `Given ${fmtMoneyInr(acc.paid)} · passed ${fmtMoneyInr(acc.passed)}` },
         { label: "To settle", value: fmtMoneyInr(acc.toPay), icon: ArrowDownRight, tone: acc.toPay > 0.5 ? "out" : undefined, sub: "Bills + brokerage − held" },
-      ]} />
+      ]} />}
 
       <div className="space-y-3">
         <TabBar label="Broker" value={tab} onChange={setTab} tabs={[
@@ -181,7 +186,7 @@ export function BrokerHistoryPage() {
           {tab === "suppliers" && (
             <DataTable id="broker-suppliers" noun="supplier" rows={supRows} rowKey={r => r.id} columns={supCols}
               defaultSort={{ key: "pending", dir: "desc" }} rowHref={r => `/suppliers/${r.id}`} details={false}
-              emptyText={isAdmin ? "No suppliers yet — add the suppliers they deal with from Edit." : "No suppliers yet."} />
+              emptyText={mayEdit ? "No suppliers yet — add the suppliers they deal with from Edit." : "No suppliers yet."} />
           )}
           {tab === "money" && (
             <DataTable id="broker-money" noun="movement" rows={money} rowKey={r => r.id} columns={moneyCols}
@@ -196,8 +201,8 @@ export function BrokerHistoryPage() {
       </div>
 
       <PayBrokerSheet open={paying} onOpenChange={setPaying} brokerId={broker.id} />
-      {isAdmin && <BrokerCreateDialog open={editing} onOpenChange={setEditing} broker={broker} />}
-      {isAdmin && <ReceiveFromBrokerSheet open={receiving} onOpenChange={setReceiving} brokerId={broker.id} />}
+      {mayEdit && <BrokerCreateDialog open={editing} onOpenChange={setEditing} broker={broker} />}
+      {mayReceive && <ReceiveFromBrokerSheet open={receiving} onOpenChange={setReceiving} brokerId={broker.id} />}
     </div>
   );
 }

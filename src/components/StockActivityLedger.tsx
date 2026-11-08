@@ -1,4 +1,6 @@
 import { useCan } from "@/hooks/useCan";
+import { hasFeature } from "@/lib/permissions";
+import { keepCols } from "@/lib/figureFilters";
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useDb } from "@/hooks/useDb";
@@ -35,8 +37,8 @@ import { bagNoOf, bagNoOfPurchase } from "@/lib/diamondBags";
 import { useStickyFilter } from "@/hooks/useStickyFilter";
 import { selHas, selList, selOn, selText } from "@/lib/filterSel";
 
-const ISSUE_ADMIN_ONLY = "Only an admin can change this";
-const STOCK_ADMIN_ONLY = "Only an admin can change stock";
+const ISSUE_ADMIN_ONLY = "Your access does not include changing assignments";
+const STOCK_ADMIN_ONLY = "Your access does not include changing stock";
 
 /** One thing this page did, whichever tab did it. */
 interface Row {
@@ -84,6 +86,8 @@ export function StockActivityLedger({ onTotals }: { onTotals?: (t: LedgerTotals)
   const db = useDb();
   const { user } = useAuth();
   const can = useCan();
+  // Rates and amounts (what material cost, what it sold for): only with fig.costs — an admin always.
+  const showCosts = hasFeature(user, db.roles ?? [], "fig.costs");
   const [q, setQ] = useState("");
   // The filters stay as they were left until cleared; entry, material, company
   // and party can hold several choices (lib/filterSel.ts).
@@ -139,7 +143,7 @@ export function StockActivityLedger({ onTotals }: { onTotals?: (t: LedgerTotals)
   /** Gold handed to a factory in bulk. It draws down real stock, so entering it
    *  twice or for the wrong factory leaves the stock short until it is undone. */
   const removeAssignment = async (id: string) => {
-    if (!isAdmin) { toast.error(ISSUE_ADMIN_ONLY); return; }
+    if (!hasFeature(user, db.roles ?? [], "buyAssign.changeAssign")) { toast.error(ISSUE_ADMIN_ONLY); return; }
     const mi = (db.materialIssuances ?? []).find(x => x.id === id);
     if (!mi) return;
     const check = canCancelIssuance(db, mi);
@@ -389,7 +393,8 @@ export function StockActivityLedger({ onTotals }: { onTotals?: (t: LedgerTotals)
     }
   });
 
-  const exportCsv = () => downloadCsv("Stock-Activity", HEAD, body);
+  // Without costs: no Rate, GST (INR) or Amount — columns 9, 11 and 12.
+  const exportCsv = () => downloadCsv("Stock-Activity", keepCols(showCosts, [9, 11, 12], HEAD), body.map(r => keepCols(showCosts, [9, 11, 12], r)));
 
   const exportPdf = () => downloadLedgerPdf({
     title: "Buy & Assign — Activity",
@@ -401,24 +406,24 @@ export function StockActivityLedger({ onTotals }: { onTotals?: (t: LedgerTotals)
         .filter(Boolean).join(" · ") || "All entries",
       `Report Generated: ${new Date().toLocaleDateString("en-IN", { month: "long", day: "numeric", year: "numeric" })}`,
     ],
-    summary: [
+    summary: !showCosts ? [] : [
       { label: "Bought in", value: fmtMoneyInr(totalIn) },
       ...(totalGst > 0 ? [{ label: "GST in bills", value: fmtMoneyInr(totalGst) }] : []),
       { label: "Sold", value: fmtMoneyInr(totalOut) },
     ],
     landscape: true,
-    columns: [
+    columns: keepCols(showCosts, [7], [
       { header: "Sr", x: 14 }, { header: "Date", x: 26 }, { header: "Entry", x: 56 },
       { header: "Bill no.", x: 100 }, { header: "Party", x: 128 }, { header: "Material", x: 172 },
       { header: "Qty", x: 218 }, { header: "Amount", x: 242 }, { header: "Remark", x: 268 },
-    ],
-    align: ["left", "left", "left", "left", "left", "left", "right", "right", "left"],
-    rows: rows.map((r, i) => [
+    ]),
+    align: keepCols(showCosts, [7], ["left", "left", "left", "left", "left", "left", "right", "right", "left"] as ("left" | "right")[]),
+    rows: rows.map((r, i) => keepCols(showCosts, [7], [
       String(i + 1), fmtDate(r.date), r.kind, [r.billNo, r.gst === "gst" ? "GST" : r.gst === "nobill" ? "No bill" : undefined].filter(Boolean).join(" · ").slice(0, 18),
       r.party.slice(0, 26), (r.detail ? `${r.material} · ${r.detail}` : r.material).slice(0, 26),
       `${r.qty}${r.unit}`, r.amountInr != null ? fmtMoneyInr(r.amountInr) : "",
       (r.remark ?? "").slice(0, 16),
-    ]),
+    ])),
     filename: "Stock-Activity",
   });
 
@@ -429,8 +434,10 @@ export function StockActivityLedger({ onTotals }: { onTotals?: (t: LedgerTotals)
   const mayEdit = can("buyAssign", "edit"), mayDelete = can("buyAssign", "delete");
   const mayAddMoney = can("payments", "add");
   // Why a pool delivery / opening stock may not be changed by this person.
-  const issueDenied = !isAdmin ? ISSUE_ADMIN_ONLY : undefined;
-  const stockDenied = !isAdmin ? STOCK_ADMIN_ONLY : undefined;
+  // Changing or cancelling an assignment is its own switch; opening stock, Stock → Edit / Delete.
+  const issueDenied = !hasFeature(user, db.roles ?? [], "buyAssign.changeAssign") ? ISSUE_ADMIN_ONLY : undefined;
+  const stockDenied = !can("stock", "edit") ? STOCK_ADMIN_ONLY : undefined;
+  const stockDeleteDenied = !can("stock", "delete") ? "Your access does not include removing stock" : undefined;
   const viewAction = (label: string, hint: string, to: string, module: Parameters<typeof needsAccess>[0]): MoreAction => ({
     label, icon: ExternalLink, disabled: !can(module), hint: can(module) ? hint : needsAccess(module, "view"), onSelect: () => navigate(to),
   });
@@ -491,7 +498,7 @@ export function StockActivityLedger({ onTotals }: { onTotals?: (t: LedgerTotals)
         ...openingStockActions(db, m, {
           onEdit: () => setEditingOpening(m),
           editDenied: stockDenied,
-          deleteDenied: stockDenied,
+          deleteDenied: stockDeleteDenied,
         }),
       ];
     }
@@ -589,7 +596,7 @@ export function StockActivityLedger({ onTotals }: { onTotals?: (t: LedgerTotals)
         id="stock-activity"
         noun="record"
         rows={rows}
-        columns={columns}
+        columns={showCosts ? columns : columns.filter(c => c.key !== "rate" && c.key !== "amount")}
         rowKey={r => r.id}
         defaultSort={{ key: "date", dir: "desc" }}
         emptyText={filtered ? "Nothing matches these filters." : "Nothing bought, assigned or sold yet."}
@@ -601,7 +608,7 @@ export function StockActivityLedger({ onTotals }: { onTotals?: (t: LedgerTotals)
               id="stock-activity-bill-lines"
               controls="none"
               rows={r.items!}
-              columns={lineColumns}
+              columns={showCosts ? lineColumns : lineColumns.filter(c => c.key !== "rate" && c.key !== "amount")}
               rowKey={it => it.id}
               rowActions={it => purchaseActions(it.id, "item")}
             />

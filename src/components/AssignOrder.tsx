@@ -4,6 +4,7 @@ import { toast } from "sonner";
 import { updateDbAs, assignOrders, type DB, type Order, type User } from "@/lib/db";
 import { useDb } from "@/hooks/useDb";
 import { useAuth } from "@/lib/auth";
+import { hasFeature } from "@/lib/permissions";
 import { reachOf } from "@/lib/permissions";
 import { salesStaff } from "@/lib/clientHandlers";
 import { Button } from "@/components/ui/button";
@@ -95,7 +96,8 @@ export function AssignOrderField({ order }: { order: Order }) {
   const db = useDb();
   const { user } = useAuth();
   const current = db.users.find(u => u.id === order.assignedEmployeeId);
-  if (user?.role !== "admin") {
+  // An admin, or an employee whose access includes assigning orders (orders.assign).
+  if (!(user?.role === "admin" || (user?.role === "employee" && hasFeature(user, db.roles ?? [], "orders.assign")))) {
     return <div className="min-w-0"><p className="text-xs text-muted-foreground mb-1.5">Assigned to</p><PersonLine u={current} /></div>;
   }
   const change = (v: string) => {

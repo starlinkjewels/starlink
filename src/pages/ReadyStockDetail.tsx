@@ -31,6 +31,7 @@ import { generateStockBand, labelPresets } from "@/lib/band";
 import { confirmBox } from "@/lib/confirm";
 import { companyIdOfClient, companyOf } from "@/lib/companies";
 import { officeLabel, officeOf, officeRank, otherLots } from "@/lib/offices";
+import { limitsOf } from "@/lib/permissions";
 import { pieceTimeline, stepQty, whoOf, type TimelineEntry } from "@/lib/readyStockHistory";
 import { readyStockDeleteBlocker } from "@/lib/readyStockGuards";
 import { builtFrom, orderPicturesPlan, piecePhotosBehind, takeOrderPictures } from "@/lib/readyStockPhotos";
@@ -86,7 +87,9 @@ export function ReadyStockDetailPage() {
   const item = db.readyStock.find(i => i.id === id);
   // A client sees the Ready Stock of the company they buy from — as on the list.
   const clientCo = user?.role === "client" && multiCo ? companyIdOfClient(db.clients.find(c => c.id === user.clientId)) : null;
-  if (!item || (clientCo && companyOf(item) !== clientCo)) {
+  // …and an employee limited to some offices, only the pieces there.
+  const myOffices = limitsOf(user, db.roles ?? []).offices;
+  if (!item || (clientCo && companyOf(item) !== clientCo) || (myOffices?.length && !myOffices.includes(officeOf(item)))) {
     return (
       <div className="text-center py-20 text-muted-foreground">
         {collectionLoaded("readyStock") ? "This piece is not in Ready Stock any more." : "Loading…"}{" "}

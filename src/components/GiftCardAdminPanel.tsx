@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { useAuth } from "@/lib/auth";
+import { hasFeature } from "@/lib/permissions";
 import { useDb } from "@/hooks/useDb";
 import { updateDb, uid, fmtMoney, fmtDate, issueGiftCard, giftCardRemaining, giftCardExpired, giftCardGranted, type GiftCard } from "@/lib/db";
 import { sendMail, giftCardEmail } from "@/lib/email";
@@ -23,7 +24,7 @@ export function GiftCardAdminPanel({ clientId }: { clientId: string }) {
   const [pct, setPct] = useState(client?.cashbackPercent != null ? String(client.cashbackPercent) : "");
   const [maxPct, setMaxPct] = useState(client?.giftMaxRedeemPercent != null ? String(client.giftMaxRedeemPercent) : "");
 
-  if (user?.role !== "admin" || !client) return null; // admin only — money-sensitive
+  if (!client || !hasFeature(user, db.roles ?? [], "clients.giftCards")) return null; // an admin, or access with clients.giftCards — money-sensitive
 
   const enabled = !!client.giftCardEnabled;
   const cards = (db.giftCards ?? []).filter(c => c.clientId === clientId)

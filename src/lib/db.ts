@@ -10,7 +10,7 @@
 // Images/videos live in Firebase Storage; docs store only download URLs.
 // The `session` (which user is logged in) stays in localStorage — it is
 // per-device and must not be shared through Firestore.
-import { fmtCcy, type CurrencyCode, type CurrencyRate, type FxQuote } from "@/lib/currency";
+import { ccy, fmtCcy, tableRate, type CurrencyCode, type CurrencyRate, type FxQuote } from "@/lib/currency";
 import {
   collection,
   doc,
@@ -33,7 +33,7 @@ import { LAZY_COLS } from "./pageData";
 import { db as fsdb, auth as fbAuth, isAdminEmail, deviceCacheActive } from "./firebase";
 import { describeChanges, summarise, undoBlocker, type ActivityEntry, type ActivityKind } from "./activityFormat";
 import { moduleForPath } from "./modules";
-import { reachOf, type AccessDoc } from "./permissions";
+import { reachOf, limitsOf, type AccessDoc } from "./permissions";
 
 export type Role = "admin" | "employee" | "client";
 
@@ -145,7 +145,7 @@ import type { MaterialDef, MaterialKey } from "./materials";
 import type { ItemDesign, ItemSpecs } from "./pure/catalogMedia";
 export type { MaterialDef, MaterialKey } from "./materials";
 import { KARAT_PURITY, toPureGold, pureFromPurity, openingDebitAmt, openingCreditAmt, hasOpeningBalance } from "./pure/basics";
-import { closedTo, isClosedDate, lockBreaches, breachMessage } from "./yearLock";
+import { closedTo, isClosedDate, lockBreaches, breachMessage, lockedPart } from "./yearLock";
 export { KARAT_PURITY, toPureGold, pureFromPurity, openingDebitAmt, openingCreditAmt, hasOpeningBalance };
 
 export interface OpeningBalanceInfo {
@@ -3037,6 +3037,8 @@ function emit() {
 function refuseSave(
   raw: { col: string; id: string; before: Record<string, unknown> | null }[],
   breaches: string[],
+  /** Said instead of the year lock's message (a person's own access limits). */
+  said?: string,
 ): void {
   for (const r of raw) {
     if (r.col === SETTINGS_COL) { cache.settings = clean(remote.settings); continue; }
@@ -3051,9 +3053,56 @@ function refuseSave(
     intentDeletes[col]?.delete(r.id);
   }
   emit();
-  const message = breachMessage(breaches, remote.settings);
-  console.warn("[year lock] save refused:", breaches);
+  const message = said ?? breachMessage(breaches, remote.settings);
+  console.warn(said ? "[access limits] save refused:" : "[year lock] save refused:", breaches);
   if (typeof window !== "undefined") window.dispatchEvent(new CustomEvent("starlink-year-locked", { detail: message }));
+}
+
+/**
+ * The signed-in employee's own limits (lib/accessFeatures.ts AccessLimits) that
+ * this save breaks — the reason, or null. Checked where every save passes, like
+ * the year lock, so no screen can get round them:
+ *  • how far back — nothing of a record dated before their window may be added,
+ *    changed or removed: the same parts of a record the year lock holds (its
+ *    money and its dates), so an older order can still move through its steps;
+ *  • the largest money entry — no account entry above it, in any currency at the
+ *    business's exchange-rate table (Settings), and none it can't be checked by.
+ * An admin and a client have no limits.
+ */
+function accessLimitBreach(changes: { col: string; id: string; before: Record<string, unknown> | null; after: Record<string, unknown> | null }[]): string | null {
+  const fb = fbAuth.currentUser;
+  if (!fb || isAdminEmail(fb.email)) return null;
+  const me = cache.users.find(u => u.authUid === fb.uid);
+  if (!me || me.role !== "employee") return null;
+  const lim = limitsOf({ id: me.id, role: me.role, roleId: me.roleId }, cache.roles ?? []);
+  if (lim.backDays != null) {
+    const d = new Date();
+    d.setDate(d.getDate() - lim.backDays - 1);
+    const until = dayOf(d.toISOString());
+    for (const c of changes) {
+      if (c.col === SETTINGS_COL) continue;
+      if (!eq(lockedPart(c.col, c.before, until), lockedPart(c.col, c.after, until))) {
+        return lim.backDays === 0
+          ? "your access covers today's records only — ask an admin to change an older one"
+          : `your access covers the last ${lim.backDays} day${lim.backDays !== 1 ? "s" : ""} only — ask an admin to change an older record`;
+      }
+    }
+  }
+  if (lim.maxAmountUsd) {
+    for (const c of changes) {
+      if (c.col !== "lockerTransactions" || !c.after) continue;
+      const amt = Number(c.after.amountInr) || 0;
+      const was = c.before ? Number(c.before.amountInr) || 0 : 0;
+      if (amt <= was) continue; // never stops making an entry smaller
+      const code = ccy(c.after.currency as string | undefined);
+      const rate = tableRate(cache.settings.currencyRates, code, "USD", String(c.after.createdAt ?? ""));
+      if (rate == null) return `your access has a limit for one money entry, and there is no ${code} → $ rate to check it against — an admin adds it in Settings → Pricing Rates`;
+      if (amt * rate > lim.maxAmountUsd + 0.005) {
+        return `${fmtCcy(amt, code)} is more than your limit of ${fmtCcy(lim.maxAmountUsd, "USD")} for one entry — an admin can record it`;
+      }
+    }
+  }
+  return null;
 }
 
 async function persist() {
@@ -3262,6 +3311,12 @@ async function persist() {
         refuseSave(logRaw, breaches);
         return;
       }
+    }
+    // …and this person's own access limits, the same way.
+    const overLimit = accessLimitBreach(logRaw);
+    if (overLimit) {
+      refuseSave(logRaw, [overLimit], `Not saved — ${overLimit}.`);
+      return;
     }
   }
 

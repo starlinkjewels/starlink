@@ -9,6 +9,7 @@ import { SupplierEditDialog } from "@/components/SupplierEditDialog";
 import { MoreMenu, type MoreAction } from "@/components/MoreMenu";
 import { filled, noteText, type Detail } from "@/components/rowDetails";
 import { useDb } from "@/hooks/useDb";
+import { useCan, useHas } from "@/hooks/useCan";
 import { useAuth } from "@/lib/auth";
 import { supplierAccount, fmtMoneyInr } from "@/lib/manufacturing";
 import { AccountSummary } from "@/components/AccountSummary";
@@ -46,7 +47,12 @@ const OWN_CLICK = "button,a,input,label,[role=menu],[role=menuitem],[data-no-row
 export function SuppliersPage() {
   const db = useDb();
   const { user } = useAuth();
-  const isAdmin = user?.role === "admin";
+  const can = useCan();
+  // Suppliers and brokers: added, changed and removed by an admin, or by access
+  // that gives Suppliers → Add / Edit / Delete (before 2026-11 an admin's alone).
+  const mayAdd = can("suppliers", "add"), mayEdit = can("suppliers", "edit"), mayDelete = can("suppliers", "delete");
+  // What we owe them (and gold owed): only with fig.payables — an admin always.
+  const showOwed = useHas()("fig.payables");
   // Kept in the address: Back from a record returns to the list as it was left.
   const [q, setQ] = useUrlState("q");
   const [view, setView] = useState<"list" | "grid">(() => {
@@ -131,15 +137,15 @@ export function SuppliersPage() {
 
   // View first, then the changes — each greyed out with the reason when it
   // can't be done, never left out. Changing a supplier is an admin's job.
-  const ADMIN_ONLY = "Only an admin can change suppliers";
+  const ADMIN_ONLY = "Your access does not include changing suppliers";
   const actionsFor = (s: Supplier): MoreAction[] => {
     const guard = guardOf(s);
     return [
       { label: "View ledger", icon: History, hint: "Purchases, payments, statement", onSelect: () => navigate(`/suppliers/${s.id}`) },
-      { label: "Edit details", icon: Pencil, onSelect: () => setEditing(s), disabled: !isAdmin, hint: isAdmin ? "Name, contact, GSTIN, address" : ADMIN_ONLY },
-      { label: s.active === false ? "Activate" : "Deactivate", icon: Power, onSelect: () => toggle(s), disabled: !isAdmin, hint: isAdmin ? undefined : ADMIN_ONLY },
+      { label: "Edit details", icon: Pencil, onSelect: () => setEditing(s), disabled: !mayEdit, hint: mayEdit ? "Name, contact, GSTIN, address" : ADMIN_ONLY },
+      { label: s.active === false ? "Activate" : "Deactivate", icon: Power, onSelect: () => toggle(s), disabled: !mayEdit, hint: mayEdit ? undefined : ADMIN_ONLY },
       { label: "Delete supplier", icon: Trash2, danger: true, onSelect: () => del(s),
-        disabled: !isAdmin || !guard.ok, hint: !isAdmin ? ADMIN_ONLY : guard.reason },
+        disabled: !mayDelete || !guard.ok, hint: !mayDelete ? "Your access does not include deleting suppliers" : guard.reason },
     ];
   };
 
@@ -189,11 +195,11 @@ export function SuppliersPage() {
       !s.contactPerson && !!s.phone && !!s.email && { label: "Email", value: <a href={`mailto:${s.email}`} className="text-primary hover:underline break-all">{s.email}</a> },
       { label: "Address", value: noteText(s.address) },
       { label: "Supplier since", value: fmtDate(s.createdAt) },
-      a.balanceOwed > 0 && Math.abs(a.balanceOwed - a.net) > 0.5 && { label: "Unpaid bills", value: fmtMoneyInr(a.balanceOwed) },
-      a.overpaid > 0 && { label: "Overpaid on bills", value: fmtMoneyInr(a.overpaid) },
-      a.advanced > 0 && { label: "Advances / loans paid", value: fmtMoneyInr(a.advanced) },
-      a.received > 0 && { label: "Received back", value: fmtMoneyInr(a.received) },
-      hasOpeningBalance(s) && { label: "Opening balance", value: `${fmtMoneyInr(s.openingBalance || 0)} ${s.openingDir === "debit" ? "debit (they owed us)" : "credit (we owed them)"}${s.openingDate ? ` · as of ${fmtDate(s.openingDate)}` : ""}` },
+      showOwed && a.balanceOwed > 0 && Math.abs(a.balanceOwed - a.net) > 0.5 && { label: "Unpaid bills", value: fmtMoneyInr(a.balanceOwed) },
+      showOwed && a.overpaid > 0 && { label: "Overpaid on bills", value: fmtMoneyInr(a.overpaid) },
+      showOwed && a.advanced > 0 && { label: "Advances / loans paid", value: fmtMoneyInr(a.advanced) },
+      showOwed && a.received > 0 && { label: "Received back", value: fmtMoneyInr(a.received) },
+      showOwed && hasOpeningBalance(s) && { label: "Opening balance", value: `${fmtMoneyInr(s.openingBalance || 0)} ${s.openingDir === "debit" ? "debit (they owed us)" : "credit (we owed them)"}${s.openingDate ? ` · as of ${fmtDate(s.openingDate)}` : ""}` },
     ]);
   };
 
@@ -203,21 +209,21 @@ export function SuppliersPage() {
       <PageHeader
         title="Suppliers"
         subtitle={tab === "brokers" ? "Brokers who bring purchases, and their brokerage" : "Purchases, payments and balances"}
-        primary={!isAdmin ? null : tab === "brokers"
+        primary={!mayAdd ? null : tab === "brokers"
           ? { label: "New Broker", icon: Plus, onClick: () => setNewBroker(true) }
           : { label: "New Supplier", icon: Plus, onClick: () => setOpen(true) }}
         actions={tab === "suppliers" ? <ViewSwitch view={view} onChange={saveView} /> : undefined}
       />
-      {isAdmin && <SupplierCreateDialog open={open} onOpenChange={setOpen} />}
+      {mayAdd && <SupplierCreateDialog open={open} onOpenChange={setOpen} />}
 
       <TabBar label="Suppliers and brokers" value={tab} onChange={pickTab} tabs={[
         { key: "suppliers", label: "Suppliers", icon: Truck, count: db.suppliers.length },
         { key: "brokers", label: "Brokers", icon: Handshake, count: (db.brokers ?? []).length },
       ]} />
 
-      {tab === "brokers" && <BrokersPanel isAdmin={isAdmin} creating={newBroker} onCreating={setNewBroker} />}
+      {tab === "brokers" && <BrokersPanel mayAdd={mayAdd} mayEdit={mayEdit} mayDelete={mayDelete} creating={newBroker} onCreating={setNewBroker} />}
 
-      {tab === "suppliers" && <AccountSummary
+      {tab === "suppliers" && showOwed && <AccountSummary
         receivable={totals.receivable}
         payable={totals.payable}
         fmt={fmtMoneyInr}
@@ -236,9 +242,9 @@ export function SuppliersPage() {
             search={{ value: q, onChange: setQ, placeholder: "Search suppliers..." }}
             resetKey={q}
             rows={list}
-            columns={columns}
+            columns={showOwed ? columns : columns.filter(c => c.key !== "balance" && c.key !== "gold")}
             rowKey={s => s.id}
-            defaultSort={{ key: "balance", dir: "desc" }}
+            defaultSort={showOwed ? { key: "balance", dir: "desc" } : { key: "supplier", dir: "asc" }}
             rowHref={s => `/suppliers/${s.id}`}
             details={supplierDetails}
             exportName="Suppliers"
@@ -255,7 +261,7 @@ export function SuppliersPage() {
             }}
             rowActions={actionsFor}
             emptyText="No suppliers found."
-            emptyAction={!db.suppliers.length && isAdmin ? { label: "Add a supplier", onClick: () => setOpen(true) } : undefined}
+            emptyAction={!db.suppliers.length && mayAdd ? { label: "Add a supplier", onClick: () => setOpen(true) } : undefined}
           />
         </div>
       )}
@@ -306,20 +312,20 @@ export function SuppliersPage() {
                   unpaid bills: a supplier holding an advance has no unpaid
                   bill, so the card said "Cleared" while their ledger said they
                   owed us money. */}
-              <div className={`mt-4 pt-3 grid ${gold === undefined ? "grid-cols-2" : "grid-cols-3"} gap-1.5 border-t border-border/50 text-center`}>
+              <div className={`mt-4 pt-3 grid ${!showOwed ? "grid-cols-1" : gold === undefined ? "grid-cols-2" : "grid-cols-3"} gap-1.5 border-t border-border/50 text-center`}>
                 <div>
                   <p className="text-[10px] text-muted-foreground mb-0.5">Purchased</p>
                   <p className={`text-xs font-semibold tabular-nums ${account.totalPurchased ? "text-brand-dark" : "text-muted-foreground"}`}>{fmtMoneyInr(account.totalPurchased)}</p>
                 </div>
-                <div>
+                {showOwed && <div>
                   <p className="text-[10px] text-muted-foreground mb-0.5">{account.net < 0 ? "Owes you" : "Owed"}</p>
                   <p className={`text-xs font-semibold tabular-nums ${account.net > 0 ? "text-destructive" : account.net < 0 ? "text-blue-600" : "text-success"}`}>
                     {account.net > 0 ? fmtMoneyInr(account.net)
                       : account.net < 0 ? fmtMoneyInr(-account.net)
                       : "✓ Cleared"}
                   </p>
-                </div>
-                {gold !== undefined && (
+                </div>}
+                {showOwed && gold !== undefined && (
                   <div>
                     <p className="text-[10px] text-muted-foreground mb-0.5">Gold owed</p>
                     <p className={`text-xs font-semibold tabular-nums ${gold > 0.0005 ? "text-destructive" : gold < -0.0005 ? "text-blue-600" : "text-success"}`}>

@@ -3,6 +3,7 @@ import type { Order } from "@/lib/db";
 import { useMemo, useState } from "react";
 import { BarChart3, Factory, LayoutDashboard, ListOrdered, ShoppingCart, TrendingUp, Users, UserCog } from "lucide-react";
 import { useAuth } from "@/lib/auth";
+import { hasFeature } from "@/lib/permissions";
 import { useDb, useDbVersion } from "@/hooks/useDb";
 import { currentUserOrders, costDataReady } from "@/lib/db";
 import { reachOf } from "@/lib/permissions";
@@ -38,6 +39,10 @@ export function ReportsHub() {
   const db = useDb();
   const version = useDbVersion();
   const isAdmin = user?.role === "admin";
+  // The team report and any one person's report: an admin, or access with reports.team.
+  // Profit: an admin, or access with fig.profit.
+  const mayTeam = hasFeature(user, db.roles ?? [], "reports.team");
+  const mayProfit = hasFeature(user, db.roles ?? [], "fig.profit");
 
   const [period, setPeriodRaw] = useState<Period>(() => read("reports-period", presetPeriod("last12")));
   // The filters stay as they were left (this browser, this person) until cleared.
@@ -61,7 +66,7 @@ export function ReportsHub() {
   // An employee who works on their own clients reports on just those: their
   // clients, their orders and the money from them — never the whole client list.
   const own = !!user && !isAdmin && user.role !== "client" && reachOf(user, db.roles ?? []) !== "all";
-  const emp = isAdmin
+  const emp = mayTeam
     ? (employeeId !== "all" ? db.users.find(u => u.id === employeeId) : undefined)
     : own ? db.users.find(u => u.id === user!.id) ?? ({ id: user!.id, name: user!.name } as (typeof db.users)[number]) : undefined;
   const [tab, setTabRaw] = useState<TabKey>(() => read("reports-tab", "overview"));
@@ -70,9 +75,9 @@ export function ReportsHub() {
 
   const tabs: { key: TabKey; label: string; icon: typeof BarChart3; show: boolean }[] = [
     { key: "overview", label: "Overview", icon: LayoutDashboard, show: true },
-    { key: "sales", label: isAdmin ? "Sales & Profit" : "Sales", icon: TrendingUp, show: true },
+    { key: "sales", label: mayProfit ? "Sales & Profit" : "Sales", icon: TrendingUp, show: true },
     { key: "clients", label: "Clients", icon: Users, show: true },
-    { key: "team", label: "Team", icon: UserCog, show: isAdmin },
+    { key: "team", label: "Team", icon: UserCog, show: mayTeam },
     { key: "production", label: "Production", icon: Factory, show: true },
     { key: "purchases", label: "Purchases & Payments", icon: ShoppingCart, show: true },
     { key: "orders", label: "Orders", icon: ListOrdered, show: true },
@@ -105,14 +110,14 @@ export function ReportsHub() {
   }, [clientId, emp?.id, empClients, orders, companyId, coClients]);
   const ctx: ReportCtx = {
     db, orders, period, prev: previousPeriod(period),
-    withProfit: isAdmin && costDataReady(), isAdmin,
+    withProfit: mayProfit && costDataReady(), isAdmin,
     clientIds: scopeClients,
     employeeId: emp?.id,
     companyId: companyId === "all" ? undefined : companyId,
     version,
     fileTag: [period.from || "start", period.to || "today"].join("_to_")
       + (clientsChosen.length ? `_${selText(clientId, id => clientName(id) ?? "client").replace(/\W+/g, "-")}` : "")
-      + (emp && isAdmin ? `_${emp.name.replace(/\W+/g, "-")}` : ""),
+      + (emp && mayTeam ? `_${emp.name.replace(/\W+/g, "-")}` : ""),
   };
   const combinedScope = empScope || companyId !== "all"
     ? (o: Order) => (!empScope || empScope(o)) && (companyId === "all" || companyOfOrder(db, o) === companyId)
@@ -133,7 +138,7 @@ export function ReportsHub() {
   const filters: TableFilter[] = [
     ...(multiCo ? [{ kind: "select" as const, label: "Company", value: companyId === "all" ? "" : companyId, onChange: (v: string) => setCompanyId(v || "all"),
       allLabel: "All companies", options: companiesOf(db.settings).map(c => ({ value: c.id, label: c.name })) }] : []),
-    ...(isAdmin ? [{ kind: "select" as const, label: "Employee", value: employeeId === "all" ? "" : employeeId, onChange: (v: string) => setEmployeeId(v || "all"),
+    ...(mayTeam ? [{ kind: "select" as const, label: "Employee", value: employeeId === "all" ? "" : employeeId, onChange: (v: string) => setEmployeeId(v || "all"),
       allLabel: "Whole team", options: staffOpts }] : []),
     { kind: "select", label: "Client", multi: true, value: clientId === "all" ? "" : clientId, onChange: v => setClientId(v || "all"), allLabel: "All clients", options: clientOpts },
   ];
@@ -146,7 +151,7 @@ export function ReportsHub() {
         subtitle={<>
           {periodLabel(period)}{ctx.prev ? ` · compared with ${periodLabel(ctx.prev)}` : ""}
           {clientsChosen.length ? ` · ${selText(clientId, clientName, "All clients", 3)}` : ""}
-          {emp && isAdmin ? ` · ${emp.name}'s work` : ""}
+          {emp && mayTeam ? ` · ${emp.name}'s work` : ""}
           {companyId !== "all" ? ` · ${companyById(db.settings, companyId).name}` : ""}
         </>}
       />
@@ -178,7 +183,7 @@ export function ReportsHub() {
         </>
       )}
       {activeTab === "clients" && <ClientsTab ctx={ctx} />}
-      {activeTab === "team" && isAdmin && <TeamTab ctx={ctx} />}
+      {activeTab === "team" && mayTeam && <TeamTab ctx={ctx} />}
       {activeTab === "production" && (
         <>
           <ProductionTab ctx={ctx} />

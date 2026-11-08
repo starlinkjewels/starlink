@@ -1,3 +1,4 @@
+import { hasSwitch } from "@/lib/access";
 import { brokerAccount, brokerageWePay } from "@/lib/brokers";
 import { companyOf } from "@/lib/companies";
 import { useMemo } from "react";
@@ -49,6 +50,9 @@ export function PurchasesTab({ ctx }: { ctx: ReportCtx }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [db, period.from, period.to, version]);
   const supMax = data.suppliers[0]?.value ?? 0;
+  // What material cost (fig.costs) and what we owe (fig.payables) — an admin always.
+  const showCosts = hasSwitch("fig.costs"), showOwed = hasSwitch("fig.payables");
+  if (!showCosts && !showOwed) return <Empty>Purchase costs and dues are not part of your access.</Empty>;
 
   return (
     <div className="space-y-4">
@@ -59,16 +63,16 @@ export function PurchasesTab({ ctx }: { ctx: ReportCtx }) {
         <p className="text-[11px] text-muted-foreground px-1">Purchases are this company&rsquo;s; dues are for the whole business.</p>
       )}
       <div className={`grid grid-cols-2 gap-3 ${[data.hasBrokers, data.gstBills > 0].filter(Boolean).length === 2 ? "lg:grid-cols-7" : data.hasBrokers || data.gstBills > 0 ? "lg:grid-cols-6" : "lg:grid-cols-5"}`}>
-        <KpiCard icon={Coins} label="Gold bought" value={inr(data.goldInr, true)} sub={`${num(Math.round(data.goldG * 1000) / 1000, " g")} · ${num(Math.round(data.goldFine * 1000) / 1000, " g fine")}`} tone="gold" />
-        <KpiCard icon={Gem} label="Diamonds bought" value={inr(data.diaInr, true)} sub={`${num(Math.round(data.diaCt * 100) / 100, " ct")}${data.diaCt ? ` · ${inr(data.diaInr / data.diaCt)}/ct avg` : ""}${data.othCount ? ` · other materials ${inr(data.othInr, true)}` : ""}${data.readyPcs ? ` · ready jewellery ${inr(data.readyInr, true)} (${num(data.readyPcs, " pcs")})` : ""}`} tone="sky" />
-        <KpiCard icon={Scale} label="Fine gold cost" value={data.fine ? `${inr(data.fine.rate)}/g` : "—"} sub={data.fine ? "Average, 24KT" : "No priced gold yet"} tone="violet" />
-        <KpiCard icon={Landmark} label="Owed to suppliers" value={inr(data.pay.suppliersInr, true)} sub="As of today" tone="rose" />
-        <KpiCard icon={Factory} label="Owed to factories" value={inr(data.pay.factoriesInr, true)} sub="Labour, as of today" tone="rose" />
-        {data.gstBills > 0 && <KpiCard icon={Receipt} label="GST on purchases" value={inr(data.gstInr, true)} sub={`${data.gstBills} bill line${data.gstBills !== 1 ? "s" : ""} in bill${data.noBill > 0 ? ` · ${inr(data.noBill, true)} bought without a bill` : ""}`} tone="violet" />}
-        {data.hasBrokers && <KpiCard icon={Handshake} label="Brokerage" value={inr(data.brokerageInr, true)} sub={`We pay, on these bills · ${inr(data.brokersOwed, true)} owed now`} tone="rose" />}
+        {showCosts && <KpiCard icon={Coins} label="Gold bought" value={inr(data.goldInr, true)} sub={`${num(Math.round(data.goldG * 1000) / 1000, " g")} · ${num(Math.round(data.goldFine * 1000) / 1000, " g fine")}`} tone="gold" />}
+        {showCosts && <KpiCard icon={Gem} label="Diamonds bought" value={inr(data.diaInr, true)} sub={`${num(Math.round(data.diaCt * 100) / 100, " ct")}${data.diaCt ? ` · ${inr(data.diaInr / data.diaCt)}/ct avg` : ""}${data.othCount ? ` · other materials ${inr(data.othInr, true)}` : ""}${data.readyPcs ? ` · ready jewellery ${inr(data.readyInr, true)} (${num(data.readyPcs, " pcs")})` : ""}`} tone="sky" />}
+        {showCosts && <KpiCard icon={Scale} label="Fine gold cost" value={data.fine ? `${inr(data.fine.rate)}/g` : "—"} sub={data.fine ? "Average, 24KT" : "No priced gold yet"} tone="violet" />}
+        {showOwed && <KpiCard icon={Landmark} label="Owed to suppliers" value={inr(data.pay.suppliersInr, true)} sub="As of today" tone="rose" />}
+        {showOwed && <KpiCard icon={Factory} label="Owed to factories" value={inr(data.pay.factoriesInr, true)} sub="Labour, as of today" tone="rose" />}
+        {showCosts && data.gstBills > 0 && <KpiCard icon={Receipt} label="GST on purchases" value={inr(data.gstInr, true)} sub={`${data.gstBills} bill line${data.gstBills !== 1 ? "s" : ""} in bill${data.noBill > 0 ? ` · ${inr(data.noBill, true)} bought without a bill` : ""}`} tone="violet" />}
+        {showCosts && data.hasBrokers && <KpiCard icon={Handshake} label="Brokerage" value={inr(data.brokerageInr, true)} sub={`We pay, on these bills · ${inr(data.brokersOwed, true)} owed now`} tone="rose" />}
       </div>
 
-      <div className="grid lg:grid-cols-3 gap-4">
+      {showCosts && <div className="grid lg:grid-cols-3 gap-4">
         <Panel title="Material bought, month by month" subtitle="By supplier bill date" icon={ShoppingCart} className="lg:col-span-2">
           {data.months.some(m => m.goldInr || m.diamondInr || m.otherInr || m.readyInr) ? (
             <div className="h-64">
@@ -100,7 +104,7 @@ export function PurchasesTab({ ctx }: { ctx: ReportCtx }) {
             </ul>
           ) : <Empty />}
         </Panel>
-      </div>
+      </div>}
     </div>
   );
 }

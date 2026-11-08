@@ -161,11 +161,11 @@ export function SupplierGoldPanel({ supplier, isAdmin, mode, onMode }: {
   // ── The account: figures, then every line ──
   const rowActions = (r: SupplierGoldRow): MoreAction[] => {
     if (r.kind === "opening") {
-      return [{ label: "Edit", icon: BookOpen, disabled: !isAdmin, hint: isAdmin ? "Gold owed when you started" : "Only an admin can change it", onSelect: () => onMode("opening") }];
+      return [{ label: "Edit", icon: BookOpen, disabled: !isAdmin, hint: isAdmin ? "Gold owed when you started" : "Your access does not include gold loans", onSelect: () => onMode("opening") }];
     }
     const e = r.entry!;
-    const why = !isAdmin ? "Only an admin can change it" : !ready ? "Still loading" : goldEntryDeleteBlocker(db, supplier, e);
-    const editWhy = !isAdmin ? "Only an admin can change it" : !ready ? "Still loading" : e.kind === "toBill" ? "A bill — correct it in Purchase History" : undefined;
+    const why = !isAdmin ? "Your access does not include gold loans" : !ready ? "Still loading" : goldEntryDeleteBlocker(db, supplier, e);
+    const editWhy = !isAdmin ? "Your access does not include gold loans" : !ready ? "Still loading" : e.kind === "toBill" ? "A bill — correct it in Purchase History" : undefined;
     return [{
       label: "Edit", icon: Pencil, disabled: !!editWhy,
       hint: editWhy ?? "Grams, purity, date, company and note",

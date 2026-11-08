@@ -12,10 +12,11 @@ import { toast } from "sonner";
 import { useAuth } from "@/lib/auth";
 import { useDb, useDbVersion } from "@/hooks/useDb";
 import { useCan } from "@/hooks/useCan";
+import { hasFeature } from "@/lib/permissions";
 import { loadDb, updateDbAs, fmtDate, orderImage, type Order } from "@/lib/db";
 import { sendMail, orderApprovedEmail } from "@/lib/email";
 import {
-  DONE_COLUMN, stageLabel, applyApprove, applyComplete, applyRevert, boardColumnOf, boardColumns, planMove, stageKind, stagePermission,
+  DONE_COLUMN, stageLabel, applyApprove, applyComplete, applyRevert, boardColumnOf, boardColumns, planMove, stageKind, stagePermission, stepLimitWhy,
   type MovePlan,
 } from "@/lib/stages";
 import { BulkDispatchDialog, BulkDeliverDialog } from "@/components/BulkDispatchDialog";
@@ -130,6 +131,9 @@ export function OrderBoard({ orders, actions, tracks }: { orders: Order[]; actio
     const plan = planMove(o, target);
     if (plan.none) return;
     if (plan.blocked) { toast.error(plan.blocked); return; }
+    // Their access may not include approving, or every step this move touches.
+    if (plan.approve && !hasFeature(user, db.roles ?? [], "orders.approve")) { toast.error("Your access does not include approving orders"); return; }
+    for (const s of plan.names) { const why = stepLimitWhy(s); if (why) { toast.error(why); return; } }
 
     if (plan.revertFrom != null) {
       if (!(await confirmBox(`Move ${o.orderNumber} back to ${name(target)}?\n\nThese stages will be marked not done again: ${plan.names.map(name).join(", ")}.`))) return;

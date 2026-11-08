@@ -4,7 +4,7 @@ import { PenTool, Pencil, Wallet, FolderOpen, CheckCircle2, CalendarDays, Indian
 import { fmtDate, currentUserOrders, type LockerTransaction } from "@/lib/db";
 import { useDb } from "@/hooks/useDb";
 import { useAuth } from "@/lib/auth";
-import { useCan } from "@/hooks/useCan";
+import { useCan, useHas } from "@/hooks/useCan";
 import { fmtMoneyInr } from "@/lib/manufacturing";
 import { fmtCcyMix, sumByCcy, ccy } from "@/lib/currency";
 import { monthLabel } from "@/lib/analytics";
@@ -54,6 +54,9 @@ export function DesignerHistoryPage() {
   const inHand = jobs.filter(isOpenJob);
   const late = inHand.filter(j => j.status !== "submitted" && j.dueDate && j.dueDate < today).length;
   const mayPay = isAdmin || can("payments", "add");
+  // What the designer came to and what we owe them: fig.costs / fig.payables — an admin always.
+  const has = useHas();
+  const showOwed = has("fig.payables"), showCosts = has("fig.costs");
 
   // Our own designer's salary is paid in Employees — shown here by month, never entered here.
   const salary = !freelance && designer.userId ? (db.expenses ?? []).filter(e => e.paidToEmployeeId === designer.userId) : [];
@@ -104,7 +107,7 @@ export function DesignerHistoryPage() {
         title={designer.name}
         subtitle={[KIND_LABEL[designer.kind], freelance && designer.ratePerDesign != null ? `${fmtMoneyInr(designer.ratePerDesign)} a design` : null, contact || null, designer.active === false ? "switched off" : null].filter(Boolean).join(" · ")}
         primary={freelance && mayPay ? { label: "Pay", icon: Wallet, onClick: () => setPaying(true) } : null}
-        secondary={isAdmin ? { label: "Edit", icon: Pencil, onClick: () => setEditing(true) } : null}
+        secondary={can("designers", "edit") ? { label: "Edit", icon: Pencil, onClick: () => setEditing(true) } : null}
       />
 
       <StatStrip items={[
@@ -112,10 +115,10 @@ export function DesignerHistoryPage() {
           sub: late ? `${late} late` : `${inHand.filter(j => j.status === "submitted").length} waiting for approval` },
         { label: "Approved this month", value: String(m.get(month)?.designs ?? 0), icon: CalendarDays, sub: `${jobs.filter(j => j.status === "approved").length} in all` },
         ...(acc ? [
-          { label: "Came to", value: fmtMoneyInr(acc.charged), icon: Receipt, sub: `${acc.designs} approved design${acc.designs === 1 ? "" : "s"}${acc.opening ? ` · ${fmtMoneyInr(Math.abs(acc.opening))} from before` : ""}` },
-          acc.advance > 0.5
+          ...(!showCosts ? [] : [{ label: "Came to", value: fmtMoneyInr(acc.charged), icon: Receipt, sub: `${acc.designs} approved design${acc.designs === 1 ? "" : "s"}${acc.opening ? ` · ${fmtMoneyInr(Math.abs(acc.opening))} from before` : ""}` }]),
+          ...(!showOwed ? [] : [acc.advance > 0.5
             ? { label: "Paid ahead", value: fmtMoneyInr(acc.advance), icon: IndianRupee, sub: `Paid ${fmtMoneyInr(acc.paid)} in all` }
-            : { label: "To pay", value: fmtMoneyInr(acc.due), icon: IndianRupee, tone: acc.due > 0.5 ? "out" as const : undefined, sub: `Paid ${fmtMoneyInr(acc.paid)} in all` },
+            : { label: "To pay", value: fmtMoneyInr(acc.due), icon: IndianRupee, tone: acc.due > 0.5 ? "out" as const : undefined, sub: `Paid ${fmtMoneyInr(acc.paid)} in all` }]),
         ] : [
           { label: "Salary", value: "Employees", icon: CheckCircle2, sub: "Paid with the team's salaries" },
         ]),
@@ -133,7 +136,7 @@ export function DesignerHistoryPage() {
               emptyText="No designs given yet — give one from an order's CAD Design card." />
           )}
           {tab === "months" && (
-            <DataTable id="designer-months" noun="month" rows={months} rowKey={r => r.month} columns={monthCols}
+            <DataTable id="designer-months" noun="month" rows={months} rowKey={r => r.month} columns={monthCols.filter(c => (showCosts || c.key !== "charged") && (has("fig.salaries") || c.key !== "salary"))}
               defaultSort={{ key: "month", dir: "desc" }} details={false} exportName={`Designer-${designer.name}-Months`}
               totals={{
                 given: list => String(list.reduce((s, r) => s + r.given, 0)),
@@ -156,7 +159,7 @@ export function DesignerHistoryPage() {
         </div>
       </div>
 
-      {isAdmin && <DesignerCreateDialog open={editing} onOpenChange={setEditing} designer={designer} />}
+      {can("designers", "edit") && <DesignerCreateDialog open={editing} onOpenChange={setEditing} designer={designer} />}
       {paying && <PayDesignerSheet designerId={designer.id} onClose={() => setPaying(false)} />}
     </div>
   );

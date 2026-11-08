@@ -7,7 +7,7 @@ import { updateDb, flush, loadDb, rolesStoreReady, orderTotal, type User } from 
 import { ccyOrder, fmtCcy, sumByCcy, ccy } from "@/lib/currency";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { RolesPanel, EmployeeAccessControls, setAdminRole } from "@/components/RolesAccess";
-import { AccessSummary, ManageAccessDialog } from "@/components/AccessManager";
+import { AccessSummary, ManageAccessDialog, AccessReportDialog } from "@/components/AccessManager";
 import { DataTable, CellMain, CellTag, type DataColumn } from "@/components/DataTable";
 import { MoreMenu, type MoreAction } from "@/components/MoreMenu";
 import { PageHeader, TabBar, ViewSwitch } from "@/components/PageHeader";
@@ -82,6 +82,7 @@ export function EmployeesPage() {
   const [loginFor, setLoginFor] = useState<User | null>(null);
   // What the ⋯ menus open: someone's access, or the companies they sell for.
   const [managing, setManaging] = useState<User | null>(null);
+  const [report, setReport] = useState(false);
   const [companiesFor, setCompaniesFor] = useState<string | null>(null);
   const rolesLive = rolesStoreReady();
   const multiCo = hasCompanies(db.settings);
@@ -260,7 +261,9 @@ export function EmployeesPage() {
         subtitle="Access, tasks and salary"
         primary={{ label: "New Employee", icon: Plus, onClick: () => setOpen(true) }}
         actions={<ViewSwitch view={view} onChange={saveView} />}
+        menu={[{ label: "Who can do what", icon: ShieldCheck, hint: "Everyone's access at a glance — for a review", onSelect: () => setReport(true) }]}
       />
+      {report && <AccessReportDialog onClose={() => setReport(false)} onManage={u => { setReport(false); setManaging(u); }} />}
       <EmployeeCreateDialog open={open} onOpenChange={setOpen} />
 
       {/* The whole team's figures, each with its picture and a quiet line. */}

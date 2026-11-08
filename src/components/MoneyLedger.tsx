@@ -1,4 +1,6 @@
-import { useCan } from "@/hooks/useCan";
+import { useCan, useHas } from "@/hooks/useCan";
+import { useAuth } from "@/lib/auth";
+import { othersExpense, othersAdvance } from "@/lib/figureFilters";
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Eye, Pencil, Trash2 } from "lucide-react";
@@ -86,7 +88,16 @@ export function MoneyLedger({ kind }: { kind: EntryKind }) {
   // Each row is matched to the bill or sale behind it, which may still be on
   // its way — listed only once it is here, so no row is offered wrongly.
   const ready = useLoaded(ENTRY_COLS[kind]);
-  const all = ready ? listEntries(db, kind) : [];
+  // Other people's salaries, expenses and advances: only with fig.salaries —
+  // an admin always. Without it, their own stay.
+  const { user: me } = useAuth();
+  const showOthersPay = useHas()("fig.salaries");
+  const all = (ready ? listEntries(db, kind) : []).filter(e => {
+    if (showOthersPay) return true;
+    if (e.kind === "expense") { const x = db.expenses.find(y => y.id === e.id); return !x || !othersExpense(x, me?.id); }
+    const t = (db.lockerTransactions ?? []).find(y => y.id === e.id);
+    return !t || !othersAdvance(t, me?.id);
+  });
   // The party list is built from the entries themselves, so it only ever offers
   // names that will actually match something.
   const parties = [...new Set(all.map(e => e.party).filter(Boolean))].sort();

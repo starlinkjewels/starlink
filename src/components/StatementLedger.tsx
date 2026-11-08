@@ -81,6 +81,7 @@ export function StatementLedger({
   rowAction,
   rowActions,
   details,
+  hideBalance = false,
 }: {
   title: string;
   caption?: string;
@@ -102,6 +103,8 @@ export function StatementLedger({
   /** More for an opened row, from the page that knows the record behind it —
    *  who recorded it, the account it went through, the full note. */
   details?: (row: StatementRow) => Detail[];
+  /** Leave out the running balance — for someone whose access hides what we owe (fig.payables). */
+  hideBalance?: boolean;
 }) {
   const [q, setQ] = useState("");
   // The dates and the type stay as they were left until cleared — one setting
@@ -218,7 +221,7 @@ export function StatementLedger({
           noun="transaction"
           rows={onlyPinned ? pinned : entries}
           pinnedRows={onlyPinned ? undefined : pinned}
-          columns={columns}
+          columns={hideBalance ? columns.filter(c => c.key !== "balance") : columns}
           rowKey={r => r.id}
           rowActions={rowActions}
           defaultSort={{ key: "date", dir: "desc" }}

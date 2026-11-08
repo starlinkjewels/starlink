@@ -1,3 +1,5 @@
+import { hasSwitch } from "@/lib/access";
+import { keepCols } from "@/lib/figureFilters";
 import { stageLabel } from "@/lib/stages";
 import { useMemo } from "react";
 import { StatusBadge } from "@/components/StatusBadge";
@@ -7,7 +9,7 @@ import { Factory, Hammer, AlarmClock, Timer, BadgeCheck, Coins, ClipboardList, G
 import { downloadCsv } from "@/lib/ledgerExport";
 import { fmtDate, type Order } from "@/lib/db";
 import { kpis, lateOpen, factoryTable, soldIn, cycleDays, pctChange } from "@/lib/analytics";
-import { DataTable, CellAmount } from "@/components/DataTable";
+import { DataTable, CellAmount, type DataColumn } from "@/components/DataTable";
 import { filled, when, userName, type Detail } from "@/components/rowDetails";
 import { C, SERIES, KpiCard, Panel, ChartTip, ExportButton, Empty, inr, pct, num } from "./ui";
 import type { ReportCtx } from "./context";
@@ -53,8 +55,11 @@ export function ProductionTab({ ctx }: { ctx: ReportCtx }) {
   const exportLate = () => downloadCsv(`Late-orders_${fileTag}.csv`, ["Order", "Client", "Item", "Status", "Promised", "Days late"],
     data.late.map(o => [o.orderNumber, db.clients.find(c => c.id === o.clientId)?.companyName ?? "", o.jewelleryType, o.status, fmtDate(o.expectedDelivery),
       Math.floor((+today - +new Date(o.expectedDelivery)) / 86_400_000)]));
-  const exportFactories = () => downloadCsv(`Factories_${fileTag}.csv`, ["Factory", "Pieces finished", "Fine gold used (g)", "Labour billed (₹)", "Labour owed now (₹)", "Open jobs", "Avg days at factory"],
-    data.factories.map(f => [f.name, f.pieces, f.fineGoldG, f.labourInr, f.labourPendingInr, f.openJobs, f.avgDays ?? ""]));
+  // Labour billed (fig.costs) and labour owed (fig.payables): figure switches — an admin always.
+  const showCosts = hasSwitch("fig.costs"), showOwed = hasSwitch("fig.payables");
+  const dropFac = [...(showCosts ? [] : [3]), ...(showOwed ? [] : [4])];
+  const exportFactories = () => downloadCsv(`Factories_${fileTag}.csv`, keepCols(false, dropFac, ["Factory", "Pieces finished", "Fine gold used (g)", "Labour billed (₹)", "Labour owed now (₹)", "Open jobs", "Avg days at factory"]),
+    data.factories.map(f => keepCols(false, dropFac, [f.name, f.pieces, f.fineGoldG, f.labourInr, f.labourPendingInr, f.openJobs, f.avgDays ?? ""])));
 
   return (
     <div className="space-y-4">
@@ -140,7 +145,7 @@ export function ProductionTab({ ctx }: { ctx: ReportCtx }) {
               defaultSort={{ key: "pieces", dir: "desc" }}
               searchText={f => f.name}
               searchPlaceholder="Search factories"
-              columns={[
+              columns={([
                 { key: "factory", header: "Factory", always: true, sortValue: f => f.name,
                   cell: f => <Link to={`/factories/${f.id}`} className="font-medium text-brand-dark hover:text-primary whitespace-nowrap">{f.name}</Link> },
                 { key: "pieces", header: "Pieces", align: "right", kind: "number", sortValue: f => f.pieces, cell: f => <span className="tabular-nums">{f.pieces || "—"}</span> },
@@ -153,7 +158,7 @@ export function ProductionTab({ ctx }: { ctx: ReportCtx }) {
                 { key: "open", header: "Open jobs", align: "right", kind: "number", sortValue: f => f.openJobs, cell: f => <span className="tabular-nums">{f.openJobs || "—"}</span> },
                 { key: "days", header: "Avg days", align: "right", kind: "number", sortValue: f => f.avgDays,
                   cell: f => <span className="tabular-nums whitespace-nowrap">{num(f.avgDays, " d")}</span> },
-              ]}
+              ] satisfies DataColumn<(typeof data.factories)[number]>[]).filter(c => (showCosts || c.key !== "billed") && (showOwed || c.key !== "owed"))}
             />
           </>
         ) : <Empty>No factory work in this period.</Empty>}

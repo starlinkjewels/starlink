@@ -8,6 +8,7 @@ import { MAIN_COMPANY_ID, companiesOf, companyIdOfClient, hasCompanies } from "@
 import { updateDbAs, type Client } from "@/lib/db";
 import { useDb } from "@/hooks/useDb";
 import { useAuth } from "@/lib/auth";
+import { hasFeature } from "@/lib/permissions";
 import { OpeningBalanceFields } from "@/components/OpeningBalanceFields";
 import { ActionSheet } from "@/components/ActionSheet";
 import { Button } from "@/components/ui/button";
@@ -40,6 +41,8 @@ const currentHandler = (clientId: string | null, db: { clients: { id: string; ac
 export function ClientEditDialog({ clientId, onClose }: { clientId: string | null; onClose: () => void }) {
   const { user } = useAuth();
   const db = useDb();
+  // Who handles the client and which company it is: an admin, or access with clients.handler.
+  const mayHandler = hasFeature(user, db.roles ?? [], "clients.handler");
   const addNew = useAddNew();
   const multiCo = hasCompanies(db.settings);
   const staff = handlerChoices(db, currentHandler(clientId, db));
@@ -81,10 +84,10 @@ export function ClientEditDialog({ clientId, onClose }: { clientId: string | nul
         c.openingBalance = ef.openingBalance || undefined;
         c.openingDir = ef.openingBalance ? (ef.openingDir || "debit") : undefined;
         c.openingDate = ef.openingBalance ? (ef.openingDate || undefined) : undefined;
-        if (user!.role === "admin") c.accountManagerId = ef.accountManagerId;
+        if (mayHandler) c.accountManagerId = ef.accountManagerId;
         // Moving a client to another company changes who bills them from now
         // on; every invoice already raised keeps the company that issued it.
-        if (user!.role === "admin" && ef.companyId) {
+        if (mayHandler && ef.companyId) {
           if (ef.companyId === MAIN_COMPANY_ID) delete c.companyId; else c.companyId = ef.companyId;
         }
         const u = d.users.find(x => x.clientId === c.id);
@@ -100,7 +103,7 @@ export function ClientEditDialog({ clientId, onClose }: { clientId: string | nul
       open={!!clientId && !!client}
       onOpenChange={v => { if (!v) onClose(); }}
       title="Edit Client"
-      description={user!.role === "admin" ? "Details, who handles them, and their login" : "Their details"}
+      description={mayHandler ? "Details, who handles them, and their login" : "Their details"}
       icon={Pencil}
       size="lg"
       footer={
@@ -145,7 +148,7 @@ export function ClientEditDialog({ clientId, onClose }: { clientId: string | nul
           hint="Carried in from your previous system."
         />
       </div>
-      {user!.role === "admin" && multiCo && (
+      {mayHandler && multiCo && (
         <div className="mt-4">
           <Label className="text-xs">Our company — who bills this client</Label>
           <Select value={ef.companyId || MAIN_COMPANY_ID} onValueChange={addNew("company", v => setEf(prev => ({ ...prev, companyId: v })))}>
@@ -159,7 +162,7 @@ export function ClientEditDialog({ clientId, onClose }: { clientId: string | nul
           )}
         </div>
       )}
-      {user!.role === "admin" && (
+      {mayHandler && (
         <div className="mt-4">
           <Label className="text-xs">Handled by</Label>
           <Select
@@ -174,7 +177,7 @@ export function ClientEditDialog({ clientId, onClose }: { clientId: string | nul
           </Select>
         </div>
       )}
-      {user!.role === "admin" && clientId && <ClientLoginSection clientId={clientId} />}
+      {hasFeature(user, db.roles ?? [], "clients.login") && clientId && <ClientLoginSection clientId={clientId} />}
     </ActionSheet>
   );
 }

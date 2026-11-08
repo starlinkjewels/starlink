@@ -6,7 +6,7 @@ import { updateDbAs, loadDb, type Designer } from "@/lib/db";
 import { recordsReady, STILL_LOADING } from "@/lib/actionHints";
 import { useDb } from "@/hooks/useDb";
 import { useAuth } from "@/lib/auth";
-import { useCan } from "@/hooks/useCan";
+import { useCan, useHas } from "@/hooks/useCan";
 import { fmtMoneyInr } from "@/lib/manufacturing";
 import { confirmBox } from "@/lib/confirm";
 import { KIND_LABEL, designerAccount, designerDeleteWhy, designerEmail, isOpenJob, jobsOfDesigner } from "@/lib/designers";
@@ -29,6 +29,11 @@ export function DesignersPage() {
   const navigate = useNavigate();
   const isAdmin = user?.role === "admin";
   const mayPay = isAdmin || can("payments", "add");
+  // Designers themselves: Designers → Add / Edit / Delete (before 2026-11 an admin's alone).
+  const mayAdd = can("designers", "add"), mayEdit = can("designers", "edit"), mayDelete = can("designers", "delete");
+  // What we owe designers (fig.payables) and their rate (fig.costs) — an admin always.
+  const has = useHas();
+  const showOwed = has("fig.payables"), showCosts = has("fig.costs");
   const [adding, setAdding] = useState(false);
   const [editing, setEditing] = useState<Designer | null>(null);
   const [paying, setPaying] = useState<Designer | null>(null);
@@ -66,10 +71,10 @@ export function DesignersPage() {
   };
   const actionsFor = (x: Designer): MoreAction[] => [
     { label: "View", icon: Eye, onSelect: () => navigate(`/designers/${x.id}`) },
-    { label: "Edit", icon: Pencil, disabled: !isAdmin, hint: isAdmin ? undefined : "Admin only", onSelect: () => setEditing(x) },
+    { label: "Edit", icon: Pencil, disabled: !mayEdit, hint: mayEdit ? undefined : "Your access does not include changing designers", onSelect: () => setEditing(x) },
     { label: "Pay", icon: Wallet, show: x.kind === "freelance", disabled: !mayPay, hint: mayPay ? "From an account" : "You can't record payments", onSelect: () => setPaying(x) },
-    { label: x.active === false ? "Switch on" : "Switch off", icon: Power, disabled: !isAdmin, hint: x.active === false ? "Can be given designs again" : "Kept with their history; not offered for new designs", onSelect: () => toggleActive(x) },
-    { label: "Delete", icon: Trash2, danger: true, disabled: !isAdmin || !!designerDeleteWhy(db, x), hint: !isAdmin ? "Admin only" : designerDeleteWhy(db, x), onSelect: () => void remove(x) },
+    { label: x.active === false ? "Switch on" : "Switch off", icon: Power, disabled: !mayEdit, hint: x.active === false ? "Can be given designs again" : "Kept with their history; not offered for new designs", onSelect: () => toggleActive(x) },
+    { label: "Delete", icon: Trash2, danger: true, disabled: !mayDelete || !!designerDeleteWhy(db, x), hint: !mayDelete ? "Your access does not include deleting designers" : designerDeleteWhy(db, x), onSelect: () => void remove(x) },
   ];
 
   const columns: DataColumn<Designer>[] = [
@@ -98,21 +103,21 @@ export function DesignersPage() {
   return (
     <div className="space-y-5">
       <PageHeader title="Designers" subtitle="CAD designers — our own and freelancers"
-        primary={isAdmin ? { label: "Add Designer", icon: Plus, onClick: () => setAdding(true) } : null} />
+        primary={mayAdd ? { label: "Add Designer", icon: Plus, onClick: () => setAdding(true) } : null} />
       <StatStrip items={[
         { label: "Designers", value: String(all.filter(x => x.active !== false).length), icon: PenTool,
           sub: `${all.filter(x => x.kind === "inhouse" && x.active !== false).length} in-house · ${all.filter(x => x.kind === "freelance" && x.active !== false).length} freelance` },
         { label: "Designs in hand", value: String((db.cadJobs ?? []).filter(isOpenJob).length), icon: FolderOpen,
           sub: `${(db.cadJobs ?? []).filter(j => j.status === "submitted").length} waiting for approval` },
         { label: "Approved this month", value: String((db.cadJobs ?? []).filter(j => j.status === "approved" && (j.approvedAt ?? "").startsWith(month)).length), icon: CheckCircle2 },
-        { label: "To pay freelancers", value: fmtMoneyInr(owed), icon: IndianRupee, tone: owed > 0.5 ? "out" as const : undefined },
+        ...(showOwed ? [{ label: "To pay freelancers", value: fmtMoneyInr(owed), icon: IndianRupee, tone: owed > 0.5 ? "out" as const : undefined }] : []),
       ]} />
       <div className="card-luxe p-3 sm:p-4">
         <DataTable
           id="designers"
           noun="designer"
           rows={all}
-          columns={columns}
+          columns={columns.filter(c => (showOwed || c.key !== "due") && (showCosts || c.key !== "rate"))}
           rowKey={x => x.id}
           searchText={x => [x.name, x.email, x.phone, KIND_LABEL[x.kind], x.notes].filter(Boolean).join(" ")}
           searchPlaceholder="Search designers"
@@ -122,11 +127,11 @@ export function DesignersPage() {
           rowActions={actionsFor}
           exportName="Designers"
           emptyText="No designers yet."
-          emptyAction={isAdmin && !all.length ? { label: "Add a designer", onClick: () => setAdding(true) } : undefined}
+          emptyAction={mayAdd && !all.length ? { label: "Add a designer", onClick: () => setAdding(true) } : undefined}
         />
       </div>
-      {isAdmin && <DesignerCreateDialog open={adding} onOpenChange={setAdding} onCreated={id => navigate(`/designers/${id}`)} />}
-      {isAdmin && editing && <DesignerCreateDialog open onOpenChange={o => { if (!o) setEditing(null); }} designer={editing} />}
+      {mayAdd && <DesignerCreateDialog open={adding} onOpenChange={setAdding} onCreated={id => navigate(`/designers/${id}`)} />}
+      {mayEdit && editing && <DesignerCreateDialog open onOpenChange={o => { if (!o) setEditing(null); }} designer={editing} />}
       {paying && <PayDesignerSheet designerId={paying.id} onClose={() => setPaying(null)} />}
     </div>
   );

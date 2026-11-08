@@ -4,7 +4,8 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, Di
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { CompanyFilter, CompanyPicker, CompanyBadge, useMultiCo } from "@/components/CompanyFields";
 import { companyOf, coField, companyById } from "@/lib/companies";
-import { useCan } from "@/hooks/useCan";
+import { useCan, useHas } from "@/hooks/useCan";
+import { keepCols } from "@/lib/figureFilters";
 import { fmtCcy, rateText } from "@/lib/currency";
 import { filled, noteText, recorded, refLink, type Detail } from "@/components/rowDetails";
 import { dayOf, fmtDate, loadDb, updateDb, DIAMOND_SHAPES, nextDiamondStockNumber, type DiamondPacket, type StockMovement, type Purchase } from "@/lib/db";
@@ -62,6 +63,8 @@ export function StockSectionPage() {
 function MaterialSection({ material }: { material: MaterialKey }) {
   const navigate = useNavigate();
   const db = useDb();
+  // Rates, amounts and value at cost: only with fig.costs — an admin always.
+  const showCosts = useHas()("fig.costs");
   // What the history below shows: one bag (purity), every bag of one size, or everything.
   const [selected, setSelected] = useState<{ keys: string[]; label: string } | null>(null);
   const selectedBucket = selected?.label ?? null;
@@ -254,8 +257,10 @@ function MaterialSection({ material }: { material: MaterialKey }) {
   const movementActions = (m: Movement): MoreAction[] => {
     if (isOpeningMovement(m)) {
       const live = db.stockMovements.find(x => x.id === m.id) ?? m;
-      const denied = isAdmin ? undefined : "Only an admin can change stock";
-      return openingStockActions(db, live, { onEdit: () => setEditingOpening(live), editDenied: denied, deleteDenied: denied });
+      // Opening stock: Stock → Edit / Delete (before 2026-11 an admin's alone).
+      return openingStockActions(db, live, { onEdit: () => setEditingOpening(live),
+        editDenied: can("stock", "edit") ? undefined : "Your access does not include changing stock",
+        deleteDenied: can("stock", "delete") ? undefined : "Your access does not include removing stock" });
     }
     const orderView = (id: string) => view("View order", db.orders.find(o => o.id === id)?.orderNumber ?? "The order", `/orders/${id}`, can("orders"), "orders");
     if (m.refType === "purchase") {
@@ -305,17 +310,17 @@ function MaterialSection({ material }: { material: MaterialKey }) {
   const exportCsv = (from: Date | null, to: Date | null) => {
     downloadCsv(
       `Stock-${materialLabel.replace(/\s+/g, "_")}${selectedBucket ? `-${selectedBucket.replace(/[^\w.+-]+/g, "_")}` : ""}`,
-      ["Date", bucketLabel, "Particulars", `In (${unit})`, `Out (${unit})`, `Balance (${unit})`, "Rate (Rs)", "Amount (Rs)"],
+      keepCols(showCosts, [6, 7], ["Date", bucketLabel, "Particulars", `In (${unit})`, `Out (${unit})`, `Balance (${unit})`, "Rate (Rs)", "Amount (Rs)"]),
       rows.filter(m => inDateRange(m.createdAt, from, to)).map(m => {
         const ra = inrRateAmount(m);
-        return [
+        return keepCols(showCosts, [6, 7], [
           fmtDate(m.createdAt), m.purityOrQuality, m.link.label,
           m.type === "purchase_in" ? m.quantity : "",
           m.type === "purchase_in" || !m.quantity ? "" : m.quantity,
           balanceById.get(m.id) ?? 0,
           ra ? Math.round(ra.rate) : "",
           ra ? Math.round(ra.amount) : "",
-        ];
+        ]);
       }),
     );
   };
@@ -326,12 +331,12 @@ function MaterialSection({ material }: { material: MaterialKey }) {
       title: `${materialLabel} — Movement History`,
       subjectLines: [
         selectedBucket ? `${bucketLabel}: ${selectedBucket}` : "All purities/shapes",
-        "Rate & Amount in Rs (INR)",
+        ...(showCosts ? ["Rate & Amount in Rs (INR)"] : []),
         `Report Generated: ${new Date().toLocaleDateString("en-IN", { month: "long", day: "numeric", year: "numeric" })}`,
       ],
       summary: entries.map(([key, qty]) => ({ label: key, value: `${qty.toLocaleString()} ${unit}` })),
       landscape: true,
-      columns: [
+      columns: keepCols(showCosts, [6, 7], [
         { header: "Date", x: 14 },
         { header: bucketLabel, x: 42 },
         { header: "Particulars", x: 70 },
@@ -340,19 +345,19 @@ function MaterialSection({ material }: { material: MaterialKey }) {
         { header: "Balance", x: 220 },
         { header: "Rate", x: 242 },
         { header: "Amount", x: 262 },
-      ],
-      align: ["left", "left", "left", "right", "right", "right", "right", "right"],
+      ]),
+      align: keepCols(showCosts, [6, 7], ["left", "left", "left", "right", "right", "right", "right", "right"] as ("left" | "right")[]),
       rows: filtered.map(m => {
         const ra = inrRateAmount(m);
         const rs = (n: number) => Math.round(n).toLocaleString("en-IN");
-        return [
+        return keepCols(showCosts, [6, 7], [
           fmtDate(m.createdAt), String(m.purityOrQuality), m.link.label,
           m.type === "purchase_in" ? `${m.quantity}${unit}` : "—",
           m.type === "purchase_in" ? "—" : `${m.quantity}${unit}`,
           `${(balanceById.get(m.id) ?? 0).toLocaleString()}${unit}`,
           ra ? rs(ra.rate) : "—",
           ra ? rs(ra.amount) : "—",
-        ];
+        ]);
       }),
       filename: `Stock-${materialLabel.replace(/\s+/g, "_")}${selectedBucket ? `-${selectedBucket.replace(/[^\w.+-]+/g, "_")}` : ""}`,
     });
@@ -396,7 +401,7 @@ function MaterialSection({ material }: { material: MaterialKey }) {
               { label: "Movement History — Excel", icon: FileSpreadsheet, hint: "For the dates in Filters", onSelect: () => exportCsv(filterFromDate, filterToDate) },
             ]}
             resetKey={JSON.stringify([selectedBucket, filterFrom, filterTo])}
-            columns={movementColumns}
+            columns={showCosts ? movementColumns : movementColumns.filter(c => c.key !== "rate" && c.key !== "amount")}
             rowKey={m => m.id}
             defaultSort={{ key: "date", dir: "desc" }}
             searchText={m => [m.purityOrQuality, m.link.label, m.note].filter(Boolean).join(" ")}
@@ -419,6 +424,8 @@ function MaterialSection({ material }: { material: MaterialKey }) {
 /* ── Certified Diamonds — packet grid, edit, delete ── */
 
 function CertifiedSection() {
+  // Rates, costs and value at cost: only with fig.costs — an admin always.
+  const showCosts = useHas()("fig.costs");
   const navigate = useNavigate();
   const { user } = useAuth();
   const isAdmin = user?.role === "admin";
@@ -485,16 +492,16 @@ function CertifiedSection() {
   const exportCertCsv = (from: Date | null, to: Date | null) => {
     downloadCsv(
       "Stock-Certified_Diamonds-History",
-      [
+      keepCols(showCosts, [15, 16, 17, 18, 19, 20], [
         "Bought", "Stock #", "Shape", "Carat", "Measurement (mm)",
         "Color", "Clarity", "Cut", "Polish", "Symmetry", "Fluorescence", "Quality",
         "Report Number", "Lab", "Supplier",
         "Currency", "Rate/ct ($)", "Total ($)", "Exchange Rate",
         "Rate/ct (INR)", "Total (INR)", "Status", "Order",
-      ],
+      ]),
       allPackets.filter(p => inDateRange(boughtDate(p), from, to)).map(p => {
         const c = costOf(p);
-        return [
+        return keepCols(showCosts, [15, 16, 17, 18, 19, 20], [
           fmtDate(boughtDate(p)), p.stockNumber ?? "", p.shape, p.carat, p.measurement ?? "",
           p.color ?? "", p.clarity ?? "", p.cut ?? "", p.polish ?? "", p.symmetry ?? "",
           p.fluorescence ?? "", p.quality ?? "",
@@ -502,7 +509,7 @@ function CertifiedSection() {
           c.currency, c.rateUsd ?? "", c.totalUsd ?? "", c.exchangeRate ?? "",
           c.rateInr ?? "", c.totalInr ?? "",
           STATUS_LABEL[p.status], orderNoOf(p.orderId) ?? "",
-        ];
+        ]);
       }),
     );
   };
@@ -512,7 +519,7 @@ function CertifiedSection() {
       title: "Certified Diamonds — Full History",
       subjectLines: [
         `${filtered.length} packet${filtered.length !== 1 ? "s" : ""}${from || to ? " (filtered)" : " (all time)"}`,
-        "Totals in Rs (INR); the $ column is what a dollar purchase was billed at",
+        ...(showCosts ? ["Totals in Rs (INR); the $ column is what a dollar purchase was billed at"] : []),
         `Report Generated: ${new Date().toLocaleDateString("en-IN", { month: "long", day: "numeric", year: "numeric" })}`,
       ],
       summary: [
@@ -522,17 +529,17 @@ function CertifiedSection() {
         { label: "Sold", value: String(filtered.filter(p => p.status === "sold").length) },
       ],
       landscape: true,
-      columns: [
+      columns: keepCols(showCosts, [8, 9, 10], [
         { header: "Bought", x: 14 }, { header: "Stock #", x: 37 }, { header: "Shape", x: 54 },
         { header: "Ct", x: 82 }, { header: "Color", x: 86 }, { header: "Clarity", x: 99 },
         { header: "Report", x: 115 }, { header: "Supplier", x: 149 },
         { header: "Rate/ct", x: 196 }, { header: "Total Rs", x: 221 }, { header: "Total $", x: 242 },
         { header: "Status", x: 246 },
-      ],
-      align: ["left", "left", "left", "right", "left", "left", "left", "left", "right", "right", "right", "left"],
+      ]),
+      align: keepCols(showCosts, [8, 9, 10], ["left", "left", "left", "right", "left", "left", "left", "left", "right", "right", "right", "left"] as ("left" | "right")[]),
       rows: filtered.map(p => {
         const c = costOf(p);
-        return [
+        return keepCols(showCosts, [8, 9, 10], [
           fmtDate(boughtDate(p)), p.stockNumber ?? "—", p.shape.slice(0, 12), String(p.carat),
           (p.color ?? "—").slice(0, 6), (p.clarity ?? "—").slice(0, 7),
           String(p.certificateNumber).slice(0, 20),
@@ -541,7 +548,7 @@ function CertifiedSection() {
           c.totalInr ? Math.round(c.totalInr).toLocaleString("en-IN") : "—",
           c.totalUsd != null ? c.totalUsd.toLocaleString("en-US") : "—",
           (STATUS_LABEL[p.status] + (p.orderId ? ` (${orderNoOf(p.orderId) ?? ""})` : "")).slice(0, 26),
-        ];
+        ]);
       }),
       filename: "Stock-Certified_Diamonds-History",
     });
@@ -809,7 +816,7 @@ function CertifiedSection() {
   };
 
   // ── The ⋯ on a stone, in stock or in the history ──
-  const ADMIN_ONLY = "Only an admin can change stock";
+  const ADMIN_ONLY = "Your access does not include changing stock";
   const packetActions = (p: DiamondPacket): MoreAction[] => {
     const del = packetDeletion(p);
     const sale = p.status === "sold" ? (db.diamondSales ?? []).find(s => s.packetId === p.id) : undefined;
@@ -828,11 +835,11 @@ function CertifiedSection() {
       { label: "View purchase", icon: ExternalLink, show: !!p.supplierId, disabled: !can("suppliers"),
         hint: can("suppliers") ? `On ${supplierName(p.supplierId) ?? "the supplier"}'s page` : needsAccess("suppliers", "view"),
         onSelect: () => navigate(`/suppliers/${p.supplierId}`) },
-      { label: "Edit", icon: Pencil, disabled: !isAdmin || !inStock,
-        hint: !isAdmin ? ADMIN_ONLY : !inStock ? STATUS_REASON[p.status as Exclude<DiamondPacket["status"], "in_stock">] : "Certificate, grading and cost",
+      { label: "Edit", icon: Pencil, disabled: !can("stock", "edit") || !inStock,
+        hint: !can("stock", "edit") ? ADMIN_ONLY : !inStock ? STATUS_REASON[p.status as Exclude<DiamondPacket["status"], "in_stock">] : "Certificate, grading and cost",
         onSelect: () => { setEditPacket({ ...p }); setEditRate(p.ratePerCaratInr ? String(p.ratePerCaratInr) : ""); } },
-      { label: "Delete", icon: Trash2, danger: true, disabled: !isAdmin || !del.ok, onSelect: () => deletePacket(p),
-        hint: !isAdmin ? ADMIN_ONLY : !del.ok ? del.reason : del.purchase ? "Removes the purchase it came from too" : "Only the stone — no purchase is on file for it" },
+      { label: "Delete", icon: Trash2, danger: true, disabled: !can("stock", "delete") || !del.ok, onSelect: () => deletePacket(p),
+        hint: !can("stock", "delete") ? "Your access does not include removing stock" : !del.ok ? del.reason : del.purchase ? "Removes the purchase it came from too" : "Only the stone — no purchase is on file for it" },
     ];
   };
 
@@ -887,7 +894,7 @@ function CertifiedSection() {
             <StatStrip items={[
               { label: certFiltered ? "In stock · filtered" : "In stock", value: `${certShown.length} stone${certShown.length === 1 ? "" : "s"}`, icon: BadgeCheck },
               { label: "Carats", value: `${r2(certShown.reduce((t, p) => t + (p.carat || 0), 0))} ct`, icon: Gem },
-              { label: "Value at cost", value: fmtMoneyInr(value), icon: Wallet, sub: unpriced ? `${unpriced} without a rate` : "Rate/ct × carats" },
+              ...(showCosts ? [{ label: "Value at cost", value: fmtMoneyInr(value), icon: Wallet, sub: unpriced ? `${unpriced} without a rate` : "Rate/ct × carats" }] : []),
             ]} />
           );
         })()}
@@ -897,7 +904,7 @@ function CertifiedSection() {
           rows={certShown}
           filters={certFilters}
           onClearFilters={() => { setFShape(""); setFColor(""); setFClarity(""); setFLab(""); setFSize(""); }}
-          columns={inStockColumns}
+          columns={showCosts ? inStockColumns : inStockColumns.filter(c => c.key !== "rate" && c.key !== "cost")}
           rowKey={p => p.id}
           defaultSort={{ key: "bought", dir: "desc" }}
           searchText={packetSearch}
@@ -927,7 +934,7 @@ function CertifiedSection() {
               { label: "Full History — Excel", icon: FileSpreadsheet, hint: "Grading, report no., cost, supplier", onSelect: () => exportCertCsv(histFromDate, histToDate) },
             ]}
             resetKey={JSON.stringify([histFrom, histTo])}
-            columns={historyColumns}
+            columns={showCosts ? historyColumns : historyColumns.filter(c => c.key !== "rate" && c.key !== "cost")}
             rowKey={p => p.id}
             defaultSort={{ key: "bought", dir: "desc" }}
             searchText={p => [packetSearch(p), STATUS_LABEL[p.status], orderNoOf(p.orderId)].filter(Boolean).join(" ")}

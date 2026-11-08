@@ -10,6 +10,8 @@ import {
 } from "@/lib/db";
 import { useDb } from "@/hooks/useDb";
 import { useAuth } from "@/lib/auth";
+import { hasFeature } from "@/lib/permissions";
+import { hasSwitch } from "@/lib/access";
 import { useCan } from "@/hooks/useCan";
 import { reserveCreditNoteNumber, releaseCreditNoteNumber } from "@/lib/counters";
 import { planReturn, applyReturn, receiveReturn, cancelReturn, cancelReturnBlocker, returnBlocker, returnsComing, type ReturnPlan } from "@/lib/salesReturn";
@@ -33,7 +35,8 @@ import { orderPictures } from "@/lib/readyStockPhotos";
 export function useMayReturn(): boolean {
   const can = useCan();
   const { user } = useAuth();
-  return !!user && user.role !== "client" && can("invoices", "edit");
+  const db = useDb();
+  return !!user && user.role !== "client" && can("invoices", "edit") && hasFeature(user, db.roles ?? [], "invoices.returns");
 }
 
 const thumb = (o: Order) => orderImage(o);
@@ -117,7 +120,7 @@ export function ReturnDialog({ orders, invoice, start, onClose }: {
       const costUsd: Record<string, number> = {};
       if (received) {
         await ensureCollections(["materialIssuances"]);
-        for (const l of plan.lines) { const c = await pieceCostUsd(l.order.id, user.role === "admin"); if (c != null) costUsd[l.order.id] = c; }
+        for (const l of plan.lines) { const c = await pieceCostUsd(l.order.id, hasSwitch("fig.profit")); if (c != null) costUsd[l.order.id] = c; }
       }
       updateDbAs({ summary: `Return ${no} — ${t.qty} pc${t.qty !== 1 ? "s" : ""} from ${client?.companyName ?? "client"}, ${fmtMoney(t.creditUsd)} credit` }, d => {
         applied = applyReturn(d, input, opts, { noteId, creditNoteNo: no, by: user.id, byName: user.name, at: new Date().toISOString(), costUsd });
@@ -311,7 +314,7 @@ export function ReceiveReturnDialog({ order, ret, onClose }: { order: Order; ret
   const go = async () => {
     if (!user) return;
     await ensureCollections(["materialIssuances"]);
-    const costUsd = await pieceCostUsd(order.id, user.role === "admin");
+    const costUsd = await pieceCostUsd(order.id, hasSwitch("fig.profit"));
     updateDbAs({ summary: `Received return ${ret.creditNoteNo} — ${order.orderNumber}, ${ret.qty} pc${ret.qty !== 1 ? "s" : ""} into Ready Stock` }, d => {
       receiveReturn(d, order.id, ret.id, { by: user.id, at: new Date().toISOString(), location, priceUsd: Number(price) >= 0 ? Number(price) : undefined, costUsd });
     });

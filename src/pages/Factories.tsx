@@ -8,7 +8,7 @@ import { updateDb, uid, fmtDate, hasOpeningBalance, openingCreditAmt, openingDeb
 import { factoryDeleteGuard, deleteRefusal } from "@/lib/partyGuards";
 import { FactoryEditDialog } from "@/components/FactoryEditDialog";
 import { PayFactorySheet } from "@/components/party/PayFactorySheet";
-import { useCan } from "@/hooks/useCan";
+import { useCan, useHas } from "@/hooks/useCan";
 import { needsAccess } from "@/lib/actionHints";
 import { MoreMenu, type MoreAction } from "@/components/MoreMenu";
 import { filled, noteText, type Detail } from "@/components/rowDetails";
@@ -53,6 +53,11 @@ export function FactoriesPage() {
   const [paying, setPaying] = useState<string | null>(null);
   const can = useCan();
   const mayPay = isAdmin || can("payments", "add");
+  // The factory itself: Factories → Add / Edit / Delete (before 2026-11 an admin's alone).
+  const mayAdd = can("factories", "add"), mayEdit = can("factories", "edit"), mayDelete = can("factories", "delete");
+  // What we owe (fig.payables) and the labour billed and paid (fig.costs) — an admin always.
+  const has = useHas();
+  const showOwed = has("fig.payables"), showCosts = has("fig.costs");
   const navigate = useNavigate();
 
   // Every factory's figures, worked out once — rows, sort and totals share it.
@@ -119,17 +124,17 @@ export function FactoriesPage() {
 
   // View first, then the changes — each greyed out with the reason when it
   // can't be done, never left out. Changing a factory is an admin's job.
-  const ADMIN_ONLY = "Only an admin can change factories";
+  const ADMIN_ONLY = "Your access does not include changing factories";
   const actionsFor = (fac: Factory): MoreAction[] => {
     const guard = guardOf(fac);
     return [
       { label: "View ledger", icon: History, hint: "Material issued, labour and payments", onSelect: () => navigate(`/factories/${fac.id}`) },
       { label: "Pay", icon: CreditCard, onSelect: () => setPaying(fac.id), disabled: !mayPay,
         hint: !mayPay ? needsAccess("payments", "add") : accounts.get(fac.id)!.chargesPending > 0 ? `Labour owed ${fmtMoneyInr(accounts.get(fac.id)!.chargesPending)} · oldest jobs first` : "Nothing owed now — would be paid ahead" },
-      { label: "Edit details", icon: Pencil, onSelect: () => setEditing(fac), disabled: !isAdmin, hint: isAdmin ? "Name, contact, phone, address" : ADMIN_ONLY },
-      { label: fac.active === false ? "Activate" : "Deactivate", icon: Power, onSelect: () => toggle(fac), disabled: !isAdmin, hint: isAdmin ? undefined : ADMIN_ONLY },
+      { label: "Edit details", icon: Pencil, onSelect: () => setEditing(fac), disabled: !mayEdit, hint: mayEdit ? "Name, contact, phone, address" : ADMIN_ONLY },
+      { label: fac.active === false ? "Activate" : "Deactivate", icon: Power, onSelect: () => toggle(fac), disabled: !mayEdit, hint: mayEdit ? undefined : ADMIN_ONLY },
       { label: "Delete factory", icon: Trash2, danger: true, onSelect: () => del(fac),
-        disabled: !isAdmin || !guard.ok, hint: !isAdmin ? ADMIN_ONLY : guard.reason },
+        disabled: !mayDelete || !guard.ok, hint: !mayDelete ? "Your access does not include deleting factories" : guard.reason },
     ];
   };
 
@@ -189,7 +194,7 @@ export function FactoriesPage() {
       (a.goldPool > 0 || a.diaPool > 0) && { label: "Pool stock", value: `${grams(a.goldPool)} gold · ${carats(a.diaPool)} diamond` },
       otherHeld(fac).length > 0 && { label: "Other material", value: otherHeld(fac).join(" · ") },
       a.diamondIssued > 0 && { label: "Diamond issued", value: `${carats(a.diamondIssued)} · ${carats(a.diamondUsed)} accounted for` },
-      hasOpeningBalance(fac) && { label: "Opening balance", value: `${fmtMoneyInr(fac.openingBalance || 0)} ${fac.openingDir === "debit" ? "debit (they owed us)" : "credit (charges we owed)"}${fac.openingDate ? ` · as of ${fmtDate(fac.openingDate)}` : ""}` },
+      showOwed && hasOpeningBalance(fac) && { label: "Opening balance", value: `${fmtMoneyInr(fac.openingBalance || 0)} ${fac.openingDir === "debit" ? "debit (they owed us)" : "credit (charges we owed)"}${fac.openingDate ? ` · as of ${fmtDate(fac.openingDate)}` : ""}` },
       !!fac.openingFineGold && { label: "Opening fine gold", value: `${grams(fac.openingFineGold)}${fac.openingFineGoldDate ? ` · as of ${fmtDate(fac.openingFineGoldDate)}` : ""}` },
     ]);
   };
@@ -200,18 +205,18 @@ export function FactoriesPage() {
       <PageHeader
         title="Factories"
         subtitle="Material, labour and payments"
-        primary={isAdmin ? { label: "New Factory", icon: Plus, onClick: () => setOpen(true) } : null}
+        primary={mayAdd ? { label: "New Factory", icon: Plus, onClick: () => setOpen(true) } : null}
         actions={<ViewSwitch view={view} onChange={saveView} />}
       />
-      {isAdmin && <FactoryCreateDialog open={open} onOpenChange={setOpen} />}
+      {mayAdd && <FactoryCreateDialog open={open} onOpenChange={setOpen} />}
 
-      <AccountSummary
+      {showOwed && <AccountSummary
         receivable={totals.receivable}
         payable={totals.payable}
         fmt={fmtMoneyInr}
         receivableSub="factories owe us · ughrani"
         payableSub="charges due · chukavni"
-      />
+      />}
 
       {/* ── List view — the shared table: sort by any heading, Excel, pages.
           The page's own search (the same one the grid uses) sits in its
@@ -226,9 +231,9 @@ export function FactoriesPage() {
             search={{ value: q, onChange: setQ, placeholder: "Search factories..." }}
             resetKey={q}
             rows={list}
-            columns={columns}
+            columns={columns.filter(c => (showOwed || c.key !== "balance") && (showCosts || (c.key !== "charged" && c.key !== "paid")))}
             rowKey={fac => fac.id}
-            defaultSort={{ key: "balance", dir: "desc" }}
+            defaultSort={showOwed ? { key: "balance", dir: "desc" } : { key: "factory", dir: "asc" }}
             rowHref={fac => `/factories/${fac.id}`}
             details={factoryDetails}
             exportName="Factories"
@@ -246,7 +251,7 @@ export function FactoriesPage() {
             }}
             rowActions={actionsFor}
             emptyText="No factories found."
-            emptyAction={!db.factories.length && isAdmin ? { label: "Add a factory", onClick: () => setOpen(true) } : undefined}
+            emptyAction={!db.factories.length && mayAdd ? { label: "Add a factory", onClick: () => setOpen(true) } : undefined}
           />
         </div>
       )}
@@ -293,7 +298,7 @@ export function FactoriesPage() {
               </div>
 
               {/* Figures: colour on the figure only, a zero in grey. */}
-              <div className="mt-4 pt-3 grid grid-cols-3 gap-1.5 border-t border-border/50 text-center">
+              <div className={`mt-4 pt-3 grid ${showOwed ? "grid-cols-3" : "grid-cols-2"} gap-1.5 border-t border-border/50 text-center`}>
                 <div>
                   <p className="text-[10px] text-muted-foreground mb-0.5">Fine Gold</p>
                   <p className={`text-xs font-semibold tabular-nums ${fineGold < 0 ? "text-destructive" : fineGold ? "text-brand-dark" : "text-muted-foreground"}`}>{fineGold.toLocaleString()} g</p>
@@ -302,12 +307,12 @@ export function FactoriesPage() {
                   <p className="text-[10px] text-muted-foreground mb-0.5">Diamond</p>
                   <p className={`text-xs font-semibold tabular-nums ${account.diamondOutstanding < 0 ? "text-destructive" : account.diamondOutstanding ? "text-brand-dark" : "text-muted-foreground"}`}>{account.diamondOutstanding.toLocaleString()} ct</p>
                 </div>
-                <div>
+                {showOwed && <div>
                   <p className="text-[10px] text-muted-foreground mb-0.5">{account.chargesOverpaid > 0 && account.chargesPending === 0 ? "Advance Paid" : "Charges Due"}</p>
                   <p className={`text-xs font-semibold tabular-nums ${account.chargesPending > 0 ? "text-destructive" : account.chargesOverpaid > 0 ? "text-blue-600" : "text-success"}`}>
                     {account.chargesPending > 0 ? fmtMoneyInr(account.chargesPending) : account.chargesOverpaid > 0 ? fmtMoneyInr(account.chargesOverpaid) : "✓ Cleared"}
                   </p>
-                </div>
+                </div>}
               </div>
 
               {otherHeld(fac).length > 0 && (

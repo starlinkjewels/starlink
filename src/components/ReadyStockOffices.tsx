@@ -5,6 +5,7 @@ import { updateDbAs, type ReadyStockItem } from "@/lib/db";
 import { useDb } from "@/hooks/useDb";
 import { useAuth } from "@/lib/auth";
 import { moveReadyStock, officeLabel, officeOf, readyStockOffices } from "@/lib/offices";
+import { limitsOf } from "@/lib/permissions";
 import { logItem, whoNow } from "@/lib/readyStockHistory";
 import { confirmBox } from "@/lib/confirm";
 import { Button } from "@/components/ui/button";
@@ -33,7 +34,9 @@ export function MoveOfficeDialog({ items, onClose, onDone }: { items: ReadyStock
   const db = useDb();
   const { user } = useAuth();
   const isAdmin = user?.role === "admin";
-  const offices = readyStockOffices(db.settings);
+  // Only to offices their access allows (an admin, every office).
+  const myOffices = limitsOf(user, db.roles ?? []).offices;
+  const offices = readyStockOffices(db.settings).filter(o => !myOffices?.length || myOffices.includes(o));
   const movable = items.filter(i => i.quantity > 0);
   const single = movable.length === 1 ? movable[0] : null;
   const from = [...new Set(movable.map(officeOf))];

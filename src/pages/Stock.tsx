@@ -5,6 +5,7 @@ import { useLoaded } from "@/hooks/useLoaded";
 import { stockAverageRate } from "@/lib/orderCost";
 import { lotBalances } from "@/lib/diamondLots";
 import { useCan } from "@/hooks/useCan";
+import { hasFeature } from "@/lib/permissions";
 import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { useDb } from "@/hooks/useDb";
@@ -103,8 +104,10 @@ export function StockPage() {
   const priced = useLoaded(["purchases"]);
   const nowIso = new Date().toISOString();
   const coArg = view === "all" ? undefined : view;
+  // What it is worth at cost: only with fig.costs — an admin always.
+  const showCosts = hasFeature(user, db.roles ?? [], "fig.costs");
   const worth = (material: string, grades: [string, number][]): string | null => {
-    if (!priced) return null;
+    if (!priced || !showCosts) return null;
     let value = 0, unpriced = 0;
     for (const [key, qty] of grades) {
       if (!(qty > 0.0005)) continue;
@@ -128,7 +131,7 @@ export function StockPage() {
   const goldFine = r3(Object.entries(goldBal).reduce((t, [k, g]) => t + toPureGold(g, k), 0));
   // A certified stone carries its own cost per carat.
   const packetsPriced = inStockPackets.filter(p => p.ratePerCaratInr != null);
-  const packetsWorth = packetsPriced.length
+  const packetsWorth = packetsPriced.length && showCosts
     ? `Worth ≈ ${fmtMoneyInr(Math.round(packetsPriced.reduce((t, p) => t + (p.ratePerCaratInr ?? 0) * p.carat, 0)))}${packetsPriced.length < inStockPackets.length ? ` · ${inStockPackets.length - packetsPriced.length} not priced` : ""}`
     : null;
   // New purchase is Buy & Assign's own form; it reads the bills too, so it opens once they are here.
@@ -199,7 +202,7 @@ export function StockPage() {
         menu={[
           // Stock already on hand before the app — a one-time job, so it waits here.
           { label: "Opening stock", icon: Boxes, hint: "From before the app — no dues", onSelect: () => setOpening(true), show: mayAddStock },
-          { label: "Move between companies", icon: ArrowRightLeft, hint: "From one company to another", onSelect: () => setMoving(true), show: multiCo && user?.role === "admin" },
+          { label: "Move between companies", icon: ArrowRightLeft, hint: "From one company to another", onSelect: () => setMoving(true), show: multiCo && hasFeature(user, db.roles ?? [], "stock.companies") },
           { label: recomputing ? "Recomputing…" : "Recompute from history", icon: RotateCcw, hint: "Rebuild counters from movements", onSelect: recompute, disabled: recomputing, show: user?.role === "admin" },
         ]}
       />

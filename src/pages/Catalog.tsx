@@ -1,5 +1,5 @@
 import { WebVideo } from "@/components/ProductVideo";
-import { useCan } from "@/hooks/useCan";
+import { useCan, useHas } from "@/hooks/useCan";
 import { requestPlayable } from "@/lib/webVideo";
 import { useState, useRef, useEffect, useCallback, useMemo } from "react";
 import { motion, AnimatePresence } from "framer-motion";
@@ -1085,9 +1085,11 @@ export function CatalogPage() {
   const canEdit = isStaff && can("catalog", "edit");
   const canDelete = isStaff && can("catalog", "delete");
   const canShare = isStaff && can("catalog", "export");
-  // Moving items and folders changes where everyone finds them — admin only.
+  // Moving items and folders changes where everyone finds them — a switch of its own.
   const isAdmin = user?.role === "admin";
-  const ADMIN_MOVE = "Only an admin can move";
+  const ADMIN_MOVE = "Your access does not include moving files and folders";
+  // Moving files and folders: an admin, or access with catalog.move.
+  const mayMove = useHas()("catalog.move");
 
   const [folders, setFolders] = useState<CatalogFolder[]>([]);
   const [favIds, setFavIds] = useState<Set<string>>(new Set());
@@ -1659,8 +1661,8 @@ export function CatalogPage() {
     { label: "Download", icon: Download, hint: canShare ? undefined : needsAccess("catalog", "export"), disabled: !canShare,
       onSelect: () => downloadFile(item.data, downloadName(item), !isAdmin) },
     { label: "Rename", icon: Edit2, hint: canEdit ? undefined : needsAccess("catalog", "edit"), disabled: !canEdit, onSelect: () => setItemSheet({ item, mode: "rename" }) },
-    { label: "Move to another folder", icon: FolderInput, hint: !isAdmin ? ADMIN_MOVE : folders.length > 1 ? undefined : "There is no other folder yet",
-      disabled: !isAdmin || folders.length < 2, onSelect: () => setItemSheet({ item, mode: "move" }) },
+    { label: "Move to another folder", icon: FolderInput, hint: !mayMove ? ADMIN_MOVE : folders.length > 1 ? undefined : "There is no other folder yet",
+      disabled: !mayMove || folders.length < 2, onSelect: () => setItemSheet({ item, mode: "move" }) },
     { label: "Delete", icon: Trash2, danger: true, hint: canDelete ? undefined : needsAccess("catalog", "delete"), disabled: !canDelete, onSelect: () => setDeleteConfirm(item.id) },
   ];
   /** A folder and everything under it, as one zip — its subfolders kept as folders inside. */
@@ -1711,7 +1713,7 @@ export function CatalogPage() {
       disabled: !canShare, onSelect: () => setSharingFolder(folder) },
     { label: "Rename", icon: Edit2, hint: canEdit ? undefined : needsAccess("catalog", "edit"), disabled: !canEdit,
       onSelect: () => { setRenamingId(folder.id); setRenameVal(folder.name); } },
-    { label: "Move", icon: FolderInput, hint: isAdmin ? "With everything inside it" : ADMIN_MOVE, disabled: !isAdmin,
+    { label: "Move", icon: FolderInput, hint: mayMove ? "With everything inside it" : ADMIN_MOVE, disabled: !mayMove,
       onSelect: () => setMovingFolder(folder) },
     { label: "Delete", icon: Trash2, danger: true, hint: canDelete ? undefined : needsAccess("catalog", "delete"), disabled: !canDelete,
       onSelect: () => setDeleteConfirm(folder.id) },
@@ -2021,7 +2023,7 @@ export function CatalogPage() {
         menu={!viewingFavorites && isStaff ? [
           { label: "Please check", icon: ClipboardCheck, hint: "Sheets whose details didn't add up", onSelect: () => navigate("/catalog/check") },
           { label: "Select to move", icon: ListChecks, show: isStaff && (subfolders.length > 0 || items.length > 0),
-            hint: isAdmin ? "Several folders and files at once" : ADMIN_MOVE, disabled: !isAdmin, onSelect: () => { setFindQ(""); setPicking(true); } },
+            hint: mayMove ? "Several folders and files at once" : ADMIN_MOVE, disabled: !mayMove, onSelect: () => { setFindQ(""); setPicking(true); } },
           { label: "Arrange folders", icon: ArrowUpDown, show: canEdit && subfolders.length > 1, hint: "Set the order they show in", onSelect: () => setArranging(true) },
         ] : undefined}
         actions={(canAdd || canShare) ? (

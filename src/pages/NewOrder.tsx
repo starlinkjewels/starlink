@@ -2,7 +2,7 @@ import { hasDiamonds, looseLabel, stonesLine } from "@/lib/orderText";
 import { activeMaterials, materialDef } from "@/lib/materials";
 import { COPY_PARAM, copyBlocker, copyFields, copyHref, copyKind } from "@/lib/orderCopy";
 import { chargeDrafts } from "@/components/OtherCharges";
-import { useCan } from "@/hooks/useCan";
+import { useCan, useHas } from "@/hooks/useCan";
 import { buildLooseTimelineSteps, byNewestEntered, type ReadyStockItem } from "@/lib/db";
 import { looseStages } from "@/lib/stages";
 import { ProductionPlan, type OrderKind } from "@/components/order/ProductionPlan";
@@ -288,6 +288,8 @@ function NewOrderForm() {
   const [plannedBuy, setPlannedBuy] = useState<PlannedBuy | null>(null);
   // Planning material is changing the order's manufacturing — the same right as on the order page.
   const canDo = useCan();
+  const sw = useHas();
+  const mayAssign = isAdmin || (isEmployee && sw("orders.assign"));
   const mayPlan = !isClient && (isAdmin || (isEmployee && canDo("orders", "edit")));
   // The CAD designer, given the design as the order is placed (a piece with metal only).
   const [designerPick, setDesignerPick] = useState<DesignerChoice>(NO_DESIGNER);
@@ -661,7 +663,7 @@ function NewOrderForm() {
       // that client (employee or admin).
       const managerActive = !!managerId && d.users.some(u => u.id === managerId && (u.role === "employee" || u.role === "admin") && u.status !== "inactive");
       const assignedEmployeeId = isClient ? (managerActive ? managerId : undefined)
-        : isEmployee ? user!.id
+        : isEmployee ? (mayAssign && f.assignedTo ? f.assignedTo : user!.id)
         : (f.assignedTo || undefined);
 
       // A new sale order shows what it sells (photos, CAD, design) unless pictures were added here.
@@ -1083,7 +1085,7 @@ function NewOrderForm() {
             ) : null}
 
             {/* One row: who it is for (the client, or the build's company) and who has it. */}
-            <div className={`grid gap-3 items-start ${isAdmin ? "md:grid-cols-2" : ""}`}>
+            <div className={`grid gap-3 items-start ${mayAssign ? "md:grid-cols-2" : ""}`}>
               {forReadyStock && (
                 <CompanyPicker value={buildCompany} onChange={setBuildCompany} label="Company" labelClassName="block text-sm font-medium text-foreground"
                   className="h-auto min-h-[52px] !mt-1.5 rounded-xl [&>span]:flex-1 [&>span]:text-left" />
@@ -1109,7 +1111,7 @@ function NewOrderForm() {
                 </Field>
               )}
               {/* Who has the order: the admin placing it, unless they give it to someone now. */}
-              {isAdmin && (
+              {mayAssign && (
                 <Field label="Assigned to">
                   <AssignPicker value={f.assignedTo} onChange={v => set("assignedTo", v)} wide />
                 </Field>
@@ -1614,7 +1616,7 @@ function NewOrderForm() {
               picks={picks} onPicks={onPicks} planned={plannedBuy} onPlanned={setPlannedBuy}
               stub={{ id: draftId.current, orderNumber: "this order", clientId: forReadyStock ? "" : f.clientId, forReadyStock: forReadyStock || undefined,
                 ...coField(orderCompany), metal: f.metal, jewelleryType: f.jewelleryType, assignedFactoryId: f.assignedFactoryId || undefined } as unknown as Order}
-              isAdmin={isAdmin} />
+              isAdmin={sw("fig.costs")} />
           </SectionCard>
         )}
 
@@ -1684,7 +1686,7 @@ function NewOrderForm() {
         </SectionCard>
 
         {/* ══ 5b. Cost & margin — admins only, as the order is placed ══ */}
-        {isAdmin && kind !== "readyStock" && (() => {
+        {sw("fig.profit") && kind !== "readyStock" && (() => {
           const now = new Date().toISOString();
           const fromStock = picks.reduce((s2, pk) => s2 + (pickCostInr(db, pk, orderCompany) ?? 0), 0);
           const unpriced = picks.filter(pk => (pk.key || pk.kind === "certified") && pickCostInr(db, pk, orderCompany) == null).length;
@@ -1789,6 +1791,8 @@ function NewOrderForm() {
             </SectionCard>
 
             {/* Advance Payment */}
+            {/* Taking money is Payments → Add — the advance is a payment like any other. */}
+            {(isAdmin || canDo("payments", "add")) && (
             <SectionCard icon={<CreditCard className="h-4 w-4 text-success" />} title="Advance Payment" subtitle="Optional" iconBg="bg-success/10">
               {/* Amount + Note — 2 cols on desktop only (note is wide) */}
               <div className="grid md:grid-cols-2 gap-3">
@@ -1881,6 +1885,7 @@ function NewOrderForm() {
                 </p>
               )}
             </SectionCard>
+            )}
           </>
         )}
 

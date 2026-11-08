@@ -4,6 +4,7 @@ import { toast } from "sonner";
 import { Pencil } from "lucide-react";
 import { useAuth } from "@/lib/auth";
 import { useDb } from "@/hooks/useDb";
+import { hasSwitch } from "@/lib/access";
 import { DIAMOND_SHAPES, type MaterialIssuance } from "@/lib/db";
 import { editIssuance, isPoolDelivery, isPoolDraw } from "@/lib/issuanceEdit";
 import { factoryPoolBalance } from "@/lib/manufacturing";
@@ -101,9 +102,9 @@ export function IssuanceEditSheet({ issuance, onClose }: { issuance: MaterialIss
 
   const save = async () => {
     if (!mi) return;
-    // Every place this opens from offers it to an admin only (the factory's
-    // page, Buy & Assign); checked again here, as the rules don't.
-    if (user?.role !== "admin") { toast.error("Only an admin can change what was issued to a factory"); return; }
+    // Opened from the factory's page (factories.issue) and Buy & Assign
+    // (buyAssign.changeAssign); checked again here.
+    if (!(user?.role === "admin" || hasSwitch("factories.issue") || hasSwitch("buyAssign.changeAssign"))) { toast.error("Your access does not include changing what was issued to a factory"); return; }
     const qty = Number(f.qty);
     if (!certified && (!qty || qty <= 0)) { toast.error(`Enter the ${unit === "g" ? "weight" : "quantity"}`); return; }
     try {

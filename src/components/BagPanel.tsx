@@ -4,7 +4,7 @@ import { toast } from "sonner";
 import { ArrowRightLeft, Gem, Hash, Layers, Package, Printer, Wallet } from "lucide-react";
 import { useDb } from "@/hooks/useDb";
 import { useAuth } from "@/lib/auth";
-import { useCan } from "@/hooks/useCan";
+import { useCan, useHas } from "@/hooks/useCan";
 import { fmtDate, loadDb, ensureCollections } from "@/lib/db";
 import { bagMoveLabel, bagNoOf, printBagLabels } from "@/lib/diamondBags";
 import { lotBalances, lotHistory, lotKey, lotLabel, lotParts, type LotSpec } from "@/lib/diamondLots";
@@ -53,6 +53,8 @@ export function BagPanel({ keys, label, companyId, start = "view", onClose }: {
   const { user } = useAuth();
   const can = useCan();
   const mayEdit = can("stock", "edit");
+  // Value at cost: only with fig.costs — an admin always.
+  const showCosts = useHas()("fig.costs");
   const multiCo = hasCompanies(db.settings);
   // The bag open now: the one given, or the one picked from a line of several.
   const [bag, setBag] = useState<string | null>(null);
@@ -327,7 +329,7 @@ export function BagPanel({ keys, label, companyId, start = "view", onClose }: {
           <StatStrip items={[
             { label: "Carats", value: `${ct} ct`, icon: Gem, sub: bag ? (ct > 0 ? "In the bag" : "Empty") : `${members.length} bags` },
             { label: "Pieces", value: pcs != null ? pcs.toLocaleString() : "—", icon: Layers, sub: pcs != null ? "Counted" : "Not counted — recount" },
-            { label: "Value at cost", value: priced ? fmtMoneyInr(value) : "—", icon: Wallet, sub: priced && ct > 0 ? `${fmtMoneyInr(value / ct)}/ct average` : "No price yet" },
+            ...(!showCosts ? [] : [{ label: "Value at cost", value: priced ? fmtMoneyInr(value) : "—", icon: Wallet, sub: priced && ct > 0 ? `${fmtMoneyInr(value / ct)}/ct average` : "No price yet" }]),
           ]} />
           {!bag && (
             <div className="grid sm:grid-cols-2 gap-2">

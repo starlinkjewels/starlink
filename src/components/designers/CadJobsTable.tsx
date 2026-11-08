@@ -3,6 +3,7 @@ import { Link } from "react-router-dom";
 import { FolderOpen } from "lucide-react";
 import { fmtDate, type CadJob } from "@/lib/db";
 import { useDb } from "@/hooks/useDb";
+import { useHas } from "@/hooks/useCan";
 import { fmtMoneyInr } from "@/lib/manufacturing";
 import { KIND_LABEL, STATUS_LABEL, STATUS_TONE, designerOf, isOpenJob, jobPayState } from "@/lib/designers";
 import { DataTable, CellMain, CellTag, CellAmount, CellDate, type DataColumn } from "@/components/DataTable";
@@ -18,6 +19,8 @@ export function CadJobsTable({ id, jobs, showDesigner, exportName, emptyText }: 
   id: string; jobs: CadJob[]; showDesigner?: boolean; exportName: string; emptyText: string;
 }) {
   const db = useDb();
+  // A design's charge is what it costs us: only with fig.costs (an admin always).
+  const showCharge = useHas()("fig.costs");
   const [open, setOpen] = useState<string | null>(null);
   // Stays as it was left until cleared; several can be ticked — a design
   // matching any of them shows ("In hand" and "Late" are groups of statuses).
@@ -60,7 +63,7 @@ export function CadJobsTable({ id, jobs, showDesigner, exportName, emptyText }: 
 
   return (
     <>
-      <DataTable id={id} noun="design" rows={rows} rowKey={j => j.id} columns={cols}
+      <DataTable id={id} noun="design" rows={rows} rowKey={j => j.id} columns={showCharge ? cols : cols.filter(c => c.key !== "charge")}
         defaultSort={{ key: "date", dir: "desc" }}
         searchText={j => [j.orderNumber, j.brief.piece, j.brief.designNo, name(j), STATUS_LABEL[j.status]].filter(Boolean).join(" ")}
         searchPlaceholder="Search designs"
