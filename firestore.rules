@@ -46,10 +46,16 @@ service cloud.firestore {
 
     // Role index — read by its owner + admin; written by staff (clients only)
     // or admin. This is what every function above consults.
+    // Staff look after CLIENTS' sign-in records only: one they create is a client's,
+    // one they change or remove must already be a client's and stay one. An
+    // employee's or an admin's record is an admin's alone — before 2026-11-08 any
+    // employee could rewrite or delete one, and so lock out another admin.
     match /userByAuth/{uid} {
       allow read:   if isAdmin() || (signedIn() && request.auth.uid == uid);
-      allow create, update: if isAdmin() || (isStaff() && request.resource.data.role == 'client');
-      allow delete: if isAdmin() || isStaff();
+      allow create: if isAdmin() || (isStaff() && request.resource.data.role == 'client');
+      allow update: if isAdmin()
+        || (isStaff() && resource.data.role == 'client' && request.resource.data.role == 'client');
+      allow delete: if isAdmin() || (isStaff() && (resource == null || resource.data.role == 'client'));
     }
 
     // User profiles — no passwords. Readable by any active user (names shown in
@@ -306,9 +312,19 @@ service cloud.firestore {
     match /docShares/{id}  { allow read, write: if canDocs(); }
 
     // App settings / branding — readable by any active user; edited by staff.
+    // The business's settings. An admin changes anything. Staff change only what
+    // the working screens change — the words they add to a list, Ready Stock's
+    // offices, the certified-stone number — and nothing else: not the rates, the
+    // companies, the invoice details, the year lock. MUST match
+    // STAFF_SETTINGS_KEYS in src/lib/db.ts (a staff save sends just those fields).
     match /meta/{doc} {
-      allow read:  if isActive();
-      allow write: if isStaff();
+      allow read:   if isActive();
+      allow create, delete: if isAdmin();
+      allow update: if isAdmin()
+        || (isStaff() && doc == 'settings'
+            && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+                 'optionLists', 'metalsWithoutKarats', 'lockerCategories', 'expenseCategories',
+                 'readyStockOffices', 'nextDiamondStockNo']));
     }
 
     // The company's brand (Settings → Brand Studio): logo, name, icon, colour —

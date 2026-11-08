@@ -24,6 +24,7 @@ import {
   getDocs,
   getCountFromServer,
   documentId,
+  deleteField,
   type Query,
   type DocumentData,
   type DocumentSnapshot,
@@ -2918,6 +2919,16 @@ const ARRAY_COLS: ArrayCol[] = [
 ];
 const SETTINGS_COL = "meta";
 const SETTINGS_DOC = "settings";
+/** The settings the working screens change, which staff may save — the words
+ *  they type into a list (ListCombo, CategoryCombo, factory labour), Ready
+ *  Stock's offices, and the certified-stone number. Everything else in the
+ *  settings is an admin's. MUST match STAFF_SETTINGS in firestore.rules. */
+const STAFF_SETTINGS_KEYS = new Set([
+  "optionLists", "metalsWithoutKarats", "lockerCategories", "expenseCategories",
+  "readyStockOffices", "nextDiamondStockNo",
+]);
+/** Whether the settings record is on the server — staff change its fields, only an admin creates it. */
+let settingsOnServer = false;
 const INDEX_COL = "userByAuth"; // uid → role index the security rules read
 
 // Minimal per-user record the security rules consult (keyed by Firebase Auth
@@ -3054,6 +3065,8 @@ async function persist() {
   // (Firestore allows at most 500 writes per batch).
   type Op =
     | { kind: "set"; col: string; id: string; data: Record<string, unknown> }
+    // Only these fields of the record, the rest left as the server has it (staff settings — below).
+    | { kind: "patch"; col: string; id: string; data: Record<string, unknown> }
     | { kind: "del"; col: string; id: string };
   const opsList: Op[] = [];
   const touched = new Set<string>();
@@ -3129,18 +3142,54 @@ async function persist() {
   }
 
   if (!eq(snap.settings, remote.settings)) {
-    opsList.push({
-      kind: "set",
-      col: SETTINGS_COL,
-      id: SETTINGS_DOC,
-      data: snap.settings as unknown as Record<string, unknown>,
-    });
-    touched.add(SETTINGS_COL);
-    logRaw.push({
-      col: SETTINGS_COL, id: SETTINGS_DOC,
-      before: (remote.settings as unknown as Record<string, unknown>) ?? null,
-      after: snap.settings as unknown as Record<string, unknown>,
-    });
+    // An admin writes the business's settings whole, as ever. Anyone else may
+    // change only the few the working screens change (STAFF_SETTINGS_KEYS) —
+    // firestore.rules refuses the rest — so their save sends just the fields
+    // that changed: never a whole copy that could undo an admin's newer change
+    // or carry a field they may not touch. Anything else is put back here.
+    const meAuth = fbAuth.currentUser;
+    const meUser = cache.users.find(u => u.authUid === meAuth?.uid);
+    const adminSession = isAdminEmail(meAuth?.email) || (meUser?.role === "admin" && meUser.status === "active");
+    const before = (remote.settings as unknown as Record<string, unknown>) ?? null;
+    if (adminSession || !before) {
+      opsList.push({
+        kind: "set",
+        col: SETTINGS_COL,
+        id: SETTINGS_DOC,
+        data: snap.settings as unknown as Record<string, unknown>,
+      });
+      touched.add(SETTINGS_COL);
+      logRaw.push({
+        col: SETTINGS_COL, id: SETTINGS_DOC,
+        before,
+        after: snap.settings as unknown as Record<string, unknown>,
+      });
+    } else {
+      const after = snap.settings as unknown as Record<string, unknown>;
+      const live = cache.settings as unknown as Record<string, unknown>;
+      const patch: Record<string, unknown> = {};
+      const refused: string[] = [];
+      for (const k of new Set([...Object.keys(before), ...Object.keys(after)])) {
+        if (eq(after[k], before[k])) continue;
+        if (STAFF_SETTINGS_KEYS.has(k) && settingsOnServer) {
+          patch[k] = after[k] === undefined ? deleteField() : after[k];
+        } else {
+          refused.push(k);
+          // Back to what the server holds, here and on screen.
+          if (before[k] === undefined) { delete after[k]; delete live[k]; }
+          else { after[k] = clean(before[k]); live[k] = clean(before[k]); }
+        }
+      }
+      if (refused.length) {
+        console.warn("[db] settings only an admin may change — not saved:", refused.join(", "));
+        emit();
+      }
+      if (Object.keys(patch).length) {
+        opsList.push({ kind: "patch", col: SETTINGS_COL, id: SETTINGS_DOC, data: patch });
+        touched.add(SETTINGS_COL);
+        logRaw.push({ col: SETTINGS_COL, id: SETTINGS_DOC, before, after });
+      }
+    }
   }
 
   // Maintain the userByAuth role index (keyed by Firebase Auth uid). The
@@ -3168,6 +3217,12 @@ async function persist() {
   for (const [auid, data] of Object.entries(desired)) {
     if (remoteIdx[auid] === JSON.stringify(data)) continue;
     if (!(amAdmin || (amStaff && data.role === "client"))) continue; // not ours to write
+    if (!amAdmin && remoteIdx[auid]) {
+      // …and over a record that is a client's already, never an employee's or an admin's (firestore.rules).
+      let was = "";
+      try { was = (JSON.parse(remoteIdx[auid]) as IndexDoc).role; } catch { /* unreadable — leave it */ }
+      if (was !== "client") continue;
+    }
     idxOps.push({
       kind: "set",
       col: INDEX_COL,
@@ -3179,6 +3234,12 @@ async function persist() {
   if (amAdmin || amStaff) {
     for (const auid of Object.keys(remoteIdx)) {
       if (!desired[auid]) {
+        // Staff may remove only a client's sign-in record (firestore.rules) — never an employee's or an admin's.
+        if (!amAdmin) {
+          let role = "";
+          try { role = (JSON.parse(remoteIdx[auid]) as IndexDoc).role; } catch { /* unreadable — leave it */ }
+          if (role !== "client") continue;
+        }
         idxOps.push({ kind: "del", col: INDEX_COL, id: auid });
         idxDeletes.push(auid);
       }
@@ -3220,7 +3281,7 @@ async function persist() {
     // writes. A new batch starts at ~8 MB. Same order as ever.
     const MAX_BYTES = 8_000_000;
     const sizeOf = (op: (typeof opsList)[number]) => {
-      if (op.kind !== "set") return 100;
+      if (op.kind === "del") return 100;
       try { return JSON.stringify(op.data).length; } catch { return 1000; }
     };
     let batch = writeBatch(fsdb), inBatch = 0, bytes = 0;
@@ -3231,6 +3292,7 @@ async function persist() {
         batch = writeBatch(fsdb); inBatch = 0; bytes = 0;
       }
       if (op.kind === "set") batch.set(doc(fsdb, op.col, op.id), op.data);
+      else if (op.kind === "patch") batch.update(doc(fsdb, op.col, op.id), op.data);
       else batch.delete(doc(fsdb, op.col, op.id));
       inBatch++; bytes += size;
     }
@@ -4393,6 +4455,7 @@ function subscribeAll(scope: Scope): Promise<void> {
             first(SETTINGS_COL);
             return;
           }
+          settingsOnServer = snap.exists();
           if (snap.exists()) {
             cache.settings = { ...defaultSettings(), ...(snap.data() as Settings) };
             remote.settings = clean(cache.settings);
