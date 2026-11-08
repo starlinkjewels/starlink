@@ -290,7 +290,8 @@ function NewOrderForm() {
   const canDo = useCan();
   const sw = useHas();
   const mayAssign = isAdmin || (isEmployee && sw("orders.assign"));
-  const mayPlan = !isClient && (isAdmin || (isEmployee && canDo("orders", "edit")));
+  // Planning production while placing it: an admin, or Orders → Edit with the production switch.
+  const mayPlan = !isClient && (isAdmin || (isEmployee && canDo("orders", "edit") && sw("orders.production")));
   // The CAD designer, given the design as the order is placed (a piece with metal only).
   const [designerPick, setDesignerPick] = useState<DesignerChoice>(NO_DESIGNER);
   // In-house order to build a piece for Ready Stock — no client, no billing, short timeline.
@@ -609,7 +610,7 @@ function NewOrderForm() {
       if (q > it.quantity) { toast.error(`${name}: only ${it.quantity} in stock.`); return; }
       if (x.price.trim() === "" || !(Number(x.price) >= 0)) { toast.error(`${name}: enter its price.`); return; }
     }
-    const designOn = mayPlan && kind === "piece" && !isDiamondOnly && !!designerPick.designerId;
+    const designOn = mayPlan && sw("orders.design") && kind === "piece" && !isDiamondOnly && !!designerPick.designerId;
     if (designOn && designerPick.rate.trim() && !(Number(designerPick.rate) >= 0)) { toast.error("CAD designer: enter a charge of 0 or more."); return; }
     // The advance's locker and amount were checked with the other missing fields (fixesNow).
 
@@ -1620,7 +1621,7 @@ function NewOrderForm() {
           </SectionCard>
         )}
 
-        {mayPlan && kind === "piece" && !isDiamondOnly && (
+        {mayPlan && sw("orders.design") && kind === "piece" && !isDiamondOnly && (
           <SectionCard icon={<PenTool className="h-4 w-4 text-primary" />} title="CAD designer" subtitle="Optional — they get the design's details and your reference images, never prices or the client">
             <DesignerFields value={designerPick} onChange={setDesignerPick} optional compact />
           </SectionCard>

@@ -33,7 +33,7 @@ import { LAZY_COLS } from "./pageData";
 import { db as fsdb, auth as fbAuth, isAdminEmail, deviceCacheActive } from "./firebase";
 import { describeChanges, summarise, undoBlocker, type ActivityEntry, type ActivityKind } from "./activityFormat";
 import { moduleForPath } from "./modules";
-import { reachOf, limitsOf, type AccessDoc } from "./permissions";
+import { reachOf, limitsOf, compileGrants, grantsNow, type AccessDoc, type GrantWindow } from "./permissions";
 
 export type Role = "admin" | "employee" | "client";
 
@@ -146,6 +146,7 @@ import type { ItemDesign, ItemSpecs } from "./pure/catalogMedia";
 export type { MaterialDef, MaterialKey } from "./materials";
 import { KARAT_PURITY, toPureGold, pureFromPurity, openingDebitAmt, openingCreditAmt, hasOpeningBalance } from "./pure/basics";
 import { closedTo, isClosedDate, lockBreaches, breachMessage, lockedPart } from "./yearLock";
+import { policyAllows, POLICY_NOUN, type Op as WriteOp } from "./pure/writePolicy";
 export { KARAT_PURITY, toPureGold, pureFromPurity, openingDebitAmt, openingCreditAmt, hasOpeningBalance };
 
 export interface OpeningBalanceInfo {
@@ -2942,16 +2943,64 @@ interface IndexDoc {
   /** An employee let into Documents (User.documentsAccess) — firestore.rules' canDocs().
    *  Present only when true, so nobody else's index document changes. */
   docs?: true;
+  /** An employee's access compiled for the database rules (permissions.ts compileGrants):
+   *  what they may do, and temporary grants as time windows. Employees only. */
+  g?: string[];
+  w?: GrantWindow[];
+  /** Their limits as the rules check them: days back, and the largest money entry per currency. */
+  lim?: { bd?: number; mx?: Record<string, number> };
+}
+
+/**
+ * The largest single money entry in each currency the business uses, from a
+ * limit in dollars at the rate table's rate today. A currency with no rate gets
+ * 0 — nothing passes. The device's check and the database rules (the same
+ * figures, in the person's sign-in record) both use exactly these.
+ */
+function moneyCaps(maxUsd: number, settings: Settings): Record<string, number> {
+  const codes = new Set<string>(["INR", "USD", ...(settings.currencyRates ?? []).map(r => ccy(r.code))]);
+  const out: Record<string, number> = {};
+  for (const c of codes) {
+    const r = tableRate(settings.currencyRates, c, "USD");
+    out[c] = r ? Math.floor((maxUsd / r) * 100) / 100 : 0;
+  }
+  return out;
+}
+
+/** JSON with keys in a fixed order — what the server sends back may order a map's keys differently. */
+function stable(v: unknown): string {
+  if (Array.isArray(v)) return `[${v.map(stable).join(",")}]`;
+  if (v && typeof v === "object") return `{${Object.keys(v as object).sort().filter(k => (v as Record<string, unknown>)[k] !== undefined).map(k => `${JSON.stringify(k)}:${stable((v as Record<string, unknown>)[k])}`).join(",")}}`;
+  return JSON.stringify(v ?? null);
+}
+/** An index document as read from the server, in the shape indexOf() makes. */
+function idxShape(v: IndexDoc): IndexDoc {
+  return {
+    role: v.role, clientId: v.clientId ?? null, appId: v.appId ?? "", status: v.status,
+    ...(v.docs === true ? { docs: true as const } : {}),
+    ...(v.g ? { g: v.g } : {}), ...(v.w?.length ? { w: v.w } : {}), ...(v.lim ? { lim: v.lim } : {}),
+  };
 }
 // Last-known Firestore state of the index (uid → serialised IndexDoc), for diffing.
 const remoteIdx: Record<string, string> = {};
 let idxSeeded = false; // remoteIdx baseline taken from the users collection at load
 
 /** The index record for a user (stable key order — used for both write & diff). */
-function indexOf(u: User): IndexDoc {
+function indexOf(u: User, roles: AccessDoc[] = cache.roles ?? [], settings: Settings = cache.settings): IndexDoc {
   const d: IndexDoc = { role: u.role, clientId: u.clientId ?? null, appId: u.id, status: u.status };
   // Last, and only when on — every other index document stays exactly as it was.
   if (u.role === "employee" && u.documentsAccess === true) d.docs = true;
+  if (u.role === "employee") {
+    // What they may do, as the database rules check it (lib/pure/writePolicy.ts).
+    const { g, w } = compileGrants({ id: u.id, role: u.role, roleId: u.roleId }, roles);
+    d.g = g;
+    if (w.length) d.w = w;
+    const lim = limitsOf({ id: u.id, role: u.role, roleId: u.roleId }, roles);
+    const out: NonNullable<IndexDoc["lim"]> = {};
+    if (lim.backDays != null) out.bd = lim.backDays;
+    if (lim.maxAmountUsd) out.mx = moneyCaps(lim.maxAmountUsd, settings);
+    if (Object.keys(out).length) d.lim = out;
+  }
   return d;
 }
 
@@ -3096,11 +3145,34 @@ function accessLimitBreach(changes: { col: string; id: string; before: Record<st
       const was = c.before ? Number(c.before.amountInr) || 0 : 0;
       if (amt <= was) continue; // never stops making an entry smaller
       const code = ccy(c.after.currency as string | undefined);
-      const rate = tableRate(cache.settings.currencyRates, code, "USD", String(c.after.createdAt ?? ""));
-      if (rate == null) return `your access has a limit for one money entry, and there is no ${code} → $ rate to check it against — an admin adds it in Settings → Pricing Rates`;
-      if (amt * rate > lim.maxAmountUsd + 0.005) {
+      const cap = moneyCaps(lim.maxAmountUsd, cache.settings)[code];
+      if (!cap) return `your access has a limit for one money entry, and there is no ${code} → $ rate to check it against — an admin adds it in Settings → Pricing Rates`;
+      if (amt > cap) {
         return `${fmtCcy(amt, code)} is more than your limit of ${fmtCcy(lim.maxAmountUsd, "USD")} for one entry — an admin can record it`;
       }
+    }
+  }
+  return null;
+}
+
+/**
+ * The first write in this save the signed-in employee's access does not cover
+ * (lib/pure/writePolicy.ts) — the reason, or null. An admin and a client are
+ * not decided here (the database rules and their own checks are).
+ */
+function writeRefusal(changes: { col: string; id: string; before: Record<string, unknown> | null; after: Record<string, unknown> | null }[]): string | null {
+  const fb = fbAuth.currentUser;
+  if (!fb || isAdminEmail(fb.email)) return null;
+  const me = cache.users.find(u => u.authUid === fb.uid);
+  if (!me || me.role !== "employee") return null;
+  // Not before their access records have arrived — a Standard staff guess could refuse what they may do.
+  if (!loadedCols.has("roles")) return null;
+  const grants = grantsNow({ id: me.id, role: me.role, roleId: me.roleId }, cache.roles ?? []);
+  for (const c of changes) {
+    const op: WriteOp = !c.before ? "create" : !c.after ? "delete" : "update";
+    if (!policyAllows(c.col, op, grants)) {
+      const what = POLICY_NOUN[c.col] ?? "these records";
+      return `your access does not include ${op === "create" ? "adding" : op === "delete" ? "removing" : "changing"} ${what}`;
     }
   }
   return null;
@@ -3262,10 +3334,13 @@ async function persist() {
   const desired: Record<string, IndexDoc> = {};
   for (const u of (snap.users || []) as User[]) {
     if (!u.authUid) continue;
-    desired[u.authUid] = indexOf(u);
+    desired[u.authUid] = indexOf(u, snap.roles ?? [], snap.settings);
   }
   for (const [auid, data] of Object.entries(desired)) {
-    if (remoteIdx[auid] === JSON.stringify(data)) continue;
+    if (remoteIdx[auid] === stable(data)) continue;
+    // An employee's record carries their compiled access — only from the server's own access
+    // records, never from a saved copy or before they arrive (that would write Standard staff's).
+    if (data.role === "employee" && !(loadedCols.has("roles") && !staleCols.has("roles"))) continue;
     if (!(amAdmin || (amStaff && data.role === "client"))) continue; // not ours to write
     if (!amAdmin && remoteIdx[auid]) {
       // …and over a record that is a client's already, never an employee's or an admin's (firestore.rules).
@@ -3319,6 +3394,14 @@ async function persist() {
       refuseSave(logRaw, [overLimit], `Not saved — ${overLimit}.`);
       return;
     }
+    // …and the rulebook of who may write what (lib/pure/writePolicy.ts) — the same one the
+    // database rules check. Refused here, whole and with the reason, it is never sent to be
+    // refused there, which would stop this device's saves without a word.
+    const notCovered = writeRefusal(logRaw);
+    if (notCovered) {
+      refuseSave(logRaw, [notCovered], `Not saved — ${notCovered}.`);
+      return;
+    }
   }
 
   if (opsList.length === 0 && idxOps.length === 0) return;
@@ -3366,7 +3449,7 @@ async function persist() {
           }
           await ib.commit();
         }
-        for (const [auid, data] of Object.entries(idxWrites)) remoteIdx[auid] = JSON.stringify(data);
+        for (const [auid, data] of Object.entries(idxWrites)) remoteIdx[auid] = stable(data);
         for (const auid of idxDeletes) delete remoteIdx[auid];
       } catch (e) {
         console.warn("[db] role-index sync skipped (not permitted for this account):", e);
@@ -4022,10 +4105,10 @@ async function reconcileRoleIndex(): Promise<void> {
     for (const k of Object.keys(remoteIdx)) delete remoteIdx[k];
     for (const d of snap.docs) {
       const v = d.data() as IndexDoc;
-      remoteIdx[d.id] = JSON.stringify({ role: v.role, clientId: v.clientId ?? null, appId: v.appId ?? "", status: v.status, ...(v.docs === true ? { docs: true } : {}) });
+      remoteIdx[d.id] = stable(idxShape(v));
     }
     idxSeeded = true;
-    const missing = cache.users.filter(u => u.authUid && remoteIdx[u.authUid] !== JSON.stringify(indexOf(u)));
+    const missing = cache.users.filter(u => u.authUid && remoteIdx[u.authUid] !== stable(indexOf(u)));
     if (missing.length) {
       console.info(`[db] role index: ${missing.length} account(s) missing or out of date on the server — writing them back`);
       updateDb(() => {}); // nothing changes in the data, so only the index is written
@@ -4103,7 +4186,7 @@ function applyList(col: ArrayCol, docs: Record<string, unknown>[]) {
   (remote[col] as unknown) = clean(list);
   // Seeded from the server's answer, never the device's saved copy.
   if (col === "users" && !idxSeeded && !staleCols.has("users")) {
-    for (const u of cache.users) if (u.authUid) remoteIdx[u.authUid] = JSON.stringify(indexOf(u));
+    for (const u of cache.users) if (u.authUid) remoteIdx[u.authUid] = stable(indexOf(u));
     idxSeeded = true;
   }
 }
