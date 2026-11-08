@@ -10,7 +10,7 @@ import { StatStrip } from "@/components/TableToolbar";
 import { SectionTitle } from "@/components/SectionTitle";
 import { DataTable, CellMain, CellAmount, CellDate, type DataColumn } from "@/components/DataTable";
 import { lockerTxnDetails } from "@/components/rowDetails";
-import { useCan } from "@/hooks/useCan";
+import { useCan, useHas } from "@/hooks/useCan";
 import { useLoaded } from "@/hooks/useLoaded";
 import { HandCoins, History, Wallet } from "lucide-react";
 import { useNavigate } from "react-router-dom";
@@ -49,6 +49,8 @@ function isIn(t: LockerTransaction) {
 export function DayBook({ lockerId: chosen }: { lockerId?: string }) {
   const db = useDb();
   const can = useCan();
+  // Balances (each line's, opening, closing): only with fig.balances — an admin always.
+  const showBal = useHas()("fig.balances");
   const navigate = useNavigate();
   const lockers = db.lockers.filter(l => l.active !== false);
   // The account picked, or the first one. Taking the first one ONCE, when the
@@ -132,14 +134,14 @@ export function DayBook({ lockerId: chosen }: { lockerId?: string }) {
     return [t.category ? x.title : t.type, x.order, t.note].filter(Boolean).join(" · ");
   };
 
-  const HEAD = ["Date", "Voucher", "Particulars", `In (${code})`, `Out (${code})`, `Balance (${code})`];
+  const HEAD = ["Date", "Voucher", "Particulars", `In (${code})`, `Out (${code})`, ...(showBal ? [`Balance (${code})`] : [])];
   // The download keeps the book's own order — oldest first — because a printed
   // page gets laid beside the written rojmel, which runs that way down the page.
   const body = [
-    ...(from ? [[fmtDate(from), "", "Opening balance — brought forward", "", "", periodOpening]] : []),
+    ...(from && showBal ? [[fmtDate(from), "", "Opening balance — brought forward", "", "", periodOpening]] : []),
     ...matching.map(({ t, balance }) => [
       fmtDate(t.createdAt), t.voucherNo ?? "", particulars(t),
-      isIn(t) ? t.amountInr : "", isIn(t) ? "" : t.amountInr, balance,
+      isIn(t) ? t.amountInr : "", isIn(t) ? "" : t.amountInr, ...(showBal ? [balance] : []),
     ]),
   ];
 
@@ -149,26 +151,26 @@ export function DayBook({ lockerId: chosen }: { lockerId?: string }) {
     title: `Day Book — ${locker?.name ?? "Account"}`,
     subjectLines: [
       `${matching.length} entr${matching.length !== 1 ? "ies" : "y"} · ${rangeLabel(from, to)} · oldest first`,
-      `Opening ${pdfMoney(periodOpening)} · Closing ${pdfMoney(from || to ? periodClosing : closing)}`,
+      ...(showBal ? [`Opening ${pdfMoney(periodOpening)} · Closing ${pdfMoney(from || to ? periodClosing : closing)}`] : []),
       `Report Generated: ${new Date().toLocaleDateString("en-IN", { month: "long", day: "numeric", year: "numeric" })}`,
     ],
     summary: [
       { label: "Money in", value: pdfMoney(totalIn) },
       { label: "Money out", value: pdfMoney(totalOut) },
-      ...(from ? [{ label: "Brought forward", value: pdfMoney(periodOpening) }] : []),
-      { label: from || to ? "Closing balance" : "Balance", value: pdfMoney(from || to ? periodClosing : closing) },
+      ...(from && showBal ? [{ label: "Brought forward", value: pdfMoney(periodOpening) }] : []),
+      ...(showBal ? [{ label: from || to ? "Closing balance" : "Balance", value: pdfMoney(from || to ? periodClosing : closing) }] : []),
     ],
     landscape: true,
     columns: [
       { header: "Date", x: 14 }, { header: "Voucher", x: 44 }, { header: "Particulars", x: 70 },
-      { header: "In", x: 180 }, { header: "Out", x: 215 }, { header: "Balance", x: 252 },
+      { header: "In", x: 180 }, { header: "Out", x: 215 }, ...(showBal ? [{ header: "Balance", x: 252 }] : []),
     ],
-    align: ["left", "left", "left", "right", "right", "right"],
+    align: ["left", "left", "left", "right", "right", ...(showBal ? ["right" as const] : [])],
     rows: [
-      ...(from ? [[fmtDate(from), "", "Opening balance — brought forward", "", "", pdfMoney(periodOpening)]] : []),
+      ...(from && showBal ? [[fmtDate(from), "", "Opening balance — brought forward", "", "", pdfMoney(periodOpening)]] : []),
       ...matching.map(({ t, balance }) => [
         fmtDate(t.createdAt), t.voucherNo ?? "", particulars(t).slice(0, 62),
-        isIn(t) ? pdfMoney(t.amountInr) : "", isIn(t) ? "" : pdfMoney(t.amountInr), pdfMoney(balance),
+        isIn(t) ? pdfMoney(t.amountInr) : "", isIn(t) ? "" : pdfMoney(t.amountInr), ...(showBal ? [pdfMoney(balance)] : []),
       ]),
     ],
     filename: `Day-Book-${locker?.name?.replace(/\s+/g, "-") ?? "account"}`,
@@ -251,19 +253,19 @@ export function DayBook({ lockerId: chosen }: { lockerId?: string }) {
         })}
         summary={
           <StatStrip items={[
-            { label: "Opening balance", value: money(locker?.openingBalance || 0), icon: History, sub: "At the start" },
+            ...(showBal ? [{ label: "Opening balance", value: money(locker?.openingBalance || 0), icon: History, sub: "At the start" }] : []),
             // The signs only when the figures do add up: filtered, in and out
             // are the rows shown, the balances the whole account.
             { label: "Money in", value: money(totalIn), tone: "in", op: filtered ? undefined : "+", sub: `${nIn} ${nIn === 1 ? "entry" : "entries"}${filtered ? " shown" : ""}` },
             { label: "Money out", value: money(totalOut), tone: "out", op: filtered ? undefined : "−", sub: `${nOut} ${nOut === 1 ? "entry" : "entries"}${filtered ? " shown" : ""}` },
-            { label: "Closing balance", value: money(closing), tone: "strong", op: filtered ? undefined : "=", icon: Wallet, sub: "Now" },
-          ]} note={filtered ? `Money in and out for what the filters show${from || to ? ` (${rangeLabel(from, to)})` : ""} — the balances are the whole account's` : undefined} />
+            ...(showBal ? [{ label: "Closing balance", value: money(closing), tone: "strong" as const, op: filtered ? undefined : ("=" as const), icon: Wallet, sub: "Now" }] : []),
+          ]} note={filtered && showBal ? `Money in and out for what the filters show${from || to ? ` (${rangeLabel(from, to)})` : ""} — the balances are the whole account's` : undefined} />
         }
         resetKey={JSON.stringify([lockerId, ql, from, to, dir])}
         id="day-book"
         noun="movement"
         rows={rows}
-        columns={columns}
+        columns={showBal ? columns : columns.filter(c => c.key !== "balance")}
         rowKey={r => r.t.id}
         defaultSort={{ key: "date", dir: "desc" }}
         // Opened: the note as typed, who recorded it and when, and what the

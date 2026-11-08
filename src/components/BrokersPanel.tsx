@@ -4,6 +4,7 @@ import { ExternalLink, Pencil, Power, Trash2, Wallet } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { updateDb, fmtDate, ensureCollections, collectionsLoaded, hasOpeningBalance, type Broker } from "@/lib/db";
 import { useDb } from "@/hooks/useDb";
+import { useCan } from "@/hooks/useCan";
 import { brokerAccount, brokerDeleteWhy, brokerPayments, brokerSuppliers } from "@/lib/brokers";
 import { fmtMoneyInr } from "@/lib/manufacturing";
 import { confirmBox } from "@/lib/confirm";
@@ -22,10 +23,14 @@ const NEEDS = ["purchases", "lockerTransactions", "supplierSales", "supplierRece
  * and what is still owed (lib/brokers.ts). Pay, edit, switch off or delete
  * from a row's ⋯.
  */
-export function BrokersPanel({ isAdmin, creating, onCreating }: {
-  isAdmin: boolean; creating: boolean; onCreating: (v: boolean) => void;
+export function BrokersPanel({ mayAdd, mayEdit, mayDelete, creating, onCreating }: {
+  /** Suppliers → Add / Edit / Delete — brokers go with suppliers. */
+  mayAdd: boolean; mayEdit: boolean; mayDelete: boolean; creating: boolean; onCreating: (v: boolean) => void;
 }) {
   const db = useDb();
+  const can = useCan();
+  // Paying anyone is Payments → Add, from whichever page.
+  const mayPay = can("payments", "add");
   const [q, setQ] = useState("");
   const [editing, setEditing] = useState<Broker | null>(null);
   const [paying, setPaying] = useState<Broker | null>(null);
@@ -53,15 +58,15 @@ export function BrokersPanel({ isAdmin, creating, onCreating }: {
     toast.success("Deleted");
   };
 
-  const ADMIN_ONLY = "Only an admin can change brokers";
+  const ADMIN_ONLY = "Your access does not include changing brokers";
   const actions = (b: Broker): MoreAction[] => {
     const delWhy = ready ? brokerDeleteWhy(db, b) : "Still loading";
     return [
       { label: "Open broker", icon: ExternalLink, hint: "Bills, suppliers and money", onSelect: () => navigate(`/suppliers/brokers/${b.id}`) },
-      { label: "Pay through broker", icon: Wallet, hint: acc(b).toPay > 0.5 ? `${fmtMoneyInr(acc(b).toPay)} to settle` : "Nothing to settle now", onSelect: () => setPaying(b) },
-      { label: "Edit details", icon: Pencil, onSelect: () => setEditing(b), disabled: !isAdmin, hint: isAdmin ? "Name, phone, usual %" : ADMIN_ONLY },
-      { label: b.active === false ? "Switch on" : "Switch off", icon: Power, onSelect: () => toggle(b), disabled: !isAdmin, hint: isAdmin ? "Kept on past bills either way" : ADMIN_ONLY },
-      { label: "Delete broker", icon: Trash2, danger: true, onSelect: () => del(b), disabled: !isAdmin || !!delWhy, hint: !isAdmin ? ADMIN_ONLY : delWhy },
+      { label: "Pay through broker", icon: Wallet, hint: acc(b).toPay > 0.5 ? `${fmtMoneyInr(acc(b).toPay)} to settle` : "Nothing to settle now", onSelect: () => setPaying(b), disabled: !mayPay, ...(mayPay ? {} : { hint: "Your access does not include payments" }) },
+      { label: "Edit details", icon: Pencil, onSelect: () => setEditing(b), disabled: !mayEdit, hint: mayEdit ? "Name, phone, usual %" : ADMIN_ONLY },
+      { label: b.active === false ? "Switch on" : "Switch off", icon: Power, onSelect: () => toggle(b), disabled: !mayEdit, hint: mayEdit ? "Kept on past bills either way" : ADMIN_ONLY },
+      { label: "Delete broker", icon: Trash2, danger: true, onSelect: () => del(b), disabled: !mayDelete || !!delWhy, hint: !mayDelete ? ADMIN_ONLY : delWhy },
     ];
   };
 
@@ -100,13 +105,13 @@ export function BrokersPanel({ isAdmin, creating, onCreating }: {
           loading={!ready}
           defaultSort={{ key: "due", dir: "desc" }}
           exportName="Brokers"
-          emptyText={isAdmin ? "No brokers yet — add one, then pick them on a purchase bill." : "No brokers yet — an admin adds them here."}
+          emptyText={mayAdd ? "No brokers yet — add one, then pick them on a purchase bill." : "No brokers yet — an admin adds them here."}
           summary={ready && totalDue > 0.5 ? (
             <p className="text-xs text-muted-foreground px-1">To settle through brokers (bills + brokerage): <span className="font-semibold text-destructive">{fmtMoneyInr(totalDue)}</span></p>
           ) : undefined}
         />
       </div>
-      {isAdmin && <BrokerCreateDialog open={creating} onOpenChange={onCreating} />}
+      {mayAdd && <BrokerCreateDialog open={creating} onOpenChange={onCreating} />}
       <BrokerCreateDialog open={!!editing} onOpenChange={v => { if (!v) setEditing(null); }} broker={editing ?? undefined} />
       <PayBrokerSheet open={!!paying} onOpenChange={v => { if (!v) setPaying(null); }} brokerId={paying?.id} />
     </div>

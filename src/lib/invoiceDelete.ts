@@ -22,10 +22,11 @@ import {
 import { confirmBox } from "./confirm";
 import { STILL_LOADING, recordsReady } from "./actionHints";
 import { closedWhy } from "./yearLock";
+import { switchWhy } from "./access";
 
-/** Who may delete an invoice: an admin only. Undefined when they may. */
+/** Who may delete an invoice: an admin, or access with invoices.delete. Undefined when they may. */
 export function invoiceDeleteAccess(user: Pick<User, "role"> | null | undefined): string | undefined {
-  return user?.role === "admin" ? undefined : "Only an admin can delete an invoice";
+  return switchWhy(user, "invoices.delete", "deleting invoices");
 }
 
 /** Why this invoice can't be deleted; undefined when it can. */

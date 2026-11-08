@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { useDb } from "@/hooks/useDb";
+import { useHas } from "@/hooks/useCan";
 import { useAuth } from "@/lib/auth";
 import { bagNoOf, giveBags, printBagLabels } from "@/lib/diamondBags";
 import { companyById, hasCompanies } from "@/lib/companies";
@@ -84,6 +85,8 @@ export function StockLotsTable({ material, companyId, selected, onSelect }: {
   material: MaterialKey; companyId: string; selected: string[] | null; onSelect: (keys: string[] | null, label?: string) => void;
 }) {
   const db = useDb();
+  // Average cost and value at cost: only with fig.costs — an admin always.
+  const showCosts = useHas()("fig.costs");
   const { user } = useAuth();
   const unit = materialUnit(db.settings, material);
   const diamond = material === "diamond";
@@ -321,8 +324,8 @@ export function StockLotsTable({ material, companyId, selected, onSelect }: {
         ...(diamond ? [{ label: "Pieces", value: pcsKnown.length ? totalPcs.toLocaleString() : "—", icon: Layers,
           sub: pcsKnown.length < shown.length ? `${pcsKnown.length ? "Counted bags only · " : ""}${shown.length - pcsKnown.length} not counted — open a bag to recount` : "Counted in every bag" }] : []),
         ...(gold ? [{ label: "Fine gold (24K)", value: fmtQty(r2(shown.reduce((s, r) => s + (r.fine ?? 0), 0)), "g"), icon: Coins }] : []),
-        { label: "Value at cost", value: fmtMoneyInr(totalValue), icon: Wallet,
-          sub: unpriced ? `${unpriced} without a price yet` : "Average cost × quantity" },
+        ...(showCosts ? [{ label: "Value at cost", value: fmtMoneyInr(totalValue), icon: Wallet,
+          sub: unpriced ? `${unpriced} without a price yet` : "Average cost × quantity" }] : []),
       ]} />
       <DataTable
         id={`stock-lots-${diamond ? "diamond" : gold ? "gold" : "material"}${together ? "-together" : ""}`}
@@ -341,7 +344,7 @@ export function StockLotsTable({ material, companyId, selected, onSelect }: {
             ? { label: `Print ${r.members.length === 1 ? "its bag label" : `its ${r.members.length} bag labels`}`, icon: Printer, disabled: !r.members.some(m => m.bag), hint: r.members.map(m => m.bag).filter(Boolean).join(", ") || "Give these lots bag numbers first", onSelect: () => print([r]) }
             : { label: "Print bag label", icon: Printer, disabled: !r.bag, hint: r.bag ? `${r.bag} · ${lotLabel(r.key)}` : "Give this lot a bag number first", onSelect: () => print([r]) },
         ]) : undefined}
-        columns={columns}
+        columns={showCosts ? columns : columns.filter(c => c.key !== "avg" && c.key !== "value")}
         filters={filters}
         onClearFilters={() => { setShape(ALL); setVariety(ALL); setType(ALL); setMm(ALL); setSize(ALL); setColor(ALL); setClarity(ALL); }}
         search={{ value: q, onChange: setQ, placeholder: diamond ? "Search bags — e.g. BAG-0007, 1.3 mm, G-H, VS" : "Search", ariaLabel: "Search stock" }}

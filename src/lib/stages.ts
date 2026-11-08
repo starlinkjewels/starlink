@@ -1,5 +1,6 @@
 import { isShelfSale } from "./stockSale";
 import { approveOrderTimeline } from "./pure/pipelines";
+import { hasSwitch, myStepLimit } from "./access";
 import {
   TIMELINE_STEPS, isDiamondOnlyOrder, isProductionStep, loadDb, statusFromTimeline, uid, worksOnOrder,
   type DB, type Order, type Settings, type Worker,
@@ -213,13 +214,22 @@ export function planMove(o: Order, target: string): MovePlan {
   return { ...plan, revertFrom: to };
 }
 
-/** Whether this person may move this order's stages — the same rule as the order screen. */
-export function stagePermission(db: DB, user: Worker, o: Order, mayEditOrders: boolean): string | null {
+/** Whether this person may move this order's stages — the same rule as the order screen.
+ *  `step`, when known, is checked against the steps their access is limited to. */
+export function stagePermission(db: DB, user: Worker, o: Order, mayEditOrders: boolean, step?: string): string | null {
   if (user.role === "admin") return null;
   if (user.role !== "employee") return "Only staff move orders.";
   if (!mayEditOrders) return "Your access does not let you change orders.";
-  if (worksOnOrder(db, user, o)) return null;
-  return "Not assigned to you — ask the admin or the account manager.";
+  if (!worksOnOrder(db, user, o)) return "Not assigned to you — ask the admin or the account manager.";
+  if (!hasSwitch("orders.stages")) return "Your access does not include moving orders through the steps.";
+  return stepLimitWhy(step);
+}
+
+/** Why the signed-in person may not move this step (their access names others); null when they may. */
+export function stepLimitWhy(step?: string): string | null {
+  const only = myStepLimit();
+  if (!only || !step || only.includes(step)) return null;
+  return `Your access does not include the step "${step}".`;
 }
 
 /** Approve a waiting order — the board's twin of the order screen's Approve. */

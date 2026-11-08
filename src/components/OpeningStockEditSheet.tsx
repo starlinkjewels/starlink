@@ -7,6 +7,7 @@ import { lotKey, lotParts } from "@/lib/diamondLots";
 import { bagNoOf } from "@/lib/diamondBags";
 import { LooseLotFields, lotFromDraft, type LooseLotDraft } from "@/components/LotFields";
 import { useAuth } from "@/lib/auth";
+import { allowed } from "@/lib/access";
 import { dayOf, type DB, type StockMovement } from "@/lib/db";
 import { fmtQty, materialDef, materialName, materialUnit } from "@/lib/materials";
 import { GradeInput } from "@/components/MaterialFields";
@@ -127,7 +128,7 @@ export function OpeningStockEditSheet({ movement, onClose }: { movement: StockMo
     if (!m) return;
     // Offered to an admin only (the Stock page, Buy & Assign); checked again
     // here, as the rules don't.
-    if (user?.role !== "admin") { toast.error("Only an admin can change stock"); return; }
+    if (!allowed("stock", "edit")) { toast.error("Your access does not include changing stock"); return; }
     const qty = Number(f.qty);
     if (!qty || qty <= 0) { toast.error("Enter the opening quantity"); return; }
     const figuresChanged = qty !== m.quantity || (Number(f.value) || 0) !== (m.valueInr ?? 0) || f.date !== dayOf(m.createdAt) || f.note.trim() !== (m.note ?? "");

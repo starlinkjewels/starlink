@@ -11,6 +11,7 @@ import { factoryFigures, supplierFigures, lockerFigure } from "@/lib/partyTotals
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { OrderThumb } from "@/components/OrderThumb";
 import { useAuth } from "@/lib/auth";
+import { useHas } from "@/hooks/useCan";
 import { loadDb, fmtMoney, fmtDate, byNewestEntered, currentUserOrders, orderTotal, balanceDue, totalAdvance, giftCardStats, keptValue } from "@/lib/db";
 import { useDb } from "@/hooks/useDb";
 import { motion } from "framer-motion";
@@ -69,6 +70,12 @@ export function Dashboard() {
   const [stockLevels, setStockLevels] = useState<StockLevels | null>(null);
   // Stock levels are staff-only; a client's dashboard does not ask for them.
   const isStaffUser = user?.role === "admin" || user?.role === "employee";
+  // The business on Home — totals, money, production, the team's spending: an
+  // admin, or an employee whose access includes dashboard.business. Profit,
+  // cash and others' spending also need their figure switches.
+  const has = useHas();
+  const business = has("dashboard.business");
+  const homeRole: "admin" | "employee" | "client" = user?.role === "client" ? "client" : business ? "admin" : "employee";
   // Every company's stock together — each company keeps its own counter.
   const coIds = companiesOf(db.settings).map(c => c.id).join(",");
   useEffect(() => (isStaffUser ? subscribeStockLevelsByCompany(coIds.split(","), by => setStockLevels(sumStockLevels(Object.values(by)))) : undefined), [isStaffUser, coIds]);
@@ -205,7 +212,7 @@ export function Dashboard() {
   }, [db.users, allExpenses]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // 5th element = optional link target (clicking the card opens that filtered view).
-  const stats: [string, string | number, LucideIcon, Tone | undefined, string?][] = user!.role === "admin"
+  const stats: [string, string | number, LucideIcon, Tone | undefined, string?][] = business
     ? [
         ["Today's orders", todayOrders, Clock, undefined, "/orders"],
         ["For approval", forApproval, ClipboardCheck, "warn", "/orders?status=Waiting"],
@@ -239,11 +246,11 @@ export function Dashboard() {
       <PushPermissionBanner />
       {studio ? (
         <>
-          <StudioHome db={db} orders={orders} role={user!.role as "admin" | "employee" | "client"} firstName={first}
+          <StudioHome db={db} orders={orders} role={homeRole} firstName={first}
             isClient={user!.role === "client"} goldGrams={goldReserveGrams} />
           {user!.role === "admin" && <TargetCard />}
           {user!.role === "admin" && <TopMovesCard />}
-          {user!.role !== "client" && <HomeAnalysis db={db} orders={orders} role={user!.role as "admin" | "employee"} />}
+          {user!.role !== "client" && <HomeAnalysis db={db} orders={orders} role={homeRole === "admin" ? "admin" : "employee"} profit={has("fig.profit")} />}
           {user!.role !== "client" && (
             <div className="border-b border-border/70 pb-2 pt-4">
               <h2 className="text-lg font-semibold tracking-tight text-foreground">More figures</h2>
@@ -299,7 +306,7 @@ export function Dashboard() {
       )}
 
       {/* ── Admin: Certificate Overview ── */}
-      {user!.role === "admin" && (
+      {business && (
         <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.1 }}
           className="card-luxe p-5">
           <SectionTitle className="mb-4" icon={BadgeCheck} title="Certificate Summary" />
@@ -311,7 +318,7 @@ export function Dashboard() {
       )}
 
       {/* ── Admin: Manufacturing Overview ── */}
-      {user!.role === "admin" && (
+      {business && (
         <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.12 }}
           className="card-luxe p-5">
           <SectionTitle className="mb-4" icon={Factory} title="Manufacturing Overview" sub="In INR" />
@@ -326,7 +333,7 @@ export function Dashboard() {
       )}
 
       {/* ── Admin: Cash Position & Profit ── */}
-      {user!.role === "admin" && (
+      {business && has("fig.balances") && (
         <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.14 }}
           className="card-luxe p-5">
           <SectionTitle className="mb-4" icon={Wallet} title="Net cash in" sub="Money in less money out, by currency — profit is in Reports"
@@ -376,7 +383,7 @@ export function Dashboard() {
       )}
 
       {/* ── Admin: Expenses Overview ── */}
-      {user!.role === "admin" && (
+      {business && has("fig.salaries") && (
         <div className="card-luxe p-5">
           <SectionTitle className="mb-4" title="Staff Expenses"
             sub={<><span className="font-semibold text-destructive">{fmtCcyMix(totalExpenseMix)}</span> · {allExpenses.length} entries</>}
@@ -417,7 +424,7 @@ export function Dashboard() {
         </div>
       )}
 
-      {user!.role === "admin" && !studio && (
+      {business && !studio && (
         <div className="grid lg:grid-cols-3 gap-4">
           <div className="card-luxe p-5 lg:col-span-2">
             <SectionTitle className="mb-4" title="Monthly Orders" />

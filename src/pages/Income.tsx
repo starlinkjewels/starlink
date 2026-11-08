@@ -16,7 +16,8 @@ import { PageHeader, TabBar } from "@/components/PageHeader";
 import { StatStrip, type TableFilter } from "@/components/TableToolbar";
 import { ReceiptEditSheet, cancelReceiptFlow, loadReceipts, paymentLockReason } from "@/components/ReceiptEditSheet";
 import { needsAccess } from "@/lib/actionHints";
-import { useCan } from "@/hooks/useCan";
+import { useCan, useHas } from "@/hooks/useCan";
+import { othersExpense, othersAdvance } from "@/lib/figureFilters";
 import { filled, linkList, lockerLabel, lockerTxnDetails, noteText, recorded, refLink, refNo, userName, when, type Detail } from "@/components/rowDetails";
 import { oneLine } from "@/components/MoneyEntryEditor";
 
@@ -64,6 +65,8 @@ export function IncomePage() {
   const navigate = useNavigate();
   const isClient = user!.role === "client";
   const can = useCan();
+  // Other people's salaries, expenses and advances: only with fig.salaries — an admin always.
+  const showOthersPay = useHas()("fig.salaries");
 
   /* Filters */
   const [curTab, setCurTab] = useState<CurrencyCode>("USD");
@@ -130,6 +133,7 @@ export function IncomePage() {
     // shown to a client viewing their own order/payment history.
     if (!isClient) {
       db.expenses.forEach(exp => {
+        if (!showOthersPay && othersExpense(exp, user!.id)) return;
         rows.push({
           id: exp.id, date: exp.createdAt, currency: ccy(exp.currency), direction: "out", type: "Expense",
           party: "Staff Expense", description: exp.title + (exp.note ? ` — ${exp.note}` : ""),
@@ -142,6 +146,7 @@ export function IncomePage() {
       // mirror of the rows already added above; counting both would double them.
       (db.lockerTransactions ?? [])
         .filter(t => t.refType !== "clientPayment" && t.refType !== "expense")
+        .filter(t => showOthersPay || !othersAdvance(t, user!.id))
         .forEach(t => {
           const locker = db.lockers.find(l => l.id === t.lockerId);
           const currency = ccy(t.currency);
@@ -161,7 +166,7 @@ export function IncomePage() {
     }
 
     return rows.sort((a, b) => +new Date(b.date) - +new Date(a.date));
-  }, [db, user, isClient]);
+  }, [db, user, isClient, showOthersPay]);
 
   /* One tab per currency: client billing in dollars and the rupee books
      always, then one for each other currency an account holds (AUD, EUR…) —

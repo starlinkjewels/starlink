@@ -1,4 +1,5 @@
 import { isShelfSale } from "./stockSale";
+import { hasSwitch } from "./access";
 import {
   stampFor, uid, isDiamondOnlyOrder, isProductionStep, statusFromTimeline,
   orderTotal, balanceDue, cashbackPercentFor, issueGiftCard, fmtMoney, worksOnOrder,
@@ -74,8 +75,9 @@ export function dispatchBlocker(o: Order): string | null {
 export function dispatchPermission(db: DB, user: Worker, o: Order): string | null {
   if (user.role === "admin") return null;
   if (user.role !== "employee") return "You cannot dispatch orders.";
-  if (worksOnOrder(db, user, o)) return null;
-  return "Not assigned to you — ask the admin or the account manager.";
+  if (!worksOnOrder(db, user, o)) return "Not assigned to you — ask the admin or the account manager.";
+  if (!hasSwitch("orders.dispatch")) return "Your access does not include dispatching orders.";
+  return null;
 }
 
 /** What is still owed on it — shown before dispatching, never a blocker. */

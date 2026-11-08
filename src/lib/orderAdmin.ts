@@ -23,6 +23,7 @@ import { confirmBox } from "./confirm";
 import { CHECKING, STILL_LOADING, recordsReady } from "./actionHints";
 import { coField, companyIdOfClient } from "./companies";
 import { orderClosedWhy } from "./yearLock";
+import { switchWhy } from "./access";
 
 /** Everything the checks read beyond the orders the app opens with. */
 export const ORDER_ADMIN_COLS = [
@@ -69,9 +70,10 @@ function deleteStopper(db: DB, o: Order): string | undefined {
   return undefined;
 }
 
-/** Why this order can't be deleted; undefined when it can. Admin only. */
+/** Why this order can't be deleted; undefined when it can. An admin, or access with orders.delete. */
 export function orderDeleteBlocker(db: DB, user: Pick<User, "role"> | null | undefined, o: Order): string | undefined {
-  if (user?.role !== "admin") return "Only the admin can delete an order";
+  const who = switchWhy(user, "orders.delete", "deleting orders");
+  if (who) return who;
   const closed = orderClosedWhy(o, db.settings);
   if (closed) return closed;
   if (!collectionsFresh(ORDER_ADMIN_COLS)) return CHECKING;
@@ -180,7 +182,8 @@ export async function deleteOrderFlow(orderId: string, user: Pick<User, "id" | "
 
 /** Bring a deleted order back — as the cancelled order it is; re-open it on its page to carry on. */
 export async function restoreOrderFlow(orderId: string, user: Pick<User, "role">): Promise<boolean> {
-  if (user.role !== "admin") { toast.error("Only the admin can restore an order"); return false; }
+  const who = switchWhy(user, "orders.delete", "restoring orders");
+  if (who) { toast.error(who); return false; }
   const o = loadDb().orders.find(x => x.id === orderId);
   if (!o?.deletedAt) { toast.error("That order is not deleted"); return false; }
   // Moved onto its build order (lib/stockSale.ts): that order is the sale now.

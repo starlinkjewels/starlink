@@ -5,7 +5,7 @@ import { studioOn } from "@/lib/studio";
 import { ClientCreateDialog } from "@/components/create/ClientCreateDialog";
 import { ClientEditDialog } from "@/components/ClientEditDialog";
 import { companiesOf, companiesForUser, companyById, companyIdOfClient, hasCompanies } from "@/lib/companies";
-import { useCan, useMayExport } from "@/hooks/useCan";
+import { useCan, useHas, useMayExport } from "@/hooks/useCan";
 import { DataTable, CellMain, CellTag, CellAmount, CellDate, type DataColumn } from "@/components/DataTable";
 import { PageHeader, ViewSwitch } from "@/components/PageHeader";
 import { FilterChips, FiltersButton, StatStrip, type TableFilter } from "@/components/TableToolbar";
@@ -150,6 +150,7 @@ export function ClientsPage() {
   const [byFilter, setByFilter] = useStickyFilter("clients.handledBy", "all");
   const [countryFilter, setCountryFilter] = useStickyFilter("clients.country", "all");
   const can = useCan();
+  const has = useHas();
   const mayExport = useMayExport();
   const db = useDb();
   const navigate = useNavigate();
@@ -205,7 +206,7 @@ export function ClientsPage() {
   const unhandled = scoped.some(c => !handlerOf(db, c));
   // A remembered filter counts only while it is shown — one left over from when
   // there were several companies (or handlers) must not hide clients with no chip to clear it.
-  const byShown = user!.role === "admin" && handlers.length + (unhandled ? 1 : 0) > 1;
+  const byShown = has("clients.handler") && handlers.length + (unhandled ? 1 : 0) > 1;
   const coNow = multiCo ? coFilter : "all";
   const byNow = byShown ? byFilter : "all";
   const list = scoped
@@ -318,7 +319,7 @@ export function ClientsPage() {
       cell: c => (countryOf(c) ? <span className="whitespace-nowrap">{countryOf(c)}</span> : <span className="text-muted-foreground/50">—</span>) },
     ...(multiCo ? [{ key: "company", header: "Company", sortValue: (c: Client) => companyById(dbNow.settings, companyIdOfClient(c)).name,
       cell: (c: Client) => <CellTag tone="blue">{companyById(dbNow.settings, companyIdOfClient(c)).name}</CellTag> }] : []),
-    ...(user!.role === "admin" ? [{ key: "manager", header: "Handled by",
+    ...(has("clients.handler") ? [{ key: "manager", header: "Handled by",
       sortValue: (c: Client) => handlerName(db, c),
       cell: (c: Client) => <span className={`whitespace-nowrap ${c.accountManagerId ? "" : "text-muted-foreground"}`}>{handlerName(db, c)}</span> }] : []),
     { key: "orders", header: "Orders", align: "right", kind: "number", sortValue: c => statsOf(c).total,
@@ -379,7 +380,7 @@ export function ClientsPage() {
       !!last && { label: "Last order", value: <>{refLink(`/orders/${last.id}`, last.orderNumber)} · {fmtDate(last.createdAt)} · {last.status}</> },
       staff && { label: "Username", value: c.username && <span className="font-mono text-xs">{c.username}</span> },
       staff && hasOpeningBalance(c) && { label: "Opening balance", value: `${fmtMoney(c.openingBalance || 0)} ${c.openingDir === "credit" ? "credit (their advance)" : "debit (they owed us)"}${c.openingDate ? ` · as of ${fmtDate(c.openingDate)}` : ""}` },
-      user!.role === "admin" && !!c.giftCardEnabled && { label: "Gift card & cashback", value: `On · ${cashbackPercentFor(db, c)}% cashback · a card covers up to ${Math.round(giftMaxRedeemPctFor(db, c) * 100)}% of an order` },
+      has("clients.giftCards") && !!c.giftCardEnabled && { label: "Gift card & cashback", value: `On · ${cashbackPercentFor(db, c)}% cashback · a card covers up to ${Math.round(giftMaxRedeemPctFor(db, c) * 100)}% of an order` },
       staff && { label: "Product Photos", value: c.productPhotoAccess ? "Access on" : "Access off" },
     ]);
   };
@@ -433,12 +434,12 @@ export function ClientsPage() {
         subtitle="Orders, bills and payments"
         primary={user!.role !== "client" && can("clients", "add") ? { label: "New Client", icon: Plus, onClick: () => setOpen(true) } : null}
         actions={<ViewSwitch view={view} onChange={saveView} />}
-        menu={user!.role === "admin" ? [
+        menu={has("clients.handler") ? [
           { label: "Fill in “Handled by”", icon: UserCog, onSelect: () => setFillOpen(true), disabled: !db.clients.some(c => !c.accountManagerId),
             hint: db.clients.some(c => !c.accountManagerId) ? "From who added each client — shown to you first" : "Every client already shows who handles them" },
         ] : undefined}
       />
-      {user!.role === "admin" && <FillHandlersSheet open={fillOpen} onOpenChange={setFillOpen} />}
+      {has("clients.handler") && <FillHandlersSheet open={fillOpen} onOpenChange={setFillOpen} />}
       {user!.role !== "client" && can("clients", "add") && <ClientCreateDialog open={open} onOpenChange={setOpen} />}
 
       <ClientEditDialog clientId={editingId} onClose={() => setEditingId(null)} />
@@ -553,7 +554,7 @@ export function ClientsPage() {
               </div>
 
               <div className="mt-4 space-y-1.5 text-sm min-w-0">
-                {user!.role === "admin" && (
+                {has("clients.handler") && (
                   <p className="flex items-center gap-2 text-muted-foreground min-w-0">
                     <UserCog className="h-4 w-4 shrink-0" />
                     <span className="truncate">{manager ? <>Handled by <span className="font-medium text-foreground">{manager.name}</span></> : "Not assigned"}</span>

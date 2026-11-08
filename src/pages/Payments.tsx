@@ -4,6 +4,7 @@ import { materialUnit } from "@/lib/materials";
 import { choicesOf } from "@/lib/optionLists";
 import { AddNewItem, useAddNew } from "@/components/create/QuickCreate";
 import { useCan } from "@/hooks/useCan";
+import { hasFeature } from "@/lib/permissions";
 import { useEffect, useLayoutEffect, useState, type ReactNode } from "react";
 import { useSearchParams } from "react-router-dom";
 import { useAuth } from "@/lib/auth";
@@ -108,6 +109,10 @@ export function PaymentsPage() {
   const mayAdd = can("payments", "add");
   const { user } = useAuth();
   const isAdmin = user?.role === "admin";
+  // Money a broker collected for us: an admin, or access with payments.broker.
+  const mayBroker = hasFeature(user, db.roles ?? [], "payments.broker");
+  // Account balances: only with the balances figure (fig.balances) — an admin always.
+  const showBal = hasFeature(user, db.roles ?? [], "fig.balances");
   // The day book opens first: it is the one view that shows the whole day, and
   // it is what gets checked against the written rojmel.
   const [book, setBook] = useState<Book>("daybook");
@@ -161,7 +166,7 @@ export function PaymentsPage() {
         primary={mayAdd ? { label: "Receive", icon: CreditCard, items: [
           { label: "From a client", icon: CreditCard, hint: "Against their invoices, or an advance", onSelect: () => setTask("client") },
           { label: "From a supplier", icon: Truck, hint: "A refund, or money back on returned goods", onSelect: () => openSupplier("receive") },
-          { label: "From a broker", icon: Handshake, hint: "Money they collected for us", onSelect: () => setTask("brokerIn"), show: isAdmin },
+          { label: "From a broker", icon: Handshake, hint: "Money they collected for us", onSelect: () => setTask("brokerIn"), show: mayBroker },
           { label: "Advance repaid by an employee", icon: Users, hint: "Upad they hand back", onSelect: () => setTask("advanceIn") },
           { label: "Other income", icon: ArrowDownCircle, hint: "Into an account — not a client or supplier", onSelect: () => openLocker("income") },
         ] } : null}
@@ -211,7 +216,7 @@ export function PaymentsPage() {
                 <span className="flex items-start gap-1.5 text-[11px] text-muted-foreground leading-snug">
                   <Icon className="h-3.5 w-3.5 mt-px shrink-0" /><span className="line-clamp-2 break-words">{l.name}</span>
                 </span>
-                <span className={`block mt-1 font-display text-xl font-bold tabular-nums leading-tight ${bal < 0 ? "text-destructive" : "text-brand-dark"}`}>{fmtCcy(bal, l.currency)}</span>
+                {showBal && <span className={`block mt-1 font-display text-xl font-bold tabular-nums leading-tight ${bal < 0 ? "text-destructive" : "text-brand-dark"}`}>{fmtCcy(bal, l.currency)}</span>}
                 <span className="block text-[11px] text-muted-foreground mt-0.5">{ccy(l.currency)}{l.type === "bank" && l.accountNumberLast4 ? ` · ····${l.accountNumberLast4}` : ""}</span>
               </button>
             );
@@ -242,7 +247,7 @@ export function PaymentsPage() {
           <PayExpense {...sheet("employee")} forEmployee />
           <LockerActions {...sheet("locker")} preset={lockerAction} />
           <PayBrokerSheet {...sheet("broker")} />
-          {isAdmin && <ReceiveFromBrokerSheet {...sheet("brokerIn")} />}
+          {mayBroker && <ReceiveFromBrokerSheet {...sheet("brokerIn")} />}
           <RefundClientSheet {...sheet("refund")} />
           {task === "advance" && <AdvanceSheet mode="give" onClose={() => setTask(null)} />}
           {task === "advanceIn" && <AdvanceSheet mode="repay" onClose={() => setTask(null)} />}

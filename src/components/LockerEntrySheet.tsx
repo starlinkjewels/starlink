@@ -9,6 +9,7 @@ import {
   worksOnClientId,
 } from "@/lib/db";
 import { useDb } from "@/hooks/useDb";
+import { hasFeature } from "@/lib/permissions";
 import { useAuth } from "@/lib/auth";
 import { useCan } from "@/hooks/useCan";
 import { useLoaded } from "@/hooks/useLoaded";
@@ -86,6 +87,7 @@ export function LockerEntrySheet({ open, onOpenChange, lockerId: startLocker }: 
   const { user } = useAuth();
   const can = useCan();
   const isAdmin = user?.role === "admin";
+  const mayBroker = hasFeature(user, db.roles ?? [], "payments.broker");
   const lockers = db.lockers.filter(l => l.active !== false);
 
   const [accountId, setAccountId] = useState("");
@@ -127,7 +129,7 @@ export function LockerEntrySheet({ open, onOpenChange, lockerId: startLocker }: 
     // Their books are in rupees. Paying them OUT from another currency's account is
     // done at a rate (the rupees go on their books); money IN from them is rupees only.
     if (WHO[w].rupees && !rupees && dir === "in") return "rupee accounts only";
-    if (w === "broker" && dir === "in" && !isAdmin) return "admins only";
+    if (w === "broker" && dir === "in" && !mayBroker) return "not in your access";
     return undefined;
   };
   const pickDir = (d: Dir) => { setDir(d); setWho(""); setPartyId(""); setAgainst(""); setCategory(""); setRate(""); setEmpKind("pay"); };

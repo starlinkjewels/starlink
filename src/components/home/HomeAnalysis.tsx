@@ -1,3 +1,4 @@
+import { hasSwitch } from "@/lib/access";
 // The new look's Home, part two: the business's analysis, in a proper order —
 // Sales & profit · Money · Production · Team — under ONE period control that
 // every chart follows. Figures are the app's own (lib/analytics.ts — the same
@@ -126,7 +127,7 @@ const cache = new Map<string, unknown>();
  * Worked out only once it comes near the screen and the device is idle: the
  * Home opens and answers a tap at once; the analysis follows as you scroll.
  */
-export function HomeAnalysis(props: { db: DB; orders: Order[]; role: "admin" | "employee" }) {
+export function HomeAnalysis(props: { db: DB; orders: Order[]; role: "admin" | "employee"; profit?: boolean }) {
   const [ready, setReady] = useState(false);
   const spot = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -144,7 +145,7 @@ export function HomeAnalysis(props: { db: DB; orders: Order[]; role: "admin" | "
   return <Analysis {...props} />;
 }
 
-function Analysis({ db, orders, role }: { db: DB; orders: Order[]; role: "admin" | "employee" }) {
+function Analysis({ db, orders, role, profit }: { db: DB; orders: Order[]; role: "admin" | "employee"; profit?: boolean }) {
   const [period, setPeriod] = useState<Period>(() => presetPeriod("last12"));
   const admin = role === "admin";
   const live = useMemo(() => orders.filter(o => !o.deletedAt), [orders]);
@@ -158,8 +159,10 @@ function Analysis({ db, orders, role }: { db: DB; orders: Order[]; role: "admin"
     return out;
     function compute() {
     const prev = previousPeriod(period);
-    const k = kpis(db, live, period, admin), kp = prev ? kpis(db, live, prev, admin) : null;
-    const months = monthly(db, live, period, admin);
+    // Profit only with the profit figure (fig.profit) — an admin always.
+    const withProfit = admin && (role === "admin" && profit !== false);
+    const k = kpis(db, live, period, withProfit), kp = prev ? kpis(db, live, prev, withProfit) : null;
+    const months = monthly(db, live, period, withProfit);
     return {
       k, kp, months,
       byType: salesBy(live, period, o => o.jewelleryType || "Other").slice(0, 7),
@@ -172,7 +175,7 @@ function Analysis({ db, orders, role }: { db: DB; orders: Order[]; role: "admin"
       open: live.filter(o => !["Delivered", "Rejected"].includes(o.status)).length,
     };
     }
-  }, [db, live, period, admin, role]);
+  }, [db, live, period, admin, role, profit]);
   const { k, kp, months } = a;
   const ch = (now: number | null | undefined, before: number | null | undefined) => (kp && now != null && before != null ? pctChange(now, before) : null);
   const monthRows = months.map(m => ({ name: m.label, sales: m.salesUsd, profit: m.profitUsd ?? 0, collected: m.collectedUsd, received: m.receivedCount, shipped: m.soldCount }));
@@ -240,8 +243,9 @@ function Analysis({ db, orders, role }: { db: DB; orders: Order[]; role: "admin"
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
             <Figure label="Collected" value={usd(k.collectedUsd)} change={ch(k.collectedUsd, kp?.collectedUsd)} />
             <Figure label="Owed to us" value={usd(ageTotal)} upIsGood={false} sub={a.owed.d90 ? `${usd(a.owed.d90)} over 90 days` : "none over 90 days"} />
-            <Figure label="We owe suppliers" value={inr(a.pay?.suppliersInr ?? 0, true)} sub="bills not yet paid" />
-            <Figure label="We owe factories" value={inr(a.pay?.factoriesInr ?? 0, true)} sub="labour not yet paid" />
+            {/* What we owe: only with fig.payables — an admin always. */}
+            {hasSwitch("fig.payables") && <Figure label="We owe suppliers" value={inr(a.pay?.suppliersInr ?? 0, true)} sub="bills not yet paid" />}
+            {hasSwitch("fig.payables") && <Figure label="We owe factories" value={inr(a.pay?.factoriesInr ?? 0, true)} sub="labour not yet paid" />}
           </div>
           <div className="grid grid-cols-1 gap-3 lg:grid-cols-3 [&>*]:min-w-0">
             <ChartCard className="lg:col-span-2" title="Money collected by month" sub="Payments received from clients"
@@ -307,7 +311,7 @@ function Analysis({ db, orders, role }: { db: DB; orders: Order[]; role: "admin"
             </div>
           ) : <Empty>No orders in this period.</Empty>}
         </ChartCard>
-        {admin && a.factories.length > 0 && (
+        {admin && hasSwitch("fig.costs") && a.factories.length > 0 && (
           <ChartCard title="Factories" sub="Pieces finished in this period, fine gold in them, labour and open jobs">
             <div className="overflow-x-auto -mx-1">
               <table className="w-full min-w-[640px] text-sm tabular-nums">

@@ -1,6 +1,7 @@
 import { expensesInUsd } from "@/lib/orderCost";
 import { DataTable, CellMain, CellTag, CellAmount, CellDate, type DataColumn } from "@/components/DataTable";
 import { useCan } from "@/hooks/useCan";
+import { hasFeature } from "@/lib/permissions";
 import { ActionSheet } from "@/components/ActionSheet";
 import { useState, useEffect, useMemo } from "react";
 import { useAuth } from "@/lib/auth";
@@ -92,9 +93,11 @@ export function ExpensesPage() {
     return () => window.removeEventListener("starlink-db-updated", refresh);
   }, []);
 
-  const isAdmin = user?.role === "admin";
+  // Everyone's expenses (the "All expenses" tab, any person's): an admin, or an
+  // employee whose access includes expenses.everyone. Anyone else: their own.
+  const isAdmin = user?.role === "admin" || (user?.role === "employee" && hasFeature(user, db.roles ?? [], "expenses.everyone"));
   const can = useCan();
-  const isEmployee = user?.role === "employee";
+  const isEmployee = user?.role === "employee" && !isAdmin;
 
   // Inclusive local-day range filter on an expense's date (blank = open-ended).
   const inDateRange = (iso: string) => {

@@ -6,7 +6,7 @@ import { requestPlayable } from "@/lib/webVideo";
 import { orderSectionRank } from "@/lib/orderLayout";
 import { ProductVideo } from "@/components/ProductVideo";
 import { productionTrack } from "@/lib/production";
-import { stageLabel } from "@/lib/stages";
+import { stageLabel, stepLimitWhy } from "@/lib/stages";
 import { issuePick, type StockPick } from "@/lib/orderStock";
 import { costDataReady, otherChargesTotal, writeStockCost } from "@/lib/db";
 import { OtherChargesEditor, chargeDrafts, chargesOf, type ChargeDraft } from "@/components/OtherCharges";
@@ -32,7 +32,7 @@ import { AddNewItem, useAddNew } from "@/components/create/QuickCreate";
 import { SectionTitle } from "@/components/SectionTitle";
 import { WeightCheck } from "@/components/WeightCheck";
 import { weightProblem, pieceWeights, isSelfMetal, fmtG, otherMetalsOf, moreMetalsGrams, isOwnMetalStock } from "@/lib/weights";
-import { useCan, useMayExport } from "@/hooks/useCan";
+import { useCan, useHas, useMayExport } from "@/hooks/useCan";
 import { MoreMenu, type MoreAction } from "@/components/MoreMenu";
 import { OrderDesignBlock } from "@/components/designers/OrderDesignBlock";
 import { OrderEditDialog } from "@/components/OrderEditDialog";
@@ -221,6 +221,7 @@ function OrderDetailPageBody() {
   const { id } = useParams();
   const { user } = useAuth();
   const can = useCan();
+  const sw = useHas();
   const addNew = useAddNew();
   const studio = useStudio();
   const nav = useNavigate();
@@ -577,7 +578,7 @@ function OrderDetailPageBody() {
   // Why a linked purchase can't be corrected / removed from here (admin only,
   // as before) — shown on its greyed button rather than the button vanishing.
   const purchaseWhy = (p: Purchase, what: "edit" | "remove"): string | undefined => {
-    if (user!.role !== "admin") return "Only the admin can correct or remove a purchase";
+    if (!sw("orders.fixPurchase")) return "Your access does not include correcting a purchase";
     const check = what === "edit" ? canEditPurchase(db, p) : canVoidPurchase(db, p);
     return check.ok ? undefined : check.reason;
   };
@@ -1064,6 +1065,16 @@ function OrderDetailPageBody() {
   // role lets them change orders at all.
   const canEditStage = () => user!.role === "admin"
     || (user!.role === "employee" && can("orders", "edit") && worksOnOrder(db, user!, order));
+  // …and what the finer switches of their access allow within that (lib/accessFeatures.ts).
+  // An admin has every switch. A step is moved by the switch for its kind, and
+  // only if their access is not limited to other steps.
+  const stepSwitch = (step: string) => step === "Final Approval" ? "orders.finalApproval"
+    : step === "Dispatch" || step === "Delivered" ? "orders.dispatch" : "orders.stages";
+  const mayStep = (step: string) => canEditStage() && sw(stepSwitch(step)) && !stepLimitWhy(step);
+  const mayApprove = () => canEditStage() && sw("orders.approve");
+  const mayPrice = () => canEditStage() && sw("orders.pricing");
+  const mayProduce = () => canEditStage() && sw("orders.production");
+  const mayDesign = () => canEditStage() && sw("orders.design");
 
   // "Final Approval" can't be marked complete until the gold/diamond this
   // order actually needs has been issued to a factory — admins can still
@@ -2474,7 +2485,7 @@ function OrderDetailPageBody() {
     if (!canEditStage() || order.deletedAt || order.melted || order.status === "Rejected") return null;
     // A made build's next step is the shelf — the header's own Ready Stock button.
     if (order.forReadyStock && (faStepIdx < 0 || faDone)) return null;
-    if (order.status === "Waiting") return { label: "Approve", icon: CheckCircle2, run: () => approve(true) };
+    if (order.status === "Waiting") return mayApprove() ? { label: "Approve", icon: CheckCircle2, run: () => approve(true) } : null;
     // The step the timeline shows as the one to do now (its own rule for a diamond-only order).
     const active = diamondOnly ? shownSteps.find(s => s.t.status !== "done") : shownSteps.find(s => s.t.status === "in_progress");
     if (!active) return mayInvoice ? { label: "Make invoice", icon: FileText, run: () => setInvoicing(true) } : null;
@@ -2482,6 +2493,7 @@ function OrderDetailPageBody() {
     // Held up before Final Approval: what is missing comes first. The factory
     // picked, or the diamonds added — both live under Manufacturing.
     if (!diamondOnly && !readiness.ready && (t.step === "In Production" || t.step === "Final Approval")) {
+      if (!mayProduce()) return null;
       if (readiness.missing.includes("factory")) {
         return issuedFactory
           ? { label: `Set to ${issuedFactory.name}`, icon: FactoryIcon, run: setFactoryFromIssued }
@@ -2489,6 +2501,7 @@ function OrderDetailPageBody() {
       }
       return { label: "Add diamonds", icon: Gem, run: () => scrollToSection("order-manufacturing") };
     }
+    if (!mayStep(t.step)) return null;
     switch (t.step) {
       case "Final Approval": return { label: "Enter actuals", icon: PackageCheck, run: () => openFinalApproval(i) };
       case "Dispatch": return { label: "Dispatch", icon: Truck, run: () => openDispatchModal(i) };
@@ -2529,7 +2542,7 @@ It goes back to being our own build, and ${item ? item.name : "its piece"} goes 
   // Melt opens when the piece is a finished, made, unsold piece; its dialog
   // then says anything else in the way. Otherwise the plan's own reason.
   const meltWhy = (): string | undefined => {
-    if (user!.role !== "admin") return "Only the admin can melt a piece";
+    if (!sw("orders.melt")) return "Your access does not include melting a piece";
     if (order.melted) return "Already melted";
     if (order.returns?.length || !hasActuals || isDiamondOnlyOrder(order) || order.materialSourcing === "readyStock" || order.readyStockCreatedId)
       return meltPlan(db, order).blocked ?? "Record the factory's actual details (Final Approval) first";
@@ -2542,15 +2555,15 @@ It goes back to being our own build, and ${item ? item.name : "its piece"} goes 
     { label: "Make invoice", icon: FileText, hint: "Dispatched and priced — bill it now", onSelect: () => setInvoicing(true),
       show: mayInvoice && nextAction?.label !== "Make invoice" },
     // The whole order in a file — costs on the admin's copy only (lib/orderExport.ts).
-    { label: "Download order — PDF", icon: FileText, hint: mayExport ? `Details, weights, material and repairs, payments, due${user!.role === "admin" ? " · with costs (admin)" : ""}` : needsAccess("orders", "export"),
-      disabled: !mayExport, onSelect: () => exportOrderPdf(db, order, { faDone, withCost: user!.role === "admin" }), show: isStaffUser },
+    { label: "Download order — PDF", icon: FileText, hint: mayExport ? `Details, weights, material and repairs, payments, due${sw("fig.profit") ? " · with costs (admin)" : ""}` : needsAccess("orders", "export"),
+      disabled: !mayExport, onSelect: () => exportOrderPdf(db, order, { faDone, withCost: sw("fig.profit") }), show: isStaffUser },
     // A real Excel workbook (.xlsx): photos, every detail, materials, payments, the log,
     // and on the admin's copy Cost & Profit (lib/xlsxExport.ts).
-    { label: "Download order — Excel", icon: FileSpreadsheet, hint: mayExport ? `Photos, details, materials, payments, log${user!.role === "admin" ? " · cost & profit (admin)" : ""}` : needsAccess("orders", "export"),
-      disabled: !mayExport, onSelect: () => { void exportOrderXlsx(db, order, { faDone, withCost: user!.role === "admin" }); }, show: isStaffUser },
+    { label: "Download order — Excel", icon: FileSpreadsheet, hint: mayExport ? `Photos, details, materials, payments, log${sw("fig.profit") ? " · cost & profit (admin)" : ""}` : needsAccess("orders", "export"),
+      disabled: !mayExport, onSelect: () => { void exportOrderXlsx(db, order, { faDone, withCost: sw("fig.profit") }); }, show: isStaffUser },
     { label: "Edit details", icon: Pencil, hint: editWhy ?? "Type, metal, size, due date, instructions…", disabled: !!editWhy, onSelect: () => setEditOpen(true), show: isStaffUser },
     { label: "Share this piece", icon: Share2, hint: "A product PDF or a link — photos, video, details, a price you set", onSelect: () => setSharingPiece(true),
-      show: isStaffUser && !isDiamondOnlyOrder(order) },
+      show: isStaffUser && !isDiamondOnlyOrder(order) && sw("orders.share") },
     { label: "Duplicate", icon: Copy, hint: copyBlocker(user, can) ?? "A new order with these details filled in — change what's different, then place it",
       disabled: !!copyBlocker(user, can), onSelect: () => nav(copyHref(order)), show: isStaffUser },
     { label: "Change client", icon: Users, hint: changeClientWhy ?? "Picked the wrong client? Move it — while nothing is billed or paid", disabled: !!changeClientWhy, onSelect: () => setClientOpen(true), show: isStaffUser },
@@ -2571,7 +2584,7 @@ It goes back to being our own build, and ${item ? item.name : "its piece"} goes 
   ];
   // A deleted order is only looked at — or brought back by the admin.
   const shownActions: MoreAction[] = order.deletedAt
-    ? [{ label: "Restore", icon: Undo2, hint: "Back as a cancelled order — re-open it to carry on", onSelect: () => { void restoreOrderFlow(order.id, user!); }, show: user!.role === "admin" && !order.mergedInto }]
+    ? [{ label: "Restore", icon: Undo2, hint: "Back as a cancelled order — re-open it to carry on", onSelect: () => { void restoreOrderFlow(order.id, user!); }, show: sw("orders.delete") && !order.mergedInto }]
     : orderActions;
 
   // A payment row: corrected or deleted as the receipt it came in on.
@@ -2632,7 +2645,7 @@ It goes back to being our own build, and ${item ? item.name : "its piece"} goes 
         const mainAction = nextAction
           ? <AsyncButton onClick={nextAction.run} title={nextAction.label} className="h-11 sm:h-10 rounded-xl px-4 gap-2 max-sm:flex-1 min-w-0"><nextAction.icon className="h-4 w-4 shrink-0" /><span className="truncate sm:max-w-[16rem]">{nextAction.label}</span></AsyncButton>
           : order.forReadyStock
-          ? (user!.role === "admin" && ((order.status !== "Rejected" && !order.deletedAt && !order.melted) || !!order.readyStockCreatedId) && (
+          ? (sw("orders.toReadyStock") && ((order.status !== "Rejected" && !order.deletedAt && !order.melted) || !!order.readyStockCreatedId) && (
               order.readyStockCreatedId
                 ? <Button onClick={() => nav(`/ready-stock/${order.readyStockCreatedId}`)} className="h-11 sm:h-10 rounded-xl px-4 gap-2 max-sm:flex-1"><PackageCheck className="h-4 w-4" />In Ready Stock ✓</Button>
                 : buildMade
@@ -2665,7 +2678,7 @@ It goes back to being our own build, and ${item ? item.name : "its piece"} goes 
                 <p className="flex-1 min-w-0 text-foreground/90">
                   <span className="font-semibold text-destructive">Deleted</span> on {fmtDate(order.deletedAt)}{(() => { const by = db.users.find(u => u.id === order.deletedBy)?.name; return by ? ` by ${by}` : ""; })()} — off every list. Everything on it was undone first, as a cancel.
                 </p>
-                {user!.role === "admin" && <Button size="sm" variant="outline" className="rounded-lg gap-1.5" onClick={() => { void restoreOrderFlow(order.id, user!); }}><Undo2 className="h-3.5 w-3.5" />Restore</Button>}
+                {sw("orders.delete") && <Button size="sm" variant="outline" className="rounded-lg gap-1.5" onClick={() => { void restoreOrderFlow(order.id, user!); }}><Undo2 className="h-3.5 w-3.5" />Restore</Button>}
               </div>
             )}
             <div className="flex items-start gap-4 sm:gap-5">
@@ -2831,7 +2844,7 @@ It goes back to being our own build, and ${item ? item.name : "its piece"} goes 
                 ) : (
                   <p className="text-[15px] font-medium text-foreground mt-0.5 flex items-center gap-1.5">
                     {order.designNumber || <span className="text-muted-foreground italic font-normal">—</span>}
-                    {canEditStage() && (
+                    {mayDesign() && (
                       <button
                         onClick={() => setEditDesign(order.designNumber ?? "")}
                         title="Edit design number"
@@ -2857,7 +2870,7 @@ It goes back to being our own build, and ${item ? item.name : "its piece"} goes 
           <div id="order-price" className={`${ORDER_SECTION} scroll-mt-20`}>
             <div className="flex items-center justify-between gap-3 mb-3">
               <p className="text-sm font-semibold text-foreground">Price</p>
-              {canEditStage() && (
+              {mayPrice() && (
                 <button
                   type="button"
                   className="h-8 -mr-2 px-2 rounded-lg text-sm font-medium text-primary hover:bg-primary/[0.07] transition-colors"
@@ -2965,11 +2978,11 @@ It goes back to being our own build, and ${item ? item.name : "its piece"} goes 
         )}
 
         {/* Reference images — staff can add them after the order was placed */}
-        {((order.images?.length ?? 0) > 0 || (user!.role !== "client" && canEditStage() && !order.melted)) && (
+        {((order.images?.length ?? 0) > 0 || (user!.role !== "client" && mayDesign() && !order.melted)) && (
           <div className={ORDER_SECTION}>
             <div className="flex items-center justify-between gap-3 mb-3">
               <p className="text-sm font-semibold text-foreground">Reference images</p>
-              {user!.role !== "client" && canEditStage() && !order.melted && <span className="text-xs text-muted-foreground tabular-nums">{order.images?.length ?? 0} of 3</span>}
+              {user!.role !== "client" && mayDesign() && !order.melted && <span className="text-xs text-muted-foreground tabular-nums">{order.images?.length ?? 0} of 3</span>}
             </div>
             <div className="flex gap-3 flex-wrap">
               {(order.images ?? []).map((src, i) => (
@@ -2981,7 +2994,7 @@ It goes back to being our own build, and ${item ? item.name : "its piece"} goes 
                       <Eye className="h-4 w-4 text-white" />
                     </div>
                   </button>
-                  {user!.role !== "client" && canEditStage() && (
+                  {user!.role !== "client" && mayDesign() && (
                     <button type="button" onClick={() => removeRefImage(src)} aria-label="Remove reference image" title="Remove"
                       className="absolute top-1.5 right-1.5 h-7 w-7 rounded-full bg-black/55 text-white grid place-items-center backdrop-blur-sm hover:bg-destructive transition-colors opacity-100 [@media(hover:hover)]:opacity-0 [@media(hover:hover)]:group-hover:opacity-100 focus-visible:opacity-100">
                       <X className="h-3.5 w-3.5" />
@@ -2989,7 +3002,7 @@ It goes back to being our own build, and ${item ? item.name : "its piece"} goes 
                   )}
                 </div>
               ))}
-              {user!.role !== "client" && canEditStage() && !order.melted && (order.images?.length ?? 0) < 3 && (
+              {user!.role !== "client" && mayDesign() && !order.melted && (order.images?.length ?? 0) < 3 && (
                 <button type="button" onClick={() => refImageRef.current?.click()} disabled={refUploading}
                   className="h-24 w-24 rounded-xl border border-dashed border-border bg-secondary/30 hover:bg-secondary/70 hover:border-primary/40 transition-colors flex flex-col items-center justify-center gap-1.5 text-muted-foreground disabled:opacity-60">
                   {refUploading ? <Loader2 className="h-5 w-5 animate-spin" /> : <ImagePlus className="h-5 w-5" />}
@@ -3019,7 +3032,7 @@ It goes back to being our own build, and ${item ? item.name : "its piece"} goes 
           </div>
         )}
 
-        {canEditStage() && order.status === "Waiting" && (
+        {mayApprove() && order.status === "Waiting" && (
           <div className={`${ORDER_SECTION} flex gap-3`}>
             <AsyncButton onClick={() => approve(true)} className="rounded-xl">Approve Order</AsyncButton>
             <AsyncButton variant="outline" onClick={() => approve(false)} className="rounded-xl">Reject</AsyncButton>
@@ -3045,7 +3058,7 @@ It goes back to being our own build, and ${item ? item.name : "its piece"} goes 
             </div>
           );
         })()}
-        {canEditStage() && order.status === "Rejected" && !order.melted && !order.mergedInto && (
+        {mayApprove() && order.status === "Rejected" && !order.melted && !order.mergedInto && (
           <div className="mt-5 flex items-center gap-3 flex-wrap">
             <span className="text-sm text-destructive font-medium">This order was rejected.</span>
             <AsyncButton variant="outline" onClick={reopenOrder} className="rounded-xl gap-2">
@@ -3279,7 +3292,7 @@ It goes back to being our own build, and ${item ? item.name : "its piece"} goes 
               main button; the rest under ⋯. */}
           {(() => {
             // Before the CAD stage only the designer can be given the design — an upload here tells the client "CAD ready".
-            const edit = canEditStage() && showCadSection;
+            const edit = mayDesign() && showCadSection;
             const busy = cadUploading || model3dmUploading;
             const uploadCad: MoreAction = { label: cadUploading ? "Uploading…" : order.cadImage ? "Replace CAD image" : "Upload CAD image", icon: ImagePlus, disabled: busy, onSelect: () => cadRef.current?.click() };
             const upload3dm: MoreAction = { label: model3dmUploading ? "Uploading…" : order.cad3dmUrl ? "Replace 3D model" : "Upload 3D model (.3dm)", icon: Box, disabled: busy, onSelect: () => model3dmRef.current?.click() };
@@ -3316,7 +3329,7 @@ It goes back to being our own build, and ${item ? item.name : "its piece"} goes 
             );
           })()}
 
-          {isStaffUser && <OrderDesignBlock order={order} canAssign={canEditStage()} />}
+          {isStaffUser && <OrderDesignBlock order={order} canAssign={mayDesign()} />}
 
           {order.cadImage && (
             <div className="space-y-2">
@@ -3363,7 +3376,7 @@ It goes back to being our own build, and ${item ? item.name : "its piece"} goes 
         <div style={{ order: secRank.dispatch }} className="card-luxe p-6 space-y-4">
           <div className="flex items-center justify-between gap-4 flex-wrap">
             <SectionTitle icon={Truck} title="Dispatch Details" />
-            {canEditStage() && (
+            {mayStep("Dispatch") && (
               <Button size="sm" variant="outline" onClick={() => {
                 setCourierName(order.courierName ?? "");
                 setTrackingNumber(order.trackingNumber ?? "");
@@ -3482,7 +3495,7 @@ It goes back to being our own build, and ${item ? item.name : "its piece"} goes 
             <SectionTitle className="min-w-0 flex-1" icon={Camera} title="Product Photography"
               sub={hasProductMedia ? `${order.productPhotos?.length ?? 0} photo${(order.productPhotos?.length ?? 0) !== 1 ? "s" : ""}${order.productVideo ? " + 1 video" : ""}` : "None yet"} />
             <div className="flex items-center gap-2 shrink-0">
-              {canEditStage() && (
+              {mayDesign() && (
                 <>
                   <input
                     ref={productPhotoRef} type="file" accept="image/*,video/*" multiple className="hidden"
@@ -3496,7 +3509,7 @@ It goes back to being our own build, and ${item ? item.name : "its piece"} goes 
                 </>
               )}
               {hasProductMedia && (
-                canEditStage()
+                mayDesign()
                   ? <MoreMenu title="Product photos" label="More photo actions" actions={[
                       { label: downloadingAll ? "Downloading…" : "Download all", icon: Download, disabled: downloadingAll, onSelect: () => void downloadAllMedia() },
                     ]} />
@@ -3528,7 +3541,7 @@ It goes back to being our own build, and ${item ? item.name : "its piece"} goes 
                     aria-label="Download photo">
                     <Download className="h-3.5 w-3.5" />
                   </button>
-                  {canEditStage() && (
+                  {mayDesign() && (
                     <button
                       type="button" onClick={() => removeProductPhoto(src)}
                       className="absolute top-1.5 left-1.5 h-7 w-7 rounded-lg bg-destructive/80 text-white grid place-items-center opacity-100 [@media(hover:hover)]:opacity-0 [@media(hover:hover)]:group-hover:opacity-100 focus-visible:opacity-100 transition-opacity"
@@ -3553,7 +3566,7 @@ It goes back to being our own build, and ${item ? item.name : "its piece"} goes 
                   <Button size="sm" variant="outline" onClick={() => downloadOne(order.productVideo!, "product-video.mp4")} className="rounded-lg gap-1.5 h-8">
                     <Download className="h-3.5 w-3.5" /> Download
                   </Button>
-                  {canEditStage() && (
+                  {mayDesign() && (
                     <AsyncButton size="sm" variant="outline" onClick={removeProductVideo} className="rounded-lg h-8 w-8 px-0 text-destructive hover:bg-destructive/10 hover:text-destructive" title="Remove video">
                       <Trash2 className="h-3.5 w-3.5" />
                     </AsyncButton>
@@ -3564,7 +3577,7 @@ It goes back to being our own build, and ${item ? item.name : "its piece"} goes 
           )}
 
           {/* Empty state — staff, nothing uploaded yet */}
-          {!hasProductMedia && canEditStage() && (
+          {!hasProductMedia && mayDesign() && (
             <div className="rounded-xl border border-dashed border-border/70 p-6 text-center text-sm text-muted-foreground">
               {order.forReadyStock
                 ? <>Add 4–5 photos and a short video — they go with the piece into Ready Stock.</>
@@ -3581,7 +3594,7 @@ It goes back to being our own build, and ${item ? item.name : "its piece"} goes 
           a number that means nothing until the piece is priced. Say so instead;
           what it has cost so far still shows. A stock build has no price by
           design, so its card stays as it was. */}
-      {user!.role === "admin" && (
+      {sw("fig.profit") && (
         <div style={{ order: secRank.profit }} className="min-w-0 empty:hidden">
           {!order.forReadyStock && !(order.amount > 0) ? (() => {
             let spent: { inr: number; complete: boolean } | null = null;
@@ -3596,7 +3609,7 @@ It goes back to being our own build, and ${item ? item.name : "its piece"} goes 
                       <p className="text-xs text-muted-foreground mt-1">Cost so far <span className="font-semibold text-foreground tabular-nums">{fmtMoneyInr(spent.inr)}</span>{spent.complete ? "" : " — part not valued yet"}</p>
                     )}
                   </div>
-                  {canEditStage() && order.status !== "Rejected" && !order.deletedAt && (
+                  {mayPrice() && order.status !== "Rejected" && !order.deletedAt && (
                     <Button size="sm" variant="outline" className="rounded-lg h-9"
                       onClick={() => { fillPricing(); setShowPricing(true); document.getElementById("order-price")?.scrollIntoView({ behavior: "smooth", block: "center" }); }}>
                       Set price
@@ -3907,14 +3920,14 @@ It goes back to being our own build, and ${item ? item.name : "its piece"} goes 
                           Set to {issuedFactory.name} — the material went there
                         </button>
                       )}
-                      {user!.role === "admin" && (
+                      {sw("orders.forceComplete") && (
                         <button onClick={() => forceAdvanceStep(idx)} className="mt-1 text-[10px] text-muted-foreground hover:text-foreground underline">
                           Force complete anyway (admin override)
                         </button>
                       )}
                     </div>
                   )}
-                  {canEditStage() && !isDone && (
+                  {mayStep(t.step) && !isDone && (
                     isActive
                       ? t.step === "Final Approval"
                         ? readiness.ready && <AsyncButton size="sm" variant="outline" onClick={() => openFinalApproval(idx)} className="mt-2 h-7 rounded-lg text-xs">Final Approval — enter actuals</AsyncButton>
@@ -3928,7 +3941,7 @@ It goes back to being our own build, and ${item ? item.name : "its piece"} goes 
                                 ? <Button size="sm" variant="outline" onClick={() => nav(`/ready-stock/${order.readyStockCreatedId}`)} className="mt-2 h-8 rounded-lg text-xs gap-1.5"><PackageCheck className="h-3.5 w-3.5" />In Ready Stock — open the piece</Button>
                                 : order.status === "Rejected" || order.deletedAt || order.melted
                                   ? <p className="text-[11px] text-muted-foreground mt-1.5">Cancelled — it doesn't go into Ready Stock.</p>
-                                  : user!.role === "admin"
+                                  : sw("orders.toReadyStock")
                                     ? <Button size="sm" onClick={openAddToStock} className="mt-2 h-8 rounded-lg text-xs gap-1.5"><PackageCheck className="h-3.5 w-3.5" />Add to Ready Stock</Button>
                                     : <p className="text-[11px] text-muted-foreground mt-1.5">An admin adds it to Ready Stock — with its price.</p>
                               : <AsyncButton size="sm" variant="outline" onClick={() => advanceStep(idx)} className="mt-2 h-7 rounded-lg text-xs">Mark complete</AsyncButton>
@@ -3941,7 +3954,7 @@ It goes back to being our own build, and ${item ? item.name : "its piece"} goes 
                   )}
                   {/* Once its pieces are on the shelf, a build's steps stay done — the piece is changed in Ready Stock.
                       Sold on itself: its sale's own steps (dispatch, delivery) can still be put right. */}
-                  {canEditStage() && isDone && (!order.readyStockCreatedId || (!!order.stockSale && (t.step === "Dispatch" || t.step === "Delivered"))) && (
+                  {mayStep(t.step) && isDone && (!order.readyStockCreatedId || (!!order.stockSale && (t.step === "Dispatch" || t.step === "Delivered"))) && (
                     <button
                       onClick={() => revertStep(idx)}
                       className="mt-2 inline-flex items-center gap-1 h-7 px-2 rounded-lg text-[11px] font-medium text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors">
@@ -3962,7 +3975,7 @@ It goes back to being our own build, and ${item ? item.name : "its piece"} goes 
       {user!.role !== "client" && order.materialSourcing !== "readyStock" && (
         <div id="order-manufacturing" style={{ order: secRank.manufacturing }} className="card-luxe p-6 space-y-5 scroll-mt-20">
           {(() => {
-            const editable = canEditStage();
+            const editable = mayProduce();
             const needsDia = orderMaterialRequirements(order).needsDiamond;
             // Diamonds can always be added to a piece unless someone said it has none —
             // an order saved without an estimated weight (0 ct) still gets its stones.
@@ -4421,7 +4434,8 @@ The piece then takes ours — add them from stock or buy them, as for any order.
               <div className="space-y-2">
                 <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Material for this order · {rows.length}</p>
                 {/* The same table as everywhere: search, count, View and Export in its one toolbar row. */}
-                <DataTable id="order-materials" noun="material" rows={rows} columns={columns} rowKey={r => r.id}
+                {/* Rate and cost only for those whose access shows costs (fig.costs) — an admin always. */}
+                <DataTable id="order-materials" noun="material" rows={rows} columns={sw("fig.costs") ? columns : columns.filter(c => c.key !== "rate" && c.key !== "cost")} rowKey={r => r.id}
                   searchText={r => [r.title, r.detail, r.source, r.sourceSub, r.status].filter(Boolean).join(" ")} searchPlaceholder="Search materials"
                   exportName={`Materials-${order.orderNumber}`} rowHref={r => r.href} details={false} rowActions={r => r.actions}
                   // What was issued to the order, in all: stones, then each material's carats or grams on

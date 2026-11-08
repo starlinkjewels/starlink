@@ -12,6 +12,8 @@ import { DesignDetailsBody } from "@/components/catalog/DesignDetails";
 import { fetchCatalogItemsByIds } from "@/lib/catalogItems";
 import { fetchDesignsToCheck, useDesign, type CatalogDesign } from "@/lib/catalogSpecs";
 import { useAuth } from "@/lib/auth";
+import { useDb } from "@/hooks/useDb";
+import { hasFeature } from "@/lib/permissions";
 import { timeAgo, type CatalogItem } from "@/lib/db";
 import { doc, getDoc, type DocumentData, type QueryDocumentSnapshot } from "firebase/firestore";
 import { db as fsdb } from "@/lib/firebase";
@@ -44,7 +46,9 @@ function CheckSheet({ designKey, onClose }: { designKey: string; onClose(): void
 
 export function CatalogCheckPage() {
   const { user } = useAuth();
-  const staff = user?.role === "admin" || user?.role === "employee";
+  const db = useDb();
+  // Checking readings: an admin, or an employee whose access includes catalog.check.
+  const staff = user?.role === "admin" || (user?.role === "employee" && hasFeature(user, db.roles ?? [], "catalog.check"));
   const [rows, setRows] = useState<CatalogDesign[]>([]);
   const [cursor, setCursor] = useState<QueryDocumentSnapshot<DocumentData> | null>(null);
   const [more, setMore] = useState(false);

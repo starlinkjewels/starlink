@@ -1,6 +1,6 @@
 import { BuyMaterialForm } from "@/components/BuyMaterialForm";
 import { brokerSuppliers } from "@/lib/brokers";
-import { useCan, useMayExport } from "@/hooks/useCan";
+import { useCan, useHas, useMayExport } from "@/hooks/useCan";
 import type { MoreAction } from "@/components/MoreMenu";
 import { PageHeader } from "@/components/PageHeader";
 import { SectionTitle } from "@/components/SectionTitle";
@@ -85,7 +85,14 @@ function SupplierHistoryPageBody() {
   const db = useDb();
   const addNew = useAddNew();
   const can = useCan();
-  const isAdmin = user?.role === "admin";
+  const has = useHas();
+  // What their access allows here (an admin: everything). Purchases, selling to
+  // the supplier and gold loans are switches; paying is Payments → Add; the
+  // supplier itself, Suppliers → Edit / Delete.
+  const mayPurchase = has("suppliers.purchase"), maySell = has("suppliers.sell"), mayGold = has("suppliers.gold");
+  const mayEdit = can("suppliers", "edit"), mayDelete = can("suppliers", "delete"), mayPay = can("payments", "add");
+  // What we owe them, and what a purchase cost: figure switches (fig.payables, fig.costs) — an admin always.
+  const showOwed = has("fig.payables"), showCosts = has("fig.costs");
   // Correcting the profile, a purchase or a payment from here: each opens in a
   // panel over the page.
   const [editingSupplier, setEditingSupplier] = useState<Supplier | null>(null);
@@ -285,7 +292,7 @@ function SupplierHistoryPageBody() {
   // ── What can be done to each line ──
   // Every action is offered; one that can't be done is greyed out with the
   // reason underneath, rather than hidden or refused with a toast on click.
-  const ADMIN_ONLY = "Only an admin can change a supplier's purchases";
+  const ADMIN_ONLY = "Your access does not include purchases";
   const purchaseActions = (p: Purchase): MoreAction[] => {
     const o = p.orderId ? db.orders.find(x => x.id === p.orderId) : undefined;
     const edit = canEditPurchase(db, p);
@@ -295,12 +302,12 @@ function SupplierHistoryPageBody() {
       { label: "View order", icon: ExternalLink, show: !!o,
         hint: can("orders") ? `Bought for ${o?.orderNumber}` : needsAccess("orders", "view"),
         disabled: !can("orders"), onSelect: () => navigate(`/orders/${o!.id}`) },
-      { label: "Edit", icon: Pencil, onSelect: () => openEditPurchase(p), disabled: !isAdmin || !edit.ok,
+      { label: "Edit", icon: Pencil, onSelect: () => openEditPurchase(p), disabled: !mayPurchase || !edit.ok,
         // Open, but only the rate: say so before the panel does.
-        hint: !isAdmin ? ADMIN_ONLY : !edit.ok ? edit.reason : !scope.quantity ? scope.reason : undefined },
+        hint: !mayPurchase ? ADMIN_ONLY : !edit.ok ? edit.reason : !scope.quantity ? scope.reason : undefined },
       { label: voidingId === p.id ? "Voiding…" : "Void", icon: Trash2, danger: true,
-        disabled: !isAdmin || voidingId === p.id || !voidable.ok, onSelect: () => voidPurchase(p),
-        hint: !isAdmin ? ADMIN_ONLY : voidable.ok ? "Reverses due, stock and factory issue" : voidable.reason },
+        disabled: !mayPurchase || voidingId === p.id || !voidable.ok, onSelect: () => voidPurchase(p),
+        hint: !mayPurchase ? ADMIN_ONLY : voidable.ok ? "Reverses due, stock and factory issue" : voidable.reason },
     ];
   };
 
@@ -322,7 +329,7 @@ function SupplierHistoryPageBody() {
       const block = saleUndoBlocker(db, sale);
       return [
         { label: "Edit", icon: Lock, disabled: true, hint: "Delete it and record it again", onSelect: () => {} },
-        { label: "Delete sale", icon: Trash2, danger: true, disabled: !isAdmin || !!block, hint: !isAdmin ? "Admins only" : block ?? "Back into stock; its money removed",
+        { label: "Delete sale", icon: Trash2, danger: true, disabled: !maySell || !!block, hint: !maySell ? "Your access does not include selling to suppliers" : block ?? "Back into stock; its money removed",
           onSelect: async () => {
             if (!(await confirmBox([`Delete this sale to ${supplier.name}?`, ...saleUndoImpact(db, sale)], { danger: true, confirmText: "Delete sale" }))) return;
             try { await undoSupplierSale(db, sale, user!); toast.success("Sale deleted — back in stock"); }
@@ -690,7 +697,7 @@ function SupplierHistoryPageBody() {
     const pays = [...(p.payments ?? [])].sort((a, b) => +new Date(a.createdAt) - +new Date(b.createdAt));
     return filled([
       { label: "Description", value: purchaseDesc(p) },
-      { label: "Rate", value: purchaseRate(p) },
+      showCosts && { label: "Rate", value: purchaseRate(p) },
       !!p.discountPct && { label: p.discountPct > 0 ? "Discount" : "Added on", value: `${Math.abs(p.discountPct)}%` },
       !!p.roundOffInr && { label: "Rounded off", value: `${p.roundOffInr > 0 ? "+" : "−"}${fmtMoneyInr(Math.abs(p.roundOffInr))}` },
       p.gstBill !== undefined && { label: "GST", value: p.gstBill ? `${pctText(p.gstPct)}% · ${fmtMoneyInr(purchaseGstInr(p))} on ${fmtMoneyInr(preGstInr(p))}` : "No bill — no GST" },
@@ -739,7 +746,7 @@ function SupplierHistoryPageBody() {
       return filled([
         { label: "Sold", value: sale.lines.map(l => `${l.label} — ${fmtMoneyInr(l.amountInr)}`).join("; ") },
         broker && { label: "Broker", value: `${broker.name} · ${fmtMoneyInr(sale.brokerageInr ?? 0)} ${sale.brokeragePaidBy === "supplier" ? "(supplier pays)" : "(we pay)"}` },
-        isAdmin && { label: "Cost to us", value: cost == null ? "Not known for every line" : `${fmtMoneyInr(cost)} · profit ${fmtMoneyInr(sale.totalInr - cost - saleBrokerageWePay(sale))}` },
+        has("fig.profit") && { label: "Cost to us", value: cost == null ? "Not known for every line" : `${fmtMoneyInr(cost)} · profit ${fmtMoneyInr(sale.totalInr - cost - saleBrokerageWePay(sale))}` },
         hasCompanies(db.settings) && { label: "Company", value: companyById(db.settings, sale.companyId).name },
         { label: "Note", value: noteText(sale.notes) },
         { label: "Recorded", value: recorded(db, sale.createdAt, sale.soldBy) },
@@ -762,25 +769,25 @@ function SupplierHistoryPageBody() {
         back={{ label: "Back to Suppliers", to: "/suppliers" }}
         title={supplier.name}
         subtitle={contactLine}
-        primary={isAdmin ? { label: "Record Purchase", icon: Plus, onClick: () => setShowPurchaseForm(true) } : null}
-        secondary={isAdmin ? { label: "Pay", icon: CreditCard, onClick: openPay } : null}
+        primary={mayPurchase ? { label: "Record Purchase", icon: Plus, onClick: () => setShowPurchaseForm(true) } : null}
+        secondary={mayPay ? { label: "Pay", icon: CreditCard, onClick: openPay } : null}
         menu={[
           // Set once, when moving from an old system — so out of sight until then.
-          { label: "Opening balance", icon: BookOpen, hint: "Not set — what was owed before the app", onSelect: openOpening, show: isAdmin && !openingSet },
-          { label: "Sell to them", icon: Tag, hint: "Diamonds, gold, a piece — off what we owe", onSelect: () => setShowSell(true), show: isAdmin },
+          { label: "Opening balance", icon: BookOpen, hint: "Not set — what was owed before the app", onSelect: openOpening, show: mayEdit && !openingSet },
+          { label: "Sell to them", icon: Tag, hint: "Diamonds, gold, a piece — off what we owe", onSelect: () => setShowSell(true), show: maySell },
           // Gold borrowed from them: into our stock, owed back in gold (or turned into a bill).
-          { label: "Gold on loan", icon: Coins, hint: "Take their gold into our stock", onSelect: () => setGoldMode("take"), show: isAdmin },
-          { label: "Return gold", icon: ArrowUpCircle, onSelect: () => setGoldMode("return"), show: isAdmin, disabled: !goldReady || !goldOwedSomewhere,
+          { label: "Gold on loan", icon: Coins, hint: "Take their gold into our stock", onSelect: () => setGoldMode("take"), show: mayGold },
+          { label: "Return gold", icon: ArrowUpCircle, onSelect: () => setGoldMode("return"), show: mayGold, disabled: !goldReady || !goldOwedSomewhere,
             hint: goldReady && goldOwedSomewhere ? `Out of stock · ${Math.round(goldOwed * 1000) / 1000} g fine owed` : NO_GOLD_OWED },
-          { label: "Gold to a bill", icon: FileText, onSelect: () => setGoldMode("bill"), show: isAdmin, disabled: !goldReady || !goldOwedSomewhere,
+          { label: "Gold to a bill", icon: FileText, onSelect: () => setGoldMode("bill"), show: mayGold, disabled: !goldReady || !goldOwedSomewhere,
             hint: goldReady && goldOwedSomewhere ? "Pay for gold owed in money, at a rate" : NO_GOLD_OWED },
-          { label: "Opening gold", icon: BookOpen, hint: "Gold owed before the app", onSelect: () => setGoldMode("opening"), show: isAdmin && !((supplier.openingGoldFine ?? 0) > 0) },
-          { label: "Receive money", icon: ArrowDownCircle, hint: "A refund from them", onSelect: () => setShowReceiveForm(true), show: user?.role === "admin" },
+          { label: "Opening gold", icon: BookOpen, hint: "Gold owed before the app", onSelect: () => setGoldMode("opening"), show: mayGold && !((supplier.openingGoldFine ?? 0) > 0) },
+          { label: "Receive money", icon: ArrowDownCircle, hint: "A refund from them", onSelect: () => setShowReceiveForm(true), show: maySell },
           { label: "Export statement", icon: Download, hint: "PDF or Excel", onSelect: () => setShowExport(true), show: mayExport },
-          { label: "Edit details", icon: Pencil, onSelect: () => setEditingSupplier(supplier), disabled: !isAdmin,
-            hint: isAdmin ? "Name, contact, GSTIN, address" : "Only an admin can change suppliers" },
-          { label: "Delete supplier", icon: Trash2, danger: true, onSelect: deleteSupplier, disabled: !isAdmin || !deleteGuard.ok,
-            hint: !isAdmin ? "Only an admin can change suppliers" : deleteGuard.reason },
+          { label: "Edit details", icon: Pencil, onSelect: () => setEditingSupplier(supplier), disabled: !mayEdit,
+            hint: mayEdit ? "Name, contact, GSTIN, address" : "Your access does not include changing suppliers" },
+          { label: "Delete supplier", icon: Trash2, danger: true, onSelect: deleteSupplier, disabled: !mayDelete || !deleteGuard.ok,
+            hint: !mayDelete ? "Your access does not include deleting suppliers" : deleteGuard.reason },
         ]}
       >
         {/* The brokers who bring this supplier's goods — and what is still pending through each. */}
@@ -807,16 +814,16 @@ function SupplierHistoryPageBody() {
           what was paid, what was bought — the statement's own figures. Who
           they are is the line under the name. */}
       <StatStrip items={[
-        account.net < 0
+        ...(!showOwed ? [] : [account.net < 0
           ? { label: "They owe us", value: fmtMoneyInr(-account.net), icon: ArrowDownCircle, tone: "in" as const, sub: "After refunds and overpaid bills" }
           : { label: "We owe", value: account.net > 0 ? fmtMoneyInr(account.net) : "✓ Settled", icon: Wallet, tone: account.net > 0 ? "out" as const : "in" as const,
-              sub: account.net > 0 ? "After advances and refunds" : "Nothing owed" },
+              sub: account.net > 0 ? "After advances and refunds" : "Nothing owed" }]),
         { label: "Paid", value: fmtMoneyInr(account.totalPaid), icon: CreditCard, tone: "in", sub: "Bills and advances" },
         { label: "Purchased", value: fmtMoneyInr(account.totalPurchased), icon: ShoppingBag, sub: `${purchases.length} purchase${purchases.length === 1 ? "" : "s"}` },
         ...(account.received > 0 ? [{ label: "Refunds received", value: fmtMoneyInr(account.received), icon: ArrowDownCircle }] : []),
         ...(account.sold > 0 ? [{ label: "Sold to them", value: fmtMoneyInr(account.sold), icon: Tag }] : []),
         // Gold taken from them on loan — only when they have a gold account (its lines are below).
-        ...(goldShown ? [{ label: "Gold owed", value: Math.abs(goldOwed) > 0.0005 ? `${fmtG(goldOwed)} fine` : "✓ Returned", icon: Coins,
+        ...(goldShown && showOwed ? [{ label: "Gold owed", value: Math.abs(goldOwed) > 0.0005 ? `${fmtG(goldOwed)} fine` : "✓ Returned", icon: Coins,
           tone: goldOwed > 0.0005 ? "out" as const : "in" as const, sub: goldOwed > 0.0005 ? "24K gold to give back" : "Nothing owed in gold" }] : []),
       ]} />
       <ExportDialog open={showExport} onClose={() => setShowExport(false)} title={`${supplier.name} ledger`} options={[
@@ -827,7 +834,7 @@ function SupplierHistoryPageBody() {
 
       {/* Opening balance (migration) — admin only; once set it stays in view,
           until then it waits in the ⋯. */}
-      {isAdmin && (openingSet || obOpen) && (
+      {mayEdit && (openingSet || obOpen) && (
         <div id="opening-balance" className="card-luxe p-5 scroll-mt-20">
           <SectionTitle title="Opening Balance"
             sub={hasOpeningBalance(supplier)
@@ -868,11 +875,14 @@ function SupplierHistoryPageBody() {
         creditLabel="Paid"
         details={statementDetails}
         rowActions={statementActions}
-        onExport={() => setShowExport(true)}
+        // The running balance is what we owe them: only with fig.payables — and the
+        // statement download, which is built round it, likewise.
+        hideBalance={!has("fig.payables")}
+        onExport={has("fig.payables") ? () => setShowExport(true) : undefined}
       />
 
       {/* Their gold account — gold taken on loan, given back or billed, in grams. Shown once there is any. */}
-      <SupplierGoldPanel supplier={supplier} isAdmin={isAdmin} mode={goldMode} onMode={setGoldMode} />
+      <SupplierGoldPanel supplier={supplier} isAdmin={mayGold} mode={goldMode} onMode={setGoldMode} />
 
 
       {/* Purchase history */}
@@ -884,7 +894,7 @@ function SupplierHistoryPageBody() {
             id="supplier-purchases"
             noun="purchase"
             rows={purchases}
-            columns={purchaseColumns}
+            columns={showOwed ? purchaseColumns : purchaseColumns.filter(c => c.key !== "pending")}
             rowKey={p => p.id}
             defaultSort={{ key: "date", dir: "desc" }}
             searchText={p => [purchaseTitle(p), purchaseDesc(p), p.invoiceNumber, orderOf(p)?.orderNumber, p.purpose === "order" ? "order" : "stock", p.notes].filter(Boolean).join(" ")}
@@ -902,7 +912,7 @@ function SupplierHistoryPageBody() {
             // be done — a paid bill says to cancel the payment first.
             rowActions={purchaseActions}
             emptyText="No purchases recorded yet."
-            emptyAction={!purchases.length && isAdmin ? { label: "Record a purchase", onClick: () => setShowPurchaseForm(true) } : undefined}
+            emptyAction={!purchases.length && mayPurchase ? { label: "Record a purchase", onClick: () => setShowPurchaseForm(true) } : undefined}
           />
         </div>
       </div>

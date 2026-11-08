@@ -10,6 +10,7 @@ import { needsAccess } from "@/lib/actionHints";
 import { filled, when, userName, refLink, linkList, noteText, type Detail } from "@/components/rowDetails";
 import { useDb } from "@/hooks/useDb";
 import { useAuth } from "@/lib/auth";
+import { hasFeature, limitsOf } from "@/lib/permissions";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { usePagination } from "@/hooks/usePagination";
@@ -115,7 +116,9 @@ export function ReadyStockPage() {
   const [officesOpen, setOfficesOpen] = useState(false);
 
   // This company's shelf; then the office tab, the search and availability.
-  const shelf = db.readyStock.filter(i => selHas(coView, companyOf(i)));
+  // An employee limited to some offices sees only the pieces there (their access's limits).
+  const myOffices = limitsOf(user, db.roles ?? []).offices;
+  const shelf = db.readyStock.filter(i => selHas(coView, companyOf(i)) && (!myOffices?.length || myOffices.includes(officeOf(i))));
   const tabs = officeTabs(db.settings, shelf).filter(t => canManage || t.items > 0);
   const tabKey = (o: string) => o || NO_OFFICE;
   // A remembered office that has since gone (or holds nothing for a client) falls back to all.
@@ -466,7 +469,7 @@ export function ReadyStockPage() {
         subtitle={canManage ? "Finished pieces, by office" : "Finished pieces to buy"}
         primary={canManage && can("readyStock", "add") ? { label: "Add Item", icon: Plus, onClick: openAdd } : null}
         menu={canManage ? [
-          { label: "Our offices", icon: Building2, hint: "Add or reorder offices", onSelect: () => setOfficesOpen(true), show: isAdmin },
+          { label: "Our offices", icon: Building2, hint: "Add or reorder offices", onSelect: () => setOfficesOpen(true), show: hasFeature(user, db.roles ?? [], "readyStock.offices") },
         ] : undefined}
         actions={<ViewSwitch view={view} onChange={saveView} />}
       />

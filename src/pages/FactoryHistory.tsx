@@ -2,7 +2,7 @@ import { LotPicker, lotStockText } from "@/components/LotFields";
 import { lotBalances, lotLabel, lotParts } from "@/lib/diamondLots";
 import { bagNoOf } from "@/lib/diamondBags";
 import { purchaseBucket } from "@/lib/materials";
-import { useCan, useMayExport } from "@/hooks/useCan";
+import { useCan, useHas, useMayExport } from "@/hooks/useCan";
 import { MoreMenu, type MoreAction } from "@/components/MoreMenu";
 import { PageHeader } from "@/components/PageHeader";
 import { SectionTitle } from "@/components/SectionTitle";
@@ -185,6 +185,11 @@ function FactoryHistoryPageBody() {
     setTimeout(() => document.getElementById("opening-balance")?.scrollIntoView({ behavior: "smooth", block: "start" }), 60);
   };
   const mayPay = isAdmin || can("payments", "add");
+  // Giving and taking back material is a switch; the factory itself, Factories → Edit / Delete.
+  const has = useHas();
+  const mayIssue = has("factories.issue"), mayEdit = can("factories", "edit"), mayDelete = can("factories", "delete");
+  // What we owe the factory (fig.payables), and its labour bills (fig.costs) — an admin always.
+  const showOwed = has("fig.payables"), showCosts = has("fig.costs");
   // Who to call, on one line under the name — the phone dials from a phone.
   const contactLine = joinDots([
     factory.contactPerson,
@@ -630,7 +635,7 @@ function FactoryHistoryPageBody() {
     }
   };
 
-  const ADMIN_ONLY = "Only an admin can change what was issued to a factory";
+  const ADMIN_ONLY = "Your access does not include giving material to factories";
   const issuanceActions = (mi: MaterialIssuance): MoreAction[] => {
     const order = db.orders.find(o => o.id === (mi.orderId ?? mi.meltOf ?? mi.rework?.orderId));
     const purchase = mi.source === "purchase" ? db.purchases.find(p => p.id === mi.sourcePurchaseId) : undefined;
@@ -641,11 +646,11 @@ function FactoryHistoryPageBody() {
     return [
       // The day-to-day steps that are not the card's own buttons (the card shows
       // at most two: Finished piece, and Set charge — or Pay while some is owed).
-      { label: "Set charge", icon: Coins, show: isAdmin && !!mi.orderId && mi.makingCharges.amountInr > 0 && issuancePending(mi) > 0,
+      { label: "Set charge", icon: Coins, show: mayIssue && !!mi.orderId && mi.makingCharges.amountInr > 0 && issuancePending(mi) > 0,
         hint: "Change the making charge", onSelect: () => openAction(mi.id, "charge") },
-      { label: "Return material", icon: Undo2, show: isAdmin && mi.status === "open",
+      { label: "Return material", icon: Undo2, show: mayIssue && mi.status === "open",
         hint: "What the factory gives back unused", onSelect: () => openAction(mi.id, "return") },
-      { label: "Close issuance", icon: Archive, show: isAdmin && mi.status === "open",
+      { label: "Close issuance", icon: Archive, show: mayIssue && mi.status === "open",
         hint: "Settle it — wastage is worked out", onSelect: () => openAction(mi.id, "close") },
       { label: "View order", icon: ExternalLink, show: !!order, disabled: !can("orders"),
         hint: can("orders") ? `${mi.source === "melt" ? "The melted piece" : "Order"} ${order?.orderNumber ?? ""}`.trim() : needsAccess("orders", "view"),
@@ -653,8 +658,8 @@ function FactoryHistoryPageBody() {
       { label: "View purchase", icon: ExternalLink, show: !!purchase, disabled: !can("suppliers"),
         hint: can("suppliers") ? `On ${supplierName ?? "the supplier"}'s page${purchase?.invoiceNumber ? ` · bill ${purchase.invoiceNumber}` : ""}` : needsAccess("suppliers", "view"),
         onSelect: () => navigate(`/suppliers/${purchase!.supplierId}`) },
-      { label: "Edit issuance", icon: Pencil, onSelect: () => setEditingIssuance(mi), disabled: !isAdmin || !edit.ok,
-        hint: !isAdmin ? ADMIN_ONLY : !edit.ok ? edit.reason
+      { label: "Edit issuance", icon: Pencil, onSelect: () => setEditingIssuance(mi), disabled: !mayIssue || !edit.ok,
+        hint: !mayIssue ? ADMIN_ONLY : !edit.ok ? edit.reason
           : certified ? "Charge and note only" : "Quantity, purity or shape, charge, note" },
       // Not offered as working actions, and said why: none of these left a
       // record that can be reversed exactly, so doing it here would guess.
@@ -666,8 +671,8 @@ function FactoryHistoryPageBody() {
         hint: "Can't be reversed exactly — issue again" },
       { label: "Undo a return", icon: Undo2, show: !(mi.source === "melt" && mi.quantityIssued === 0), disabled: true, onSelect: () => {},
         hint: "Can't be undone exactly — issue again" },
-      { label: "Cancel issuance", icon: Trash2, danger: true, onSelect: () => cancelIssuance(mi), disabled: !isAdmin || !cancel.ok,
-        hint: !isAdmin ? ADMIN_ONLY : !cancel.ok ? cancel.reason
+      { label: "Cancel issuance", icon: Trash2, danger: true, onSelect: () => cancelIssuance(mi), disabled: !mayIssue || !cancel.ok,
+        hint: !mayIssue ? ADMIN_ONLY : !cancel.ok ? cancel.reason
           : isPoolDraw(mi) ? "It goes back into the factory's pool"
           : certified ? "The stones go back into stock" : "The material goes back into stock" },
     ];
@@ -1115,18 +1120,18 @@ function FactoryHistoryPageBody() {
         title={factory.name}
         subtitle={contactLine}
         actions={<CompanyFilter value={coView} onChange={setCoView} className="h-10 rounded-xl text-sm w-40 sm:w-48 min-w-0" />}
-        primary={user?.role === "admin" ? { label: "Issue Material", icon: Plus, onClick: () => setShowIssueForm(true) } : null}
+        primary={mayIssue ? { label: "Issue Material", icon: Plus, onClick: () => setShowIssueForm(true) } : null}
         // Paying their labour in one go, oldest jobs first — one job at a time is its card's Pay.
         secondary={mayPay ? { label: "Pay", icon: CreditCard, onClick: () => setPayingFactory(true) } : null}
         menu={[
           // Set once, when moving from an old system — so out of sight until then.
-          { label: "Opening balance", icon: BookOpen, hint: "Not set — what was owed and held before the app", onSelect: openOpening, show: isAdmin && !openingSet },
-          { label: "Move between companies", icon: ArrowRightLeft, hint: "Gold, diamonds or other material, company to company", onSelect: () => setMovingPool(true), show: multiCo && user?.role === "admin" },
-          { label: "Export ledger", icon: Download, hint: "Ledger or movement sheet", onSelect: () => setShowExport(true), show: mayExport },
-          { label: "Edit details", icon: Pencil, onSelect: () => setEditingFactory(factory), disabled: !isAdmin,
-            hint: isAdmin ? "Name, contact, phone, address" : "Only an admin can change factories" },
-          { label: "Delete factory", icon: Trash2, danger: true, onSelect: deleteFactory, disabled: !isAdmin || !deleteGuard.ok,
-            hint: !isAdmin ? "Only an admin can change factories" : deleteGuard.reason },
+          { label: "Opening balance", icon: BookOpen, hint: "Not set — what was owed and held before the app", onSelect: openOpening, show: mayEdit && !openingSet },
+          { label: "Move between companies", icon: ArrowRightLeft, hint: "Gold, diamonds or other material, company to company", onSelect: () => setMovingPool(true), show: multiCo && has("factories.companies") },
+          { label: "Export ledger", icon: Download, hint: "Ledger or movement sheet", onSelect: () => setShowExport(true), show: mayExport && has("fig.costs") && has("fig.payables") },
+          { label: "Edit details", icon: Pencil, onSelect: () => setEditingFactory(factory), disabled: !mayEdit,
+            hint: mayEdit ? "Name, contact, phone, address" : "Your access does not include changing factories" },
+          { label: "Delete factory", icon: Trash2, danger: true, onSelect: deleteFactory, disabled: !mayDelete || !deleteGuard.ok,
+            hint: !mayDelete ? "Your access does not include deleting factories" : deleteGuard.reason },
         ]}
       />
 
@@ -1135,12 +1140,12 @@ function FactoryHistoryPageBody() {
       <StatStrip
         note={view !== "all" ? `${companyById(db.settings, view).name} only` : undefined}
         items={[
-          account.chargesPending <= 0 && account.chargesOverpaid > 0
+          ...(!showOwed ? [] : [account.chargesPending <= 0 && account.chargesOverpaid > 0
             ? { label: "Paid ahead", value: fmtMoneyInr(account.chargesOverpaid), icon: Wallet, sub: `Held by the factory · ${fmtMoneyInr(account.chargesTotal)} billed` }
             : { label: "We owe", value: account.chargesPending > 0 ? fmtMoneyInr(account.chargesPending) : "✓ Cleared",
                 tone: account.chargesPending > 0 ? "out" as const : "in" as const, icon: Coins,
-                sub: `Labour · ${fmtMoneyInr(account.chargesTotal)} billed${account.chargesOverpaid > 0 ? ` · ${fmtMoneyInr(account.chargesOverpaid)} paid ahead` : ""}` },
-          { label: "Paid", value: fmtMoneyInr(account.chargesPaid), tone: "in", icon: CreditCard, sub: "Labour paid" },
+                sub: `Labour · ${fmtMoneyInr(account.chargesTotal)} billed${account.chargesOverpaid > 0 ? ` · ${fmtMoneyInr(account.chargesOverpaid)} paid ahead` : ""}` }]),
+          ...(showCosts ? [{ label: "Paid", value: fmtMoneyInr(account.chargesPaid), tone: "in" as const, icon: CreditCard, sub: "Labour paid" }] : []),
           { label: "Fine gold (24KT)", value: `${factoryFineGoldBalance(db.materialIssuances, id!, factory.openingFineGold, view).toLocaleString()} g`, icon: Coins, sub: "At the factory" },
           { label: "Diamond", value: `${account.diamondOutstanding > 0 ? "+" : ""}${account.diamondOutstanding.toLocaleString()} ct`, icon: Gem,
             tone: account.diamondOutstanding < 0 ? "out" : undefined, sub: "Net, given less used" },
@@ -1165,7 +1170,7 @@ function FactoryHistoryPageBody() {
 
       {/* Opening balance (migration) — admin only; once set it stays in view,
           until then it waits in the ⋯. */}
-      {isAdmin && (openingSet || obOpen) && (
+      {mayEdit && (openingSet || obOpen) && (
         <div id="opening-balance" className="card-luxe p-5 scroll-mt-20">
           <SectionTitle title="Opening Balance"
             sub={hasOpeningBalance(factory) || factory.openingFineGold
@@ -1306,7 +1311,7 @@ function FactoryHistoryPageBody() {
                     )}
                   </p>
                 </div>
-                {user?.role === "admin" && (
+                {mayIssue && (
                   <div className="flex flex-wrap items-center gap-1 -mr-2">
                     {mi.orderId && (
                       <>
@@ -1314,7 +1319,7 @@ function FactoryHistoryPageBody() {
                           <button type="button" onClick={() => openAction(mi.id, "piece")} className={ISSUE_ACTION}><CheckCircle2 className="h-4 w-4" />Finished piece</button>
                         )}
                         {mi.makingCharges.amountInr > 0 && pending > 0
-                          ? <button type="button" onClick={() => openAction(mi.id, "pay")} className={ISSUE_ACTION}><CreditCard className="h-4 w-4" />Pay</button>
+                          ? mayPay && <button type="button" onClick={() => openAction(mi.id, "pay")} className={ISSUE_ACTION}><CreditCard className="h-4 w-4" />Pay</button>
                           : <button type="button" onClick={() => openAction(mi.id, "charge")} className={ISSUE_ACTION}><Coins className="h-4 w-4" />Set charge</button>}
                       </>
                     )}

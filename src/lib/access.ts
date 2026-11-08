@@ -1,7 +1,8 @@
 import { toast } from "sonner";
 import { loadDb } from "./db";
 import { auth, isAdminEmail } from "./firebase";
-import { can, type PermAction, type PermUser } from "./permissions";
+import { can, hasFeature, limitsOf, type PermAction, type PermUser } from "./permissions";
+import type { AccessLimits } from "./accessFeatures";
 import { moduleForPath, type ModuleKey } from "./modules";
 
 /**
@@ -21,6 +22,34 @@ export function currentPermUser(): PermUser | null {
 /** Whether the signed-in person may do this in this section. */
 export function allowed(module: ModuleKey, action: PermAction): boolean {
   return can(currentPermUser(), loadDb().roles ?? [], module, action);
+}
+
+/** Whether the signed-in person has one of the finer switches (lib/accessFeatures.ts). */
+export function hasSwitch(key: string): boolean {
+  return hasFeature(currentPermUser(), loadDb().roles ?? [], key);
+}
+
+/**
+ * For the shared rules that take the person as an argument: undefined when
+ * they may (an admin always; an employee with the switch), else the reason.
+ * The switch is read for the signed-in person — whom these rules are always
+ * asked about.
+ */
+export function switchWhy(user: { role: string } | null | undefined, key: string, what: string): string | undefined {
+  if (user?.role === "admin") return undefined;
+  if (user?.role === "employee" && hasSwitch(key)) return undefined;
+  return `Your access does not include ${what}`;
+}
+
+/** The order steps the signed-in person may move — undefined: every step. */
+export function myStepLimit(): string[] | undefined {
+  const s = myLimits().stages;
+  return s && s.length ? s : undefined;
+}
+
+/** The signed-in person's limits (none for an admin or a client). */
+export function myLimits(): AccessLimits {
+  return limitsOf(currentPermUser(), loadDb().roles ?? []);
 }
 
 /**

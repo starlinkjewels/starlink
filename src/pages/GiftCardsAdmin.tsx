@@ -11,6 +11,7 @@ import { PageHeader } from "@/components/PageHeader";
 import { StatStrip } from "@/components/TableToolbar";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "@/lib/auth";
+import { hasFeature } from "@/lib/permissions";
 import { useCan } from "@/hooks/useCan";
 import type { MoreAction } from "@/components/MoreMenu";
 import { GIFT_CARD_NO_DELETE, GIFT_CARD_NO_EDIT, cancelGiftCardFlow, giftCardCancelBlocker } from "@/lib/giftCardActions";
@@ -130,13 +131,13 @@ export function GiftCardsAdminPage() {
   // client); never edited, never deleted. Each is shown, greyed with why.
   const cardActions = (c: GiftCard): MoreAction[] => {
     const dead = giftCardCancelBlocker(c, db.orders);
-    const admin = user?.role === "admin";
+    const admin = hasFeature(user, db.roles ?? [], "giftCards.cancel");
     return [
       { label: "View client", icon: Eye, onSelect: () => navigate(`/clients/${c.clientId}`),
         disabled: !can("clients"), hint: can("clients") ? clientName(c.clientId) : needsAccess("clients", "view") },
       { label: "Edit", icon: Pencil, onSelect: () => {}, disabled: true, hint: oneLine(GIFT_CARD_NO_EDIT) },
       { label: "Cancel card", icon: Ban, danger: true, onSelect: () => cancelGiftCardFlow(c.id), disabled: !!dead || !admin,
-        hint: oneLine(dead) ?? (admin ? `Stops ${fmtMoney(giftCardRemaining(c, db.orders))} being spent` : "Admins only") },
+        hint: oneLine(dead) ?? (admin ? `Stops ${fmtMoney(giftCardRemaining(c, db.orders))} being spent` : "Your access does not include cancelling gift cards") },
       { label: "Delete", icon: Trash2, danger: true, onSelect: () => {}, disabled: true, hint: GIFT_CARD_NO_DELETE },
     ];
   };

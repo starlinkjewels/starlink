@@ -1,6 +1,7 @@
 import { useAuth } from "@/lib/auth";
 import { useDb } from "@/hooks/useDb";
-import { can, type PermAction } from "@/lib/permissions";
+import { can, hasFeature, limitsOf, type PermAction } from "@/lib/permissions";
+import type { AccessLimits } from "@/lib/accessFeatures";
 import { moduleForPath, type ModuleKey } from "@/lib/modules";
 import { useLocation } from "react-router-dom";
 
@@ -16,6 +17,27 @@ export function useCan(): (module: ModuleKey, action?: PermAction) => boolean {
   const { user } = useAuth();
   const db = useDb();
   return (module, action = "view") => can(user, db.roles ?? [], module, action);
+}
+
+/**
+ * Whether the signed-in person has one of the finer switches of access
+ * (lib/accessFeatures.ts) — approve an order, cancel one, see profit… An
+ * admin always has; a client never through this.
+ *
+ *   const has = useHas();
+ *   {has("orders.cancel") && <CancelButton />}
+ */
+export function useHas(): (key: string) => boolean {
+  const { user } = useAuth();
+  const db = useDb();
+  return key => hasFeature(user, db.roles ?? [], key);
+}
+
+/** The limits on the signed-in person's access (none for an admin or a client). */
+export function useLimits(): AccessLimits {
+  const { user } = useAuth();
+  const db = useDb();
+  return limitsOf(user, db.roles ?? []);
 }
 
 /**

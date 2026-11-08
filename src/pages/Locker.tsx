@@ -1,7 +1,7 @@
 import { LockerCreateDialog } from "@/components/create/LockerCreateDialog";
 import { lockerEntryText, lockerLookup } from "@/lib/lockerText";
 import { DataTable, CellMain, CellTag, CellAmount, CellDate, type DataColumn } from "@/components/DataTable";
-import { useCan } from "@/hooks/useCan";
+import { useCan, useHas } from "@/hooks/useCan";
 import { useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { loadDb, updateDb, fmtDate, collectionsLoaded, type Locker, type LockerType, type LockerTransaction, type LockerTxnType } from "@/lib/db";
@@ -64,6 +64,9 @@ export function LockerPage() {
   const { user } = useAuth();
   const db = useDb();
   const can = useCan();
+  // Balances (each account's, each line's, opening and closing): only with
+  // fig.balances — an admin always. Money in and out stay.
+  const showBal = useHas()("fig.balances");
   const [open, setOpen] = useState(false);
 
   // "View account" elsewhere opens this page on that account (?account=id).
@@ -376,12 +379,12 @@ export function LockerPage() {
     const cur = ccy(selected.currency);
     downloadCsv(
       `Locker-${selected.name.replace(/\s+/g, "_")}`,
-      ["Date", "Description", "Category", `Money In (${cur})`, `Money Out (${cur})`, `Balance (${cur})`],
+      ["Date", "Description", "Category", `Money In (${cur})`, `Money Out (${cur})`, ...(showBal ? [`Balance (${cur})`] : [])],
       txns.filter(t => inDateRange(t.createdAt, from, to)).map(t => {
         const signed = txnSigned(t);
         // Rounded to the currency's cents: adding up dollar or euro amounts
         // leaves float noise (…0000000004) on a running total.
-        return [fmtDate(t.createdAt), txnText(t), categoryOf(t), signed > 0 ? signed : "", signed < 0 ? -signed : "", roundCcy(txnBalances.get(t.id) ?? 0, cur)];
+        return [fmtDate(t.createdAt), txnText(t), categoryOf(t), signed > 0 ? signed : "", signed < 0 ? -signed : "", ...(showBal ? [roundCcy(txnBalances.get(t.id) ?? 0, cur)] : [])];
       }),
     );
   };
@@ -394,11 +397,11 @@ export function LockerPage() {
       subjectLines: [
         `Account: ${selected.name}${selected.type === "bank" && selected.accountNumberLast4 ? ` (····${selected.accountNumberLast4})` : ""}`,
         `Type: ${selected.type === "bank" ? "Bank" : "Cash"} · Currency: ${cur}`,
-        `Opening Balance: ${fmtCcyPdf(selected.openingBalance || 0, cur)}`,
+        ...(showBal ? [`Opening Balance: ${fmtCcyPdf(selected.openingBalance || 0, cur)}`] : []),
         `Report Generated: ${new Date().toLocaleDateString("en-IN", { month: "long", day: "numeric", year: "numeric" })}`,
       ],
       summary: [
-        { label: "Current Balance", value: fmtCcyPdf(lockerBalance(selected, db.lockerTransactions), cur) },
+        ...(showBal ? [{ label: "Current Balance", value: fmtCcyPdf(lockerBalance(selected, db.lockerTransactions), cur) }] : []),
         { label: "Total In", value: fmtCcyPdf(totalIn, cur) },
         { label: "Total Out", value: fmtCcyPdf(totalOut, cur) },
       ],
@@ -407,7 +410,7 @@ export function LockerPage() {
         { header: "Description", x: 50 },
         { header: "In", x: 118 },
         { header: "Out", x: 140 },
-        { header: "Balance", x: 165 },
+        ...(showBal ? [{ header: "Balance", x: 165 }] : []),
       ],
       rows: txns.filter(t => inDateRange(t.createdAt, from, to)).map(t => {
         const signed = txnSigned(t);
@@ -415,7 +418,7 @@ export function LockerPage() {
           fmtDate(t.createdAt), txnText(t).slice(0, 26),
           signed > 0 ? pdfNum(signed, cur) : "—",
           signed < 0 ? pdfNum(-signed, cur) : "—",
-          pdfNum(txnBalances.get(t.id) ?? 0, cur),
+          ...(showBal ? [pdfNum(txnBalances.get(t.id) ?? 0, cur)] : []),
         ];
       }),
       filename: `Locker-${selected.name.replace(/\s+/g, "_")}`,
@@ -465,7 +468,7 @@ export function LockerPage() {
                   </p>
                 </div>
               </div>
-              <p className={`mt-2.5 text-xl font-display font-bold tabular-nums leading-tight ${bal < 0 ? "text-destructive" : "text-brand-dark"}`}>{fmtCcy(bal, l.currency)}</p>
+              <p className={`mt-2.5 text-xl font-display font-bold tabular-nums leading-tight ${bal < 0 ? "text-destructive" : "text-brand-dark"}`}>{showBal ? fmtCcy(bal, l.currency) : "—"}</p>
             </div>
           );
         })}
@@ -501,21 +504,21 @@ export function LockerPage() {
                 onChange: v => setFilterCat(v), options: catOptions },
             ]}
             onClearFilters={() => { setFilterFrom(""); setFilterTo(""); setFilterCat(""); }}
-            exports={[{ label: "PDF or Excel", icon: Download, hint: "With the running balance", onSelect: () => setShowExport(true) }]}
+            exports={[{ label: "PDF or Excel", icon: Download, hint: showBal ? "With the running balance" : "Money in and out", onSelect: () => setShowExport(true) }]}
             summary={
               rangeOn ? (
                 <StatStrip items={[
-                  { label: filterFrom ? "Opening" : "Opening balance", value: fmtCcy(rangeOpen, selected.currency), icon: History, sub: filterFrom ? `At the start of ${fmtDate(rFrom!.toISOString())}` : "At the start" },
+                  ...(showBal ? [{ label: filterFrom ? "Opening" : "Opening balance", value: fmtCcy(rangeOpen, selected.currency), icon: History, sub: filterFrom ? `At the start of ${fmtDate(rFrom!.toISOString())}` : "At the start" }] : []),
                   { label: "Money in", value: fmtCcy(rangeIn, selected.currency), tone: "in", op: "+", sub: `${rangeNIn} ${rangeNIn === 1 ? "entry" : "entries"}` },
                   { label: "Money out", value: fmtCcy(rangeOut, selected.currency), tone: "out", op: "−", sub: `${rangeNOut} ${rangeNOut === 1 ? "entry" : "entries"}` },
-                  { label: "Closing", value: fmtCcy(rangeOpen + rangeIn - rangeOut, selected.currency), tone: "strong", op: "=", icon: Wallet, sub: filterTo ? `At the end of ${fmtDate(rTo!.toISOString())}` : "Now" },
+                  ...(showBal ? [{ label: "Closing", value: fmtCcy(rangeOpen + rangeIn - rangeOut, selected.currency), tone: "strong" as const, op: "=" as const, icon: Wallet, sub: filterTo ? `At the end of ${fmtDate(rTo!.toISOString())}` : "Now" }] : []),
                 ]} />
               ) : (
               <StatStrip items={[
-                { label: "Opening balance", value: fmtCcy(selected.openingBalance || 0, selected.currency), icon: History },
+                ...(showBal ? [{ label: "Opening balance", value: fmtCcy(selected.openingBalance || 0, selected.currency), icon: History }] : []),
                 { label: "Money in", value: fmtCcy(totalIn, selected.currency), tone: "in", op: "+", sub: `${nIn} ${nIn === 1 ? "entry" : "entries"}` },
                 { label: "Money out", value: fmtCcy(totalOut, selected.currency), tone: "out", op: "−", sub: `${nOut} ${nOut === 1 ? "entry" : "entries"}` },
-                { label: "Balance", value: fmtCcy(lockerBalance(selected, db.lockerTransactions), selected.currency), tone: "strong", op: "=", icon: Wallet },
+                ...(showBal ? [{ label: "Balance", value: fmtCcy(lockerBalance(selected, db.lockerTransactions), selected.currency), tone: "strong" as const, op: "=" as const, icon: Wallet }] : []),
               ]} note={filtersActive ? "Whole account — not narrowed by the category" : undefined} />
               )
             }
@@ -523,10 +526,10 @@ export function LockerPage() {
             id="locker-ledger"
             noun="transaction"
             rows={ledgerRows}
-            columns={ledgerColumns}
+            columns={showBal ? ledgerColumns : ledgerColumns.filter(c => c.key !== "balance")}
             rowKey={r => r.id}
             defaultSort={{ key: "date", dir: "desc" }}
-            pinnedRows={[openingRow]}
+            pinnedRows={showBal ? [openingRow] : []}
             searchText={r => (r.t ? [txnText(r.t), r.t.note, r.t.voucherNo, typeOf(r.t).label].filter(Boolean).join(" ") : "")}
             searchPlaceholder="Search this ledger"
             totals={{
