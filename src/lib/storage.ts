@@ -5,6 +5,7 @@
 import { webVideoUrl } from "./webVideo";
 import { ref, uploadString, uploadBytesResumable, getDownloadURL, deleteObject } from "firebase/storage";
 import { storage, STORAGE_PREFIX } from "./firebase";
+import { ensureFileClaims } from "./fileClaims";
 
 /** Keeps this build's uploads inside its own folder of a shared bucket. */
 const scoped = (folder: string) => (STORAGE_PREFIX ? `${STORAGE_PREFIX}/${folder}` : folder);
@@ -27,6 +28,7 @@ export async function uploadDataUrl(dataUrl: string, folder: string): Promise<st
   const mime = mimeMatch?.[1] ?? "image/jpeg";
   const ext = mime.split("/")[1]?.split("+")[0] || "jpg";
   const path = `${scoped(folder)}/${key()}.${ext}`;
+  await ensureFileClaims(); // the file rules read who they are from it (lib/fileClaims.ts)
   const r = ref(storage, path);
   await uploadString(r, dataUrl, "data_url");
   return getDownloadURL(r);
@@ -48,6 +50,7 @@ export async function uploadFile(
 ): Promise<string> {
   const ext = file.name.split(".").pop() || "bin";
   const path = `${scoped(folder)}/${key()}.${ext}`;
+  await ensureFileClaims(); // the file rules read who they are from it (lib/fileClaims.ts)
   const r = ref(storage, path);
   const task = uploadBytesResumable(r, file, { contentType: file.type || undefined });
   await new Promise<void>((resolve, reject) => {

@@ -1,37 +1,74 @@
 rules_version = '2';
 
-// Every user signs in via Firebase Authentication, so Storage requires a
-// signed-in user for both reads and writes. This blocks anonymous access with
-// just the public config. (Media has no per-user isolation — any authenticated
-// user can read any object; tighten later if needed.)
+// Files. Storage rules can't read this app's database ("diamondflow" is a named
+// database; Storage reads only "(default)"), so who someone is comes from their
+// sign-in token: the "sl" claim the server keeps there from their sign-in record
+// (functions/src/fileClaims.ts) — { r: admin | employee | client, st: active | off,
+// docs?: true }. An owner is known by email, always.
+//
+// Viewing a photo in the app goes through its link (a download URL carries its
+// own key), so these rules decide mostly who may ADD, CHANGE and DELETE files:
+//   • staff — the app's own folders;
+//   • clients — only add new files where the app lets them: their orders' photos
+//     and chat attachments (never change or delete anyone's);
+//   • backups — admins only; documents — staff with Documents access.
+// Folders the app does not use are left exactly as they were.
 service firebase.storage {
   match /b/{bucket}/o {
     // 👇 EDIT: must match ADMIN_EMAILS in src/lib/firebase.ts (and firestore.rules).
-    function isAdmin() {
+    function isOwner() {
       return request.auth != null
         && request.auth.token.email in ['online@ssdiam.in'];
     }
+    function signedIn() { return request.auth != null; }
+    // Their sign-in record's role, on their token — and active.
+    function on() {
+      return signedIn() && request.auth.token.sl is map && request.auth.token.sl.st == 'active';
+    }
+    function isAdmin() { return isOwner() || (on() && request.auth.token.sl.r == 'admin'); }
+    function isStaff() { return isOwner() || (on() && request.auth.token.sl.r in ['admin', 'employee']); }
+    function isClient() { return on() && request.auth.token.sl.r == 'client'; }
+    function hasDocs() { return isAdmin() || (on() && request.auth.token.sl.r == 'employee' && request.auth.token.sl.docs == true); }
 
     // Automatic database backups (src/lib/backup.ts). Each file is a FULL
-    // snapshot of the whole account, so it must never be readable by staff or
-    // clients — admin only. Declared before the catch-all so it wins.
-    match /backups/{file} {
-      allow read, write, delete: if isAdmin();
+    // snapshot of the whole account — admins only (any admin, not only an owner).
+    match /backups/{rest=**} {
+      allow read, write: if isAdmin();
     }
 
-    // Documents (the business's own papers, src/lib/documents.ts): never LISTED —
-    // a signed-in client must not be able to see what is there. A file is read or
-    // written only by its exact address (documents/<random id>/<name>), which only
-    // people with Documents access are given (firestore.rules canDocs()).
+    // Documents (the business's own papers, src/lib/documents.ts): never LISTED,
+    // read by staff, added or changed by those with Documents access. A shared
+    // link opens through the server (functions/src/docShare.ts), not these rules.
     match /documents/{rest=**} {
-      allow get, write: if request.auth != null;
+      allow get: if isStaff();
+      allow write: if hasDocs();
     }
 
-    // Everything else, as before. Written as "top folder + the rest" so that the
-    // documents folder above is the only rule for its files (Storage rules add up:
-    // a catch-all that also matched documents/ would let it be listed again).
+    // An order's pictures (reference images, CAD, product photos, 3D files) and
+    // chat attachments: a client adds new ones (placing an order, a message);
+    // only staff change or remove any.
+    match /orders/{rest=**} {
+      allow read: if signedIn();
+      // A client only ever adds: never over a file already there.
+      allow create: if isStaff() || (isClient() && resource == null);
+      allow update, delete: if isStaff();
+    }
+    match /messages/{rest=**} {
+      allow read: if signedIn();
+      // A client only ever adds: never over a file already there.
+      allow create: if isStaff() || (isClient() && resource == null);
+      allow update, delete: if isStaff();
+    }
+
+    // The rest of the app's folders: read by anyone signed in, written by staff only.
+    function staffFolders() { return ['catalog', 'readyStock', 'cad', 'settings', 'companies', 'campaigns', 'products', 'shares', 'users', 'misc']; }
+    // Every folder the app uses — those above and the four with rules of their own.
+    function appFolders() { return staffFolders().concat(['backups', 'documents', 'orders', 'messages']); }
+    // One rule for every other path. A folder that is not the app's (older files
+    // of another database live in this bucket) stays exactly as it was before.
     match /{top}/{rest=**} {
-      allow read, write: if request.auth != null && top != 'documents';
+      allow read: if signedIn() && (top in staffFolders() || !(top in appFolders()));
+      allow write: if (isStaff() && top in staffFolders()) || (signedIn() && !(top in appFolders()));
     }
   }
 }

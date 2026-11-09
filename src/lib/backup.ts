@@ -12,6 +12,7 @@
 // admin e-mails only — never leave it on the default "any signed-in user" rule.
 import { ref, uploadString, getDownloadURL, listAll, deleteObject } from "firebase/storage";
 import { storage } from "./firebase";
+import { ensureFileClaims } from "./fileClaims";
 import { loadDb, ensureAllCollections, whenFresh } from "./db";
 
 const FOLDER = "backups";
@@ -51,6 +52,8 @@ export async function createBackup(): Promise<BackupEntry> {
   await ensureAllCollections();
   // ...and the server's answer for them, never this device's saved copy.
   await whenFresh();
+  // The file rules allow backups to admins, read from the sign-in token (lib/fileClaims.ts).
+  await ensureFileClaims();
   await uploadString(ref(storage, path), JSON.stringify(loadDb()), "raw", {
     contentType: "application/json",
   });

@@ -149,6 +149,7 @@ import type { ItemDesign, ItemSpecs } from "./pure/catalogMedia";
 export type { MaterialDef, MaterialKey } from "./materials";
 import { KARAT_PURITY, toPureGold, pureFromPurity, openingDebitAmt, openingCreditAmt, hasOpeningBalance } from "./pure/basics";
 import { closedTo, isClosedDate, lockBreaches, breachMessage, lockedPart, soldInClosedYear } from "./yearLock";
+import { ensureFileClaims, stampTeamOnce } from "./fileClaims";
 import { policyAllows, POLICY_NOUN, READ_LOCKED, readAllowed, type Op as WriteOp } from "./pure/writePolicy";
 export { KARAT_PURITY, toPureGold, pureFromPurity, openingDebitAmt, openingCreditAmt, hasOpeningBalance };
 
@@ -1339,6 +1340,9 @@ export interface Settings {
   /** Every order, client and invoice carries its "who works on this" list (staffIds) — set by an
    *  admin's session once it has filled them all. Until then nobody is limited by it. */
   ownScopeReady?: boolean;
+  /** When an admin's session had the whole team's sign-in tokens stamped for the
+   *  file rules (lib/fileClaims.ts) — once; the file rules count on it after. */
+  fileClaimsAt?: string;
 }
 
 /** One financial year's close, as every signed-in person may read it. */
@@ -4279,7 +4283,14 @@ export function startDb(scope: Scope = { kind: "full" }): Promise<void> {
         await reconcileRoleIndex();
         // The "who works on this" lists: filled in (and marked done) by an admin's session.
         if (!cache.settings.ownScopeReady) updateDb(() => {});
+        // Who is who on everyone's sign-in token, for the file rules (lib/fileClaims.ts) — once.
+        if (!cache.settings.fileClaimsAt) {
+          const done = await stampTeamOnce();
+          if (done && gen === subGeneration) updateDb(d => { d.settings.fileClaimsAt = new Date().toISOString(); });
+        }
       }
+      // This session's own token, stamped for the file rules before anything is uploaded.
+      void ensureFileClaims();
       // Legacy localStorage migration only runs for staff (admin) sessions.
       if (scope.kind === "full") {
         const legacy = readLegacy();
