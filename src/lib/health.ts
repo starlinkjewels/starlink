@@ -8,7 +8,10 @@
  * A session sends a few at most — never a flood.
  */
 import { httpsCallable } from "firebase/functions";
-import { functions, EMULATORS } from "./firebase";
+import { functions } from "./firebase";
+
+/** The local test setup (the dev server against the emulators) — there is no server to tell. */
+const EMULATORS = !!import.meta.env?.DEV && import.meta.env?.VITE_EMULATORS === "1";
 
 type Kind = "failedLogin" | "denied" | "error" | "signin";
 let sent = 0;
