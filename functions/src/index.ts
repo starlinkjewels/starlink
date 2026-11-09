@@ -16,6 +16,9 @@ export { makeWebVideo } from "./videoWeb";
 export { openDocShare } from "./docShare";
 // Who someone is, on their sign-in token, for the file rules (see fileClaims.ts).
 export { fileClaimsOnIndex, syncFileClaims } from "./fileClaims";
+// Software health — attacks and failures watched, partners alerted (see health/).
+export { healthTick, healthDigest, healthOnDelete, healthOnActivity } from "./health/watchers";
+export { reportHealth, healthAction } from "./health/report";
 // Smart Pipelines — the business's own automations (Settings → Autopilot; see pipelines/).
 export { pipelineOnOrder, pipelineOnClient, pipelineOnInvoice, pipelineOnAnswer, pipelineTick, pipelineTest, pipelineRunNow } from "./pipelines";
 

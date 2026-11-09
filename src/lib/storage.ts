@@ -6,6 +6,7 @@ import { webVideoUrl } from "./webVideo";
 import { ref, uploadString, uploadBytesResumable, getDownloadURL, deleteObject } from "firebase/storage";
 import { storage, STORAGE_PREFIX } from "./firebase";
 import { ensureFileClaims } from "./fileClaims";
+import { reportHealth } from "./health";
 
 /** Keeps this build's uploads inside its own folder of a shared bucket. */
 const scoped = (folder: string) => (STORAGE_PREFIX ? `${STORAGE_PREFIX}/${folder}` : folder);
@@ -30,7 +31,12 @@ export async function uploadDataUrl(dataUrl: string, folder: string): Promise<st
   const path = `${scoped(folder)}/${key()}.${ext}`;
   await ensureFileClaims(); // the file rules read who they are from it (lib/fileClaims.ts)
   const r = ref(storage, path);
-  await uploadString(r, dataUrl, "data_url");
+  try {
+    await uploadString(r, dataUrl, "data_url");
+  } catch (e) {
+    if ((e as { code?: string })?.code === "storage/unauthorized") reportHealth("denied", { what: `a file in ${folder.split("/")[0]}` });
+    throw e;
+  }
   return getDownloadURL(r);
 }
 

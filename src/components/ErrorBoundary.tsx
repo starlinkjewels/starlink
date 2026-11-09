@@ -1,4 +1,5 @@
 import { Component, type ErrorInfo, type ReactNode } from "react";
+import { reportHealth } from "@/lib/health";
 import { AlertTriangle, RotateCw } from "lucide-react";
 import { flush, whenFresh } from "@/lib/db";
 
@@ -62,6 +63,8 @@ export class ErrorBoundary extends Component<
     // before anything changed — draw the screen again once the server has answered.
     if (error?.name === "StaleDataError") { void whenFresh().then(() => this.setState({ error: null, reloading: false })); return; }
     console.error("[app] a screen failed to draw:", error, info.componentStack);
+    // A screen that fails to draw is reported (Settings → Software health) — never a new build arriving.
+    if (!CHUNK_ERROR.test(String(error?.message ?? error))) reportHealth("error", { message: String(error?.message ?? error).slice(0, 300), page: window.location.pathname.replace(/\/[A-Za-z0-9_-]{12,}/g, "/:id").slice(0, 80) });
     this.setState({ where: info.componentStack ?? undefined });
     if (CHUNK_ERROR.test(String(error?.message ?? error)) && reloadOnceForNewBuild()) this.setState({ reloading: true });
   }

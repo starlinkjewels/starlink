@@ -14,6 +14,7 @@ import { ArrowRight, Eye, EyeOff, Gem, Loader2, Lock, Mail, ReceiptText, Workflo
 import { BrandLogo } from "@/components/BrandLogo";
 import { useBrand, brandName, BUILTIN } from "@/lib/brand";
 import { Facets } from "@/components/Facets";
+import { reportHealth } from "@/lib/health";
 
 /** The logo on the dark brand panel: a light version when there is one, else the logo on a light plate. */
 function PanelLogo() {
@@ -46,7 +47,8 @@ export function LoginPage() {
     setLoading(true);
     const u = await login(email.trim(), password);
     setLoading(false);
-    if (!u) { toast.error("Invalid credentials"); return; }
+    // Counted by the server: many wrong passwords alert every partner (Settings → Software health).
+    if (!u) { reportHealth("failedLogin", { email: email.trim() }); toast.error("Invalid credentials"); return; }
     if (remember) localStorage.setItem("starlink_remember_user", email); else localStorage.removeItem("starlink_remember_user");
     toast.success(`Welcome, ${u.name}`);
     nav("/", { replace: true });
