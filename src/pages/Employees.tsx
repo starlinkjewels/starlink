@@ -99,7 +99,7 @@ export function EmployeesPage() {
     .filter(shownFilter.test)
     .sort((a, b) => (a.role === "admin" ? -1 : 0) - (b.role === "admin" ? -1 : 0));
 
-  const { paged, page, setPage, totalPages, total, start, end } = usePagination(emps, PAGE_SIZE);
+  const { paged, page, setPage, totalPages, total, start, end } = usePagination(emps, PAGE_SIZE, "page", JSON.stringify([q, filter]));
 
 
   const toggle = (u: User) => {

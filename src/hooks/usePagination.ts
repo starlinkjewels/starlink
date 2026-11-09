@@ -15,7 +15,9 @@ import { usePageSizePref } from "@/hooks/usePageSize";
  *
  * `paramKey` names the query parameter; give one per list when a page shows two.
  */
-export function usePagination<T>(items: T[], defaultPageSize = 10, paramKey = "page") {
+export function usePagination<T>(items: T[], defaultPageSize = 10, paramKey = "page",
+  /** The list's search and filters, as one string — when it changes, back to page 1. */
+  resetKey = "") {
   // How many rows a page holds is the reader's choice, kept across visits. The
   // number passed in is only the fallback for someone who has never set one.
   const pageSize = usePageSizePref(defaultPageSize);
@@ -48,14 +50,23 @@ export function usePagination<T>(items: T[], defaultPageSize = 10, paramKey = "p
   useEffect(() => { setPageState(fromUrl); }, [fromUrl]);
 
   // A changed search or filter is a different list, so go back to the top — but
-  // not on the first render, which would throw away the page just restored.
-  // Changing the rows per page reshuffles every page boundary, so it counts too.
-  const first = useRef(true);
+  // only when the reader changed it (`resetKey`: the page's search and filters),
+  // never because the records were still arriving. It used to watch the list's
+  // length, and the list grows while a page loads — so coming Back to page 3 of
+  // Orders snapped to page 1 the moment the rest of the orders landed. Changing
+  // the rows per page reshuffles every page boundary, so it counts too. A page
+  // past the end (fewer rows for now) is shown as the last one, not thrown away.
+  // Compared with the last values seen rather than "skip the first run": React
+  // runs effects twice when a page opens in development, and a skip-once flag
+  // let the second run through — the same snap to page 1, just from elsewhere.
+  const seen = useRef(`${pageSize}|${resetKey}`);
   useEffect(() => {
-    if (first.current) { first.current = false; return; }
+    const now = `${pageSize}|${resetKey}`;
+    if (seen.current === now) return;
+    seen.current = now;
     setPageState(1);
     writeParam(1);
-  }, [items.length, pageSize, writeParam]);
+  }, [resetKey, pageSize, writeParam]);
 
   const totalPages = Math.max(1, Math.ceil(items.length / pageSize));
   const safePage = Math.min(page, totalPages);

@@ -89,7 +89,7 @@ export function SuppliersPage() {
       s.name.toLowerCase().includes(q.toLowerCase()) || (s.contactPerson || "").toLowerCase().includes(q.toLowerCase()),
     )
     .sort((a, b) => Math.abs(netOf(b)) - Math.abs(netOf(a)) || a.name.localeCompare(b.name));
-  const { paged, page, setPage, totalPages, total, start, end } = usePagination(list, PAGE_SIZE);
+  const { paged, page, setPage, totalPages, total, start, end } = usePagination(list, PAGE_SIZE, "page", q);
 
   // Grand totals across ALL suppliers (not just the search/current page):
   // net > 0 → we still owe them (payable); net < 0 → they owe us (receivable).

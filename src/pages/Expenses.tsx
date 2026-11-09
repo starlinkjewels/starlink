@@ -379,7 +379,7 @@ export function ExpensesPage() {
             search={{ value: search, onChange: setSearch, placeholder: "Search expense, person or client…" }}
             filters={passbookFilters}
             onClearFilters={clearPassbook}
-            resetKey={JSON.stringify(["passbook", dateFrom, dateTo, filterEmployee, filterCategory, ccyNow, search])}
+            resetKey={JSON.stringify(["passbook", dateFrom, dateTo, filterEmployee, filterCategory, filterCcy, search])}
           />
         </div>
       )}

@@ -11,8 +11,8 @@
 // What a page was showing is kept per VISIT — one per step in the history (see
 // syncVisit) — in sessionStorage, so it lasts as long as the tab, and a page
 // opened anew starts clean.
-import { useEffect, useRef, useState } from "react";
-import { useLocation, useNavigationType } from "react-router-dom";
+import { useCallback, useEffect, useRef, useState, type MouseEvent as ReactMouseEvent } from "react";
+import { useLocation, useNavigate, useNavigationType } from "react-router-dom";
 
 /* ── 1. Layers: Back closes the top one ─────────────────────────────────── */
 
@@ -374,4 +374,20 @@ export function previousPath(): string | undefined {
   const idx = (window.history.state as { idx?: number } | null)?.idx ?? 0;
   if (idx <= 0) return undefined;
   return (store.get<string[]>(TRAIL) ?? [])[idx - 1];
+}
+
+/**
+ * The click of an in-app back link ("← Orders"): when the page one step back IS
+ * where the link points, it steps back to it — as the phone's Back does — so the
+ * list comes back on the page, search and scroll it was left at, and Back after
+ * it doesn't come round to this page again. Otherwise the link opens its page.
+ * A link that opened the list anew always landed on page 1.
+ * Ctrl/⌘/Shift-click still opens the link the browser's way (a new tab).
+ */
+export function useStepBack() {
+  const navigate = useNavigate();
+  return useCallback((to: string | undefined) => (e: ReactMouseEvent) => {
+    if (e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+    if (to && previousPath() === to) { e.preventDefault(); navigate(-1); }
+  }, [navigate]);
 }
