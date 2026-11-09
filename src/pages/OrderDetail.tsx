@@ -1,3 +1,4 @@
+import { ourFinishedNet } from "@/lib/pure/accounts";
 import { ShopifyOrderCard } from "@/components/order/ShopifyOrderCard";
 import { EtsyOrderCard } from "@/components/order/EtsyOrderCard";
 import { isShelfSale } from "@/lib/stockSale";
@@ -834,6 +835,10 @@ function OrderDetailPageBody() {
   const [faOther, setFaOther] = useState("");
   // Metal the factory supplied itself, metal by metal — each its grams and ₹ a gram.
   const [faFacMetals, setFaFacMetals] = useState<{ metal: string; grams: string; rate: string }[]>([]);
+  // Metal the client gave the factory straight (not via their account with us): grams only — not charged, not ours.
+  const [faClientMetals, setFaClientMetals] = useState<{ metal: string; grams: string }[]>([]);
+  /** Of those, the grams of gold (a metal with karats) — part of the piece's gold that is not ours. */
+  const faClientGoldG = Math.round(faClientMetals.filter(m => m.metal && metalHasKarats(m.metal, db.settings)).reduce((t, m) => t + (Number(m.grams) || 0), 0) * 1000) / 1000;
   // The gold in stock's rate at the piece's purity — a gold row's rate to start from.
   const [faGoldMetalRate, setFaGoldMetalRate] = useState("");
   // Where the labour and metal rate were filled in from, said under them (first approval only).
@@ -1352,6 +1357,7 @@ function OrderDetailPageBody() {
     const goldMetalRate = fg && purityNow ? String(Math.round(fg.rate * purityNow / 10) / 100) : "";
     setFaGoldMetalRate(goldMetalRate);
     const ownMetal = !order.metal || /^none/i.test(order.metal) ? "Gold" : order.metal;
+    setFaClientMetals((order.clientMetal ?? []).map(m => ({ metal: m.metal, grams: String(m.grams) })));
     const savedFac = finish?.labour?.metalByFactory;
     if (savedFac?.length) setFaFacMetals(savedFac.map(m => ({ metal: m.metal, grams: String(m.grams), rate: String(m.rate) })));
     else if (finish?.labour?.metalByFactoryGrams != null)
@@ -1506,6 +1512,17 @@ function OrderDetailPageBody() {
     // silver order the figure was taken, ignored and silently thrown away — and
     // a two-tone piece is platinum AND gold.
     const hasNet = !isNaN(netW) && netW > 0;
+    // The client's own gold in the piece (given the factory straight): never more than the piece's gold.
+    if (faClientGoldG > 0 && faClientGoldG > (hasNet ? netW : 0) + 0.0005) {
+      toast.error(`The client's gold (${faClientGoldG} g) is more than the piece's gold (${hasNet ? netW : 0} g) — check the grams.`);
+      return;
+    }
+    const clientGoldG = hasNet ? Math.min(netW, faClientGoldG) : 0;
+    /** What the piece took from OUR gold at the factory: its gold less the client's own. */
+    const ourNetW = hasNet ? Math.max(0, Math.round((netW - clientGoldG) * 1000) / 1000) : 0;
+    const clientMetal = faClientMetals
+      .map(m => ({ metal: m.metal.trim(), grams: Math.round((Number(m.grams) || 0) * 1000) / 1000 }))
+      .filter(m => m.metal && m.grams > 0);
     const labourNet = Math.round(((hasNet ? netW : 0) + faOtherW + moreW + xG.metal) * 1000) / 1000;
     // Each metal at its own rate and minimum (gold, titanium …) when there is more than gold.
     const labour = faLabourOf(hasNet ? netW : 0, faOtherW);
@@ -1580,12 +1597,14 @@ function OrderDetailPageBody() {
           }
           finish.factoryId = factoryId;
           finish.purityOrQuality = karat;
-          finish.quantityIssued = hasNet ? netW : 0;
+          // Drawn from our gold at the factory: only our part (the client's own gold is theirs).
+          finish.quantityIssued = hasNet ? ourNetW : 0;
           finish.finishedNetWeight = hasNet ? netW : undefined;
+          finish.clientGoldNet = clientGoldG > 0 ? clientGoldG : undefined;
           finish.finishedKarat = hasNet ? karat : undefined;
           finish.finishedPurity = hasNet && purity > 0 ? purity : undefined;
           finish.labour = labour;
-          finish.finishedPieces = hasNet ? [{ id: uid("fp_"), quantityUsed: netW, piecesCount: 1, recordedAt: now, recordedBy: user!.id }] : [];
+          finish.finishedPieces = hasNet ? [{ id: uid("fp_"), quantityUsed: ourNetW, piecesCount: 1, recordedAt: now, recordedBy: user!.id }] : [];
           finish.makingCharges = { amountInr: labourVal, payments: finish.makingCharges?.payments || [] };
           finish.status = "closed";
           finish.closedAt = new Date().toISOString(); // when it was closed — the year-closing lock reads it
@@ -1627,6 +1646,8 @@ function OrderDetailPageBody() {
           const used = Math.round((i.quantityIssued - returned) * 1000) / 1000;
           mi.finishedPieces = [{ id: uid("fp_"), quantityUsed: used, piecesCount: 1, recordedAt: now, recordedBy: user!.id }];
         }
+        // The metal the client gave the factory straight — on the order, so the bill shows it as theirs.
+        if (clientMetal.length) o.clientMetal = clientMetal; else delete o.clientMetal;
         // Two-tone: the second metal used in the finished piece.
         const otherW = w ? w.other : parseFloat(faOtherNet);
         const otherP = parseFloat(faOtherPurity);
@@ -1688,7 +1709,7 @@ function OrderDetailPageBody() {
         o.manufacturingLog.push({
           id: uid("mlog_"), type: "material_returned", at: now, employeeId: user!.id, factoryId,
           material: "gold", amountMaterial: hasNet ? netW : undefined, amountInr: labourVal || undefined,
-          remarks: `${alreadyDone ? "Final details updated" : "Final approval"} — ${hasNet ? `net ${netW}g @ ${purity || "?"} purity (${purity > 0 ? pureFromPurity(netW, purity) : 0}g fine gold)` : "no gold used"}${labourVal ? ` · labour ${fmtMoneyInr(labourVal)}` : ""}`,
+          remarks: `${alreadyDone ? "Final details updated" : "Final approval"} — ${hasNet ? `net ${netW}g @ ${purity || "?"} purity (${purity > 0 ? pureFromPurity(netW, purity) : 0}g fine gold)` : "no gold used"}${clientMetal.length ? ` · the client's own: ${clientMetal.map(m => `${m.grams}g ${m.metal}`).join(", ")}` : ""}${labourVal ? ` · labour ${fmtMoneyInr(labourVal)}` : ""}`,
         });
       });
       // A stock build raised before Final Approval existed has no such step, so
@@ -4325,7 +4346,7 @@ The piece then takes ours — add them from stock or buy them, as for any order.
                       { label: "Gold used", icon: Coins,
                         value: finish?.finishedNetWeight != null ? `${finish.finishedNetWeight} g` : "—",
                         sub: finish?.finishedNetWeight != null
-                          ? `${finish.finishedPurity != null ? `@ ${finish.finishedPurity}‰` : (finish.finishedKarat || "")} · ${finish.finishedPurity != null ? pureFromPurity(finish.finishedNetWeight, finish.finishedPurity) : toPureGold(finish.finishedNetWeight, finish.finishedKarat || "24K")} g fine`
+                          ? `${finish.finishedPurity != null ? `@ ${finish.finishedPurity}‰` : (finish.finishedKarat || "")} · ${finish.finishedPurity != null ? pureFromPurity(finish.finishedNetWeight, finish.finishedPurity) : toPureGold(finish.finishedNetWeight, finish.finishedKarat || "24K")} g fine${(finish.clientGoldNet ?? 0) > 0 ? ` · ${finish.clientGoldNet} g the client's own — ${ourFinishedNet(finish)} g ours` : ""}`
                           : undefined },
                       { label: "Labour", icon: FactoryIcon, value: finish?.makingCharges?.amountInr ? fmtMoneyInr(finish.makingCharges.amountInr) : "—",
                         // Made by metal: each metal's making (its own minimum where that applied).
@@ -4337,6 +4358,10 @@ The piece then takes ours — add them from stock or buy them, as for any order.
                           // Metal the factory supplied itself.
                           ...factoryMetalLines(finish?.labour).map(m => `${m.metal} by factory ${fmtMoneyInr(Math.round(m.grams * m.rate * 100) / 100)}`),
                         ].join(" · ") || undefined },
+                      // Metal the client gave the factory straight — theirs, not charged.
+                      ...((order.clientMetal ?? []).length ? [{ label: "Client's metal", icon: Coins,
+                        value: order.clientMetal!.map(m => `${m.grams} g`).join(" + "),
+                        sub: `${order.clientMetal!.map(m => m.metal).join(", ")} — theirs, not charged` }] : []),
                       { label: "Factory bill", icon: Tag, value: order.factoryBillNo || "—" },
                     ]} />
                     {/* The figure the factory bills handling on — their scale, not
@@ -5078,7 +5103,12 @@ The piece then takes ours — add them from stock or buy them, as for any order.
                     </div>
                     )}
                   </div>
-                  {faEffNet > 0 && Number(faGoldPurity) > 0 && <p className="text-[11px] text-muted-foreground mt-1">= {fmtG(pureFromPurity(faEffNet, Number(faGoldPurity)))}g fine (24KT) deducted from {faFactory?.name || "the factory"}</p>}
+                  {faEffNet > 0 && Number(faGoldPurity) > 0 && (() => {
+                    // The client's own gold (given the factory straight) is not taken from ours.
+                    const theirs = Math.min(faEffNet, faClientGoldG);
+                    const ours = Math.max(0, Math.round((faEffNet - theirs) * 1000) / 1000);
+                    return <p className="text-[11px] text-muted-foreground mt-1">= {fmtG(pureFromPurity(ours, Number(faGoldPurity)))}g fine (24KT) deducted from {faFactory?.name || "the factory"}{theirs > 0 ? ` — ${fmtG(theirs)} g of the piece is the client's own gold` : ""}</p>;
+                  })()}
                   {order.clientSupplied?.gold && (() => {
                     // The client gives the gold: what the piece takes from theirs.
                     const cl = db.clients.find(c => c.id === order.clientId);
@@ -5438,6 +5468,40 @@ The piece then takes ours — add them from stock or buy them, as for any order.
                     );
                   })}
                   <Button type="button" variant="outline" size="sm" className="mt-2 gap-1" onClick={() => setFaFacMetals(rs => [...rs, { metal: "", grams: "", rate: "" }])}><Plus className="h-3.5 w-3.5" />Add metal</Button>
+                </div>
+                {/* Metal the client gave the factory straight — theirs: not on the factory's bill, not
+                    taken from our gold there, no cost to us. Labour is still on the piece's full weight. */}
+                <div className="mt-2.5 rounded-lg border border-emerald-600/30 bg-emerald-50/40 px-2.5 py-2">
+                  <p className="text-[11px] font-medium text-foreground">Metal supplied by the client <span className="font-normal text-muted-foreground">— theirs, given to the factory: not charged, not from our gold</span></p>
+                  {order.clientSupplied?.gold && (
+                    <p className="mt-1 text-[10px] text-muted-foreground">Their gold for this order comes from their account with us (above) — list only another metal here.</p>
+                  )}
+                  {faClientMetals.map((r, i) => (
+                    <div key={i} className="mt-1.5 grid grid-cols-[1.3fr_1fr_auto] items-end gap-2">
+                      <div><Label className="text-[11px]">Metal</Label>
+                        <Select value={r.metal || "__none"} onValueChange={v => setFaClientMetals(rs => rs.map((x, j) => j !== i ? x : { ...x, metal: v === "__none" ? "" : v }))}>
+                          <SelectTrigger className="h-9 rounded-lg mt-1" aria-label={`Client's metal ${i + 1}`}><SelectValue placeholder="Choose…" /></SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="__none">Choose…</SelectItem>
+                            {choicesOf("metals", r.metal || undefined, db.settings, { builtIn: false })
+                              .filter(m => !(order.clientSupplied?.gold && metalHasKarats(m, db.settings)))
+                              .map(m => <SelectItem key={m} value={m}>{m}</SelectItem>)}
+                          </SelectContent>
+                        </Select></div>
+                      <div><Label className="text-[11px]">Grams</Label>
+                        <Input type="number" min={0} step="0.001" value={r.grams} aria-label={`${r.metal || "Metal"} by the client (g)`}
+                          onChange={e => setFaClientMetals(rs => rs.map((x, j) => (j === i ? { ...x, grams: e.target.value } : x)))} className="rounded-lg h-9 mt-1" placeholder="g" /></div>
+                      <Button type="button" variant="ghost" size="icon" className="h-9 w-9" aria-label={`Remove ${r.metal || "metal"} by the client`}
+                        onClick={() => setFaClientMetals(rs => rs.filter((_, j) => j !== i))}><Trash2 className="h-4 w-4" /></Button>
+                    </div>
+                  ))}
+                  {faClientGoldG > 0 && (() => {
+                    const net = faW ? faW.gold : (Number(faGoldNet) || 0);
+                    return net > 0 && faClientGoldG > net + 0.0005
+                      ? <p className="mt-1 text-[10px] font-medium text-destructive">More than the piece's gold ({fmtG(net)} g) — check the grams</p>
+                      : <p className="mt-1 text-[10px] text-muted-foreground">{fmtG(faClientGoldG)} g of the piece's gold is theirs{net > 0 ? ` — ${fmtG(Math.max(0, net - faClientGoldG))} g from our gold at the factory` : ""}.</p>;
+                  })()}
+                  <Button type="button" variant="outline" size="sm" className="mt-2 gap-1" onClick={() => setFaClientMetals(rs => [...rs, { metal: rs.length ? "" : (!order.metal || /^none/i.test(order.metal) ? "" : order.metal), grams: "" }])}><Plus className="h-3.5 w-3.5" />{faClientMetals.length ? "Add metal" : "Add the client's metal"}</Button>
                 </div>
                 {/* A light piece is charged the factory's minimum instead of the
                     per-gram rate, so the total will not equal rate × weight — say

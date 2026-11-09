@@ -309,8 +309,10 @@ export async function exportOrderXlsx(db: DB, order: Order, opts: { faDone: bool
 
     // ── The client's own material (job work)
     const cm = (client?.materialLedger ?? []).filter(e => e.orderId === order.id);
-    if (order.clientSupplied || cm.length) {
+    if (order.clientSupplied || cm.length || (order.clientMetal ?? []).length) {
       r = section(ws, r, C, "Client's own material");
+      // Metal they gave the factory straight — not charged.
+      for (const m of order.clientMetal ?? []) r = kvRow(ws, r, C, `Metal supplied by the client — ${m.metal}`, `${m.grams} g · not charged`);
       if (order.clientSupplied) r = kvRow(ws, r, C, "They give", [order.clientSupplied.gold && `Gold${order.clientSupplied.goldLossPct ? ` (loss ${order.clientSupplied.goldLossPct}%)` : ""}`, order.clientSupplied.diamonds && "Diamonds"].filter(Boolean).join(" · "));
       if (cm.length) r = table(ws, r, C, ["Date", "What", "Material", "Grams / ct", "Fine g / pcs"],
         cm.map(e => [new Date(e.at), e.kind === "in" ? "Received" : e.kind === "out" ? "Given back" : "Used in the piece", e.material === "gold" ? "Gold" : "Diamonds",

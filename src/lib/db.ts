@@ -717,6 +717,9 @@ export interface Order {
    *  both (lib/clientMaterial.ts). Their gold: the piece's fine gold plus the
    *  agreed loss % comes off their gold balance at Final Approval. */
   clientSupplied?: { gold?: boolean; diamonds?: boolean; goldLossPct?: number };
+  /** Metal the client gave straight to the factory for this piece (Final Approval): not charged
+   *  by the factory, not ours, no cost to us — shown on the bill as theirs. Labour is on the full weight. */
+  clientMetal?: { metal: string; grams: number }[];
   /** A loose-diamond order: what the stones are (the piece's metal, size and finish don't apply). */
   stoneSpec?: StoneSpec;
 
@@ -2162,6 +2165,9 @@ export interface MaterialIssuance {
   // Receive form is saved; gold issuances convert the net weight to pure (24KT)
   // gold to net off the factory's fine-gold balance (see factoryFineGoldBalance). ──
   finishedNetWeight?: number; // grams of the finished piece (gold issuances)
+  /** Of finishedNetWeight, the grams of gold the CLIENT supplied straight to the factory (Final
+   *  Approval) — never ours: not drawn from our gold there, not in our cost. See ourFinishedNet. */
+  clientGoldNet?: number;
   finishedKarat?: string;     // its karat, e.g. "18K" — legacy / label
   finishedPurity?: number;    // actual purity entered at Final Approval (‰, e.g. 750) — drives the pure-gold conversion
   finishDisposition?: "used" | "returned"; // certified diamond issuances: chosen at Final Approval (so a later edit knows the current state)

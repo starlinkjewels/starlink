@@ -115,6 +115,24 @@ export function factoryOtherGrades(issuances: MaterialIssuance[], factoryId: str
  * physically in the factory's hands. Derived, never stored (same trust level as
  * factoryPoolBalance above).
  */
+/**
+ * The part of a finished piece's net gold that was OURS — what left our gold
+ * at the factory: the net weight less the grams the client supplied straight
+ * to the factory (clientGoldNet). Everything that counts our gold used reads
+ * this, never finishedNetWeight alone.
+ */
+export function ourFinishedNet(i: Pick<MaterialIssuance, "finishedNetWeight" | "clientGoldNet">): number {
+  return Math.max(0, Math.round(((i.finishedNetWeight ?? 0) - (i.clientGoldNet ?? 0)) * 1000) / 1000);
+}
+/** That part in fine (24KT) grams, at the purity entered at Final Approval (else the karat). */
+export function ourFinishedFine(i: Pick<MaterialIssuance, "finishedNetWeight" | "clientGoldNet" | "finishedPurity" | "finishedKarat" | "purityOrQuality">, fallbackKarat?: string): number {
+  if (i.finishedNetWeight == null) return 0;
+  const net = ourFinishedNet(i);
+  if (i.finishedPurity != null) return pureFromPurity(net, i.finishedPurity);
+  const k = i.finishedKarat || fallbackKarat;
+  return k ? toPureGold(net, k) : 0;
+}
+
 export function factoryFineGoldBalance(issuances: MaterialIssuance[], factoryId: string, openingFineGold = 0, companyId?: string): number {
   let inFine = 0, outFine = 0;
   // The opening fine gold was entered before there was more than one company — the first company's.
@@ -122,12 +140,9 @@ export function factoryFineGoldBalance(issuances: MaterialIssuance[], factoryId:
   for (const i of issuances) {
     if (i.factoryId !== factoryId || i.material !== "gold" || !ofCompany(i, companyId)) continue;
     if (i.source !== "factoryPool") inFine += toPureGold(i.quantityIssued, i.purityOrQuality);
-    if (i.finishedNetWeight != null) {
-      // Prefer the actual purity entered at Final Approval; fall back to karat.
-      outFine += i.finishedPurity != null
-        ? pureFromPurity(i.finishedNetWeight, i.finishedPurity)
-        : i.finishedKarat ? toPureGold(i.finishedNetWeight, i.finishedKarat) : 0;
-    }
+    // Prefer the actual purity entered at Final Approval; fall back to karat. Only our part:
+    // gold the client gave the factory straight was never ours there.
+    if (i.finishedNetWeight != null) outFine += ourFinishedFine(i);
   }
   // Fine gold physically at the factory at migration adds straight onto the balance.
   return Math.round((inFine - outFine + (openingFineGold || 0)) * 1000) / 1000;

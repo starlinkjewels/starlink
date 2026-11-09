@@ -98,6 +98,8 @@ function clientMaterialHtml(order: Order): string {
   else if (cs?.gold) lines.push("Gold: client's own — not charged");
   if (dia && (dia.ct ?? 0) > 0) lines.push(`Client's own diamonds: ${dia.ct} ct${dia.pcs ? ` · ${dia.pcs} pcs` : ""} — not charged`);
   else if (cs?.diamonds) lines.push("Diamonds: client's own — not charged");
+  // Metal the client gave the factory straight (Final Approval).
+  for (const m of order.clientMetal ?? []) if (m.grams > 0) lines.push(`Metal supplied by you: ${m.grams} g ${m.metal} — not charged`);
   return lines.map(t => `<div style="font-size:9px;color:#0f766e;margin-top:1px;">${esc(t)}</div>`).join("");
 }
 

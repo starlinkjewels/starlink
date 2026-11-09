@@ -157,7 +157,7 @@ function issuancePart(i: Rec, until: string): Rec | null {
     const closedOn = (i.closedAt as string | undefined) || lastBack || (i.issuedAt as string | undefined);
     if (i.status === "closed" && dated(closedOn, until)) {
       out.final = {
-        ...pick(i, ["status", "quantityIssued", "finishedNetWeight", "finishedKarat", "finishedPurity", "finishDisposition", "finishReturnedCt", "finishReturnedPcs", "finishReturnedQty", "labour", "finishedPieces"]),
+        ...pick(i, ["status", "quantityIssued", "finishedNetWeight", "clientGoldNet", "finishedKarat", "finishedPurity", "finishDisposition", "finishReturnedCt", "finishReturnedPcs", "finishReturnedQty", "labour", "finishedPieces"]),
         charges: num(mc.amountInr),
       };
     }
