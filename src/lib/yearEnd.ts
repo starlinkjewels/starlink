@@ -238,6 +238,8 @@ export function yearPnl(db: DB, fy: FiscalYear) {
     sold: orders.length,
     salesUsd: t.sellingUsd, salesInr: t.sellingInr, costInr: t.costInr, costUsd: t.costUsd,
     grossProfitUsd: t.profitUsd, grossMarginPct: t.marginPct, incomplete: t.incomplete,
+    // Salespeople's commission — inside the cost above (lib/commission.ts).
+    commissionUsd: t.commissionUsd, commissionInr: t.commissionInr,
     fxUsd: fx.usd, fxInr: fx.inr,
     supplierSales: { count: supAll.length, sellingInr: r2(counted.reduce((s, r) => s + r.sellingInr, 0)), profitInr: r2(counted.reduce((s, r) => s + (r.profitInr ?? 0), 0)), profitUsd: supProfitUsd, uncounted: supAll.length - counted.length },
     expenses: { usd: opex.totalUsd, inr: opex.totalInr, count: opex.count, byCategory: opex.byCategory, uncounted: opex.uncounted },

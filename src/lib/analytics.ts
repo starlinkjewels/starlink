@@ -1,7 +1,7 @@
 import { ourFinishedFine } from "./pure/accounts";
 import { companyOf } from "@/lib/companies";
 import { orderTotal, balanceDue, toPureGold, pureFromPurity, type DB, type Order, type MaterialIssuance } from "./db";
-import { recognisedSale, saleDate, profitReport, inrOn } from "./orderCost";
+import { recognisedSale, saleDate, profitReport, inrOn, orderCost } from "./orderCost";
 import { supplierAccount, factoryAccount } from "./manufacturing";
 import { isReworkIssue } from "./rework";
 
@@ -351,6 +351,8 @@ export interface TeamRow {
   id: string; name: string; role: string;
   clients: number; received: number; sold: number; salesUsd: number;
   profitUsd: number | null; profitInr: number | null; collectedUsd: number;
+  /** Sales commission they earned on what shipped in the period, ₹ (lib/commission.ts) — with the profit only. */
+  commissionInr: number | null;
   expensesInr: number;
   /** Their expenses left out of expensesInr — in a currency with no rate on file. */
   expensesUncounted: number;
@@ -364,6 +366,15 @@ export interface TeamRow {
  */
 export function teamTable(db: DB, orders: Order[], p: Period, withProfit: boolean): TeamRow[] {
   const staff = db.users.filter(u => u.role === "employee" || u.role === "admin");
+  // Commission goes to ONE person per order (whoever took it, else the client's handler,
+  // or whom an admin named) — not to everyone the order is "theirs" for below.
+  const commission = new Map<string, number>();
+  if (withProfit) {
+    for (const o of soldIn(orders, p)) {
+      const c = orderCost(db, o).commission;
+      if (c && c.inr > 0) commission.set(c.payeeId, (commission.get(c.payeeId) ?? 0) + c.inr);
+    }
+  }
   return staff.map(u => {
     const managed = new Set(db.clients.filter(c => c.accountManagerId === u.id).map(c => c.id));
     const mine = orders.filter(o => o.assignedEmployeeId === u.id || managed.has(o.clientId));
@@ -388,6 +399,7 @@ export function teamTable(db: DB, orders: Order[], p: Period, withProfit: boolea
       sold: sold.length, salesUsd: r2(sold.reduce((s, o) => s + orderTotal(o), 0)),
       profitUsd: pr?.profitUsd ?? null, profitInr: pr?.profitInr ?? null,
       collectedUsd: collectionsIn(db, p, undefined, u.id),
+      commissionInr: withProfit ? r2(commission.get(u.id) ?? 0) : null,
       expensesInr: r2(expensesInr), expensesUncounted,
       tasksDone: tasks.filter(t => t.completed && inPeriod(p, t.completedAt ?? t.createdAt)).length,
       tasksOpen: tasks.filter(t => !t.completed).length,

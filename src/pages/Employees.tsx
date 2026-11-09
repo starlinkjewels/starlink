@@ -1,7 +1,7 @@
 import { UserAvatar } from "@/components/UserAvatar";
 import { EmployeeCreateDialog, emailTakenMessage } from "@/components/create/EmployeeCreateDialog";
 import { EmployeeCompaniesControl } from "@/components/EmployeeCompanies";
-import { useState, type MouseEvent } from "react";
+import { useMemo, useState, type MouseEvent } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { updateDb, flush, loadDb, rolesStoreReady, orderTotal, type User } from "@/lib/db";
 import { ccyOrder, fmtCcy, sumByCcy, ccy } from "@/lib/currency";
@@ -23,7 +23,7 @@ import { Input } from "@/components/ui/input";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { TasksPanel } from "@/components/TasksPanel";
 import {
-  Plus, Trash2, Search, ListTodo, Eye, Users, KeyRound, LogIn, Rows3, LayoutGrid, Power, ShieldCheck, ShieldOff, Crown, Building2, ArrowRight, Pencil,
+  Plus, Trash2, Search, ListTodo, Eye, Users, KeyRound, LogIn, Rows3, LayoutGrid, Power, ShieldCheck, ShieldOff, Crown, Building2, ArrowRight, Pencil, Percent,
 } from "lucide-react";
 import { Label } from "@/components/ui/label";
 import { toast } from "sonner";
@@ -32,6 +32,10 @@ import { PaginationBar } from "@/components/PaginationBar";
 import { EmployeeEditDialog } from "@/components/EmployeeEditDialog";
 import { confirmDeleteEmployee, employeeDeleteBlock } from "@/lib/employeeGuards";
 import { advanceOwed } from "@/lib/employeeAdvances";
+import { useAuth } from "@/lib/auth";
+import { fmtMoneyInr } from "@/lib/manufacturing";
+import { commissionRows, commissionByPerson, commissionAccount } from "@/lib/commissionLedger";
+import { CommissionRulesSheet, useCommissionData } from "@/components/CommissionSheets";
 
 const PAGE_SIZE = 12;
 
@@ -52,6 +56,12 @@ const OWN_CLICK = "button,a,input,label,[role=menu],[role=menuitem],[data-no-row
 
 export function EmployeesPage() {
   const db = useDb();
+  const { user } = useAuth();
+  // Sales commission (lib/commission.ts) — admins only: it is worked out from every order's cost.
+  const isAdmin = user?.role === "admin";
+  const commReady = useCommissionData(isAdmin);
+  const commRows = useMemo(() => (isAdmin && commReady ? commissionRows(db) : null), [db, isAdmin, commReady]);
+  const [commRules, setCommRules] = useState(false);
   // The month the table's salary and orders are for ("2026-10"), or every month.
   const thisMonth = new Date().toISOString().slice(0, 7);
   // Stays as it was left (this browser, this person) until cleared — back to
@@ -130,7 +140,8 @@ export function EmployeesPage() {
   const salaryIn = (userId: string) => {
     const u = db.users.find(x => x.id === userId);
     // An advance written off is not pay (lib/employeeAdvances.ts).
-    const lines: { amount: number; currency?: string }[] = (db.expenses ?? []).filter(e => e.paidToEmployeeId === userId && !e.advanceWriteOff && inPeriod(e.createdAt));
+    // Sales commission paid has its own columns (Commission, Commission owed).
+    const lines: { amount: number; currency?: string }[] = (db.expenses ?? []).filter(e => e.paidToEmployeeId === userId && !e.advanceWriteOff && !e.commission && inPeriod(e.createdAt));
     if (u?.openingPaid && u.openingPaid > 0 && inPeriod(u.openingPaidDate || u.createdAt)) lines.push({ amount: u.openingPaid, currency: u.openingPaidCurrency ?? "INR" });
     return sumByCcy(lines, e => e.amount, e => e.currency);
   };
@@ -148,6 +159,9 @@ export function EmployeesPage() {
     return { count: list.length, clients: new Set(list.map(o => o.clientId).filter(Boolean)).size, value: Math.round(list.reduce((s, o) => s + orderTotal(o), 0) * 100) / 100 };
   };
   const grey = (n: number, text: string) => <span className={`tabular-nums whitespace-nowrap ${n ? "" : "text-muted-foreground/60"}`}>{text}</span>;
+  /** Sales commission earned (shipped) in the month shown, and owed now — admins only. */
+  const commEarned = commRows ? commissionByPerson(commRows, iso => inPeriod(iso)) : null;
+  const commOwed = (u: User) => (commRows ? commissionAccount(db, u.id, commRows).owedInr : 0);
 
   /**
    * Everything that can be done to one person — the same in a card's ⋯ and a
@@ -219,6 +233,13 @@ export function EmployeesPage() {
         : grey(0, "0"); } },
     { key: "orderValue", header: "Order value", align: "right", kind: "number", sortValue: u => takenBy(u.id).value, csv: u => takenBy(u.id).value,
       cell: u => grey(takenBy(u.id).value, takenBy(u.id).value ? `$${takenBy(u.id).value.toLocaleString("en-US", { maximumFractionDigits: 2 })}` : "—") },
+    // Sales commission (admins): earned on what was shipped in the month shown, and what is owed now.
+    ...(commEarned ? [
+      { key: "commission", header: "Commission", align: "right", kind: "number", sortValue: (u: User) => commEarned.get(u.id) ?? 0, csv: (u: User) => commEarned.get(u.id) ?? 0,
+        cell: (u: User) => { const v = commEarned.get(u.id) ?? 0; return grey(v, v ? fmtMoneyInr(v) : "—"); } },
+      { key: "commissionOwed", header: "Commission owed", align: "right", kind: "number", sortValue: (u: User) => commOwed(u), csv: (u: User) => commOwed(u),
+        cell: (u: User) => { const v = commOwed(u); return v > 0.005 ? <span className="font-medium text-amber-800 whitespace-nowrap">{fmtMoneyInr(v)}</span> : v < -0.005 ? <span className="text-[11px] text-muted-foreground whitespace-nowrap">Paid ahead {fmtMoneyInr(-v)}</span> : grey(0, "—"); } },
+    ] as DataColumn<User>[] : []),
     // Pending tasks and status have their tile and their tab above — kept under View, so the month's figures fit.
     { key: "tasks", header: "Pending tasks", align: "right", kind: "number", hidden: true, sortValue: u => pendingCount(u.id),
       cell: u => pendingPill(pendingCount(u.id)) },
@@ -261,8 +282,12 @@ export function EmployeesPage() {
         subtitle="Access, tasks and salary"
         primary={{ label: "New Employee", icon: Plus, onClick: () => setOpen(true) }}
         actions={<ViewSwitch view={view} onChange={saveView} />}
-        menu={[{ label: "Who can do what", icon: ShieldCheck, hint: "Everyone's access at a glance — for a review", onSelect: () => setReport(true) }]}
+        menu={[
+          { label: "Who can do what", icon: ShieldCheck, hint: "Everyone's access at a glance — for a review", onSelect: () => setReport(true) },
+          { label: "Sales commission", icon: Percent, hint: "The company's % of margin and each person's", onSelect: () => setCommRules(true), show: isAdmin },
+        ]}
       />
+      {commRules && <CommissionRulesSheet onClose={() => setCommRules(false)} />}
       {report && <AccessReportDialog onClose={() => setReport(false)} onManage={u => { setReport(false); setManaging(u); }} />}
       <EmployeeCreateDialog open={open} onOpenChange={setOpen} />
 

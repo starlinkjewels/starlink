@@ -37,8 +37,8 @@ export function TeamTab({ ctx }: { ctx: ReportCtx }) {
   };
 
   const exportTeam = () => downloadCsv(`Team_${fileTag}.csv`,
-    ["Name", "Role", "Clients managed", "Orders in", "Shipped", "Sales ($)", ...(withProfit ? ["Profit ($)"] : []), "Collected ($)", "Expenses (₹)", "Open orders", "Avg days to dispatch", "On-time %", "Tasks done", "Tasks open"],
-    active.map(r => [r.name, r.role, r.clients, r.received, r.sold, r.salesUsd, ...(withProfit ? [r.profitUsd ?? ""] : []), r.collectedUsd, r.expensesInr, r.open, r.avgCycleDays ?? "", r.onTimePct ?? "", r.tasksDone, r.tasksOpen]));
+    ["Name", "Role", "Clients managed", "Orders in", "Shipped", "Sales ($)", ...(withProfit ? ["Profit ($)", "Commission (₹)"] : []), "Collected ($)", "Expenses (₹)", "Open orders", "Avg days to dispatch", "On-time %", "Tasks done", "Tasks open"],
+    active.map(r => [r.name, r.role, r.clients, r.received, r.sold, r.salesUsd, ...(withProfit ? [r.profitUsd ?? "", r.commissionInr ?? ""] : []), r.collectedUsd, r.expensesInr, r.open, r.avgCycleDays ?? "", r.onTimePct ?? "", r.tasksDone, r.tasksOpen]));
 
   return (
     <div className="space-y-4">
@@ -88,6 +88,8 @@ export function TeamTab({ ctx }: { ctx: ReportCtx }) {
               <div className="flex items-center gap-2 min-w-[150px]"><span className="font-semibold w-16 text-right shrink-0">{r.salesUsd ? usd(r.salesUsd, true) : "—"}</span><div className="flex-1"><Bar value={r.salesUsd} max={maxSales} /></div></div>
             ) },
             ...(withProfit ? [{ key: "profit", header: "Profit", align: "right" as const, sortValue: (r: TeamRow) => (r.sold ? r.profitUsd : null), cell: (r: TeamRow) => <span className={`font-semibold ${(r.profitUsd ?? 0) < 0 ? "text-destructive" : "text-success"}`}>{r.sold ? usd(r.profitUsd, true) : "—"}{r.sold && r.profitInr != null && <span className="block text-[11px] font-normal text-muted-foreground whitespace-nowrap">{inr(r.profitInr, true)}</span>}</span> }] : []),
+            // Their sales commission on what shipped — each order counts for one person only.
+            ...(withProfit ? [{ key: "commission", header: "Commission", align: "right" as const, sortValue: (r: TeamRow) => r.commissionInr, cell: (r: TeamRow) => (r.commissionInr ? inr(r.commissionInr, true) : "—") }] : []),
             { key: "collected", header: "Collected", align: "right", sortValue: r => r.collectedUsd, cell: r => (r.collectedUsd ? usd(r.collectedUsd, true) : "—") },
             { key: "expenses", header: "Expenses", align: "right", sortValue: r => r.expensesInr, cell: r => (r.expensesInr ? inr(r.expensesInr, true) : "—") },
             { key: "open", header: "Open", align: "right", sortValue: r => r.open, cell: r => r.open || "—" },

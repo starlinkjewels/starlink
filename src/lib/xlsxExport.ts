@@ -364,7 +364,7 @@ export async function exportOrderXlsx(db: DB, order: Order, opts: { faDone: bool
         r = kvRow(ws, r, C, "Sold on", recognisedSale(order) ? new Date(saleDate(order)) : "Not dispatched yet", recognisedSale(order) ? FMT.date : undefined);
       }
       r = kvRow(ws, r, C, "Cost complete", p.cost.complete ? "Yes" : "No — see 'Not counted yet'");
-      const groups: [string, { label: string; amountInr: number; estimate?: boolean }[]][] = [["Gold", p.cost.gold], ["Diamonds", p.cost.diamond], ["Other materials", p.cost.materials], ["Labour", p.cost.labour], ["Other", p.cost.other]];
+      const groups: [string, { label: string; amountInr: number; estimate?: boolean }[]][] = [["Gold", p.cost.gold], ["Diamonds", p.cost.diamond], ["Other materials", p.cost.materials], ["Labour", p.cost.labour], ["Other", p.cost.other.filter(l => !l.commission)], ["Sales commission", p.cost.other.filter(l => l.commission)]];
       const costRows = groups.flatMap(([g, ls]) => ls.map(l => [g, `${l.label}${l.estimate ? " (estimate)" : ""}`, l.amountInr] as (Cell["value"] | null)[]));
       r = table(ws, r + 1, C, ["Part", "What it cost", "Amount (₹)"], costRows, [undefined, undefined, FMT.inr], ["Total cost", undefined, p.cost.totalInr]);
       for (const m of p.cost.missing) r = kvRow(ws, r - 1, C, `Not counted yet · ${m.label}`, m.reason) + 1;
@@ -472,14 +472,15 @@ export async function exportOrdersXlsx(db: DB, orders: Order[], name: string, su
     } else {
       // The admin's Profit sheet: selling, every part of the cost, profit and margin.
       const ws = wb.addWorksheet("Profit", { views: [{ state: "frozen", ySplit: 4, xSplit: 1, showGridLines: false }], pageSetup: { orientation: "landscape", fitToPage: true, fitToWidth: 1, fitToHeight: 0 } });
-      const heads = ["Order", "Design", "Client", "Item", "Metal", "Status", "Ordered", "Sold", "Selling ($)", "Gold (₹)", "Diamonds (₹)", "Other mat. (₹)", "Labour (₹)", "Other (₹)", "Cost (₹)", "Rate", "Cost ($)", "Profit ($)", "Margin", "Markup", "Cost complete", "Material came from", "Not counted"];
-      const fmts = [undefined, undefined, undefined, undefined, undefined, undefined, FMT.date, FMT.date, FMT.usd, FMT.inr, FMT.inr, FMT.inr, FMT.inr, FMT.inr, FMT.inr, "0.00", FMT.usd, FMT.usd, FMT.pct, FMT.pct, undefined, undefined, undefined];
-      ws.columns = [{ width: 16 }, { width: 12 }, { width: 22 }, { width: 13 }, { width: 16 }, { width: 13 }, { width: 12 }, { width: 12 }, { width: 12 }, { width: 12 }, { width: 13 }, { width: 13 }, { width: 12 }, { width: 11 }, { width: 13 }, { width: 8 }, { width: 11 }, { width: 11 }, { width: 9 }, { width: 9 }, { width: 10 }, { width: 44 }, { width: 40 }];
+      // Commission (₹): the salesperson's share of the margin (lib/commission.ts) — inside Cost, its own column.
+      const heads = ["Order", "Design", "Client", "Item", "Metal", "Status", "Ordered", "Sold", "Selling ($)", "Gold (₹)", "Diamonds (₹)", "Other mat. (₹)", "Labour (₹)", "Other (₹)", "Commission (₹)", "Cost (₹)", "Rate", "Cost ($)", "Profit ($)", "Margin", "Markup", "Cost complete", "Material came from", "Not counted"];
+      const fmts = [undefined, undefined, undefined, undefined, undefined, undefined, FMT.date, FMT.date, FMT.usd, FMT.inr, FMT.inr, FMT.inr, FMT.inr, FMT.inr, FMT.inr, FMT.inr, "0.00", FMT.usd, FMT.usd, FMT.pct, FMT.pct, undefined, undefined, undefined];
+      ws.columns = [{ width: 16 }, { width: 12 }, { width: 22 }, { width: 13 }, { width: 16 }, { width: 13 }, { width: 12 }, { width: 12 }, { width: 12 }, { width: 12 }, { width: 13 }, { width: 13 }, { width: 12 }, { width: 11 }, { width: 13 }, { width: 13 }, { width: 8 }, { width: 11 }, { width: 11 }, { width: 9 }, { width: 9 }, { width: 10 }, { width: 44 }, { width: 40 }];
       const top = titleBand(ws, heads.length, `${brandName()}  —  Profit (ADMIN ONLY)`, [subject, `${orders.length} order${orders.length !== 1 ? "s" : ""}`, "Never send out", `Downloaded ${fmtDate(new Date().toISOString())}`].filter(Boolean).join("  ·  "));
       headerRow(ws, top, heads);
       const sumLines = (ls: { amountInr: number }[]) => r2(ls.reduce((s2, l) => s2 + l.amountInr, 0));
       let rr = top;
-      let selling = 0, cost = 0, costUsd = 0, profit = 0;
+      let selling = 0, cost = 0, costUsd = 0, profit = 0, commission = 0;
       for (const o of orders) {
         rr++;
         const p = orderProfit(db, o);
@@ -487,24 +488,26 @@ export async function exportOrdersXlsx(db: DB, orders: Order[], name: string, su
         const sold = recognisedSale(o);
         if (!o.forReadyStock) { selling += p.sellingUsd; if (p.profitUsd != null) profit += p.profitUsd; }
         cost += c.totalInr; if (p.costUsd != null) costUsd += p.costUsd;
+        const comm = sumLines(c.other.filter(l => l.commission));
+        commission += comm;
         ws.getRow(rr).values = [o.orderNumber, o.designNumber ?? "", db.clients.find(x => x.id === o.clientId)?.companyName ?? (o.forReadyStock ? "Ready stock" : ""),
           o.jewelleryType, `${o.metal}${o.productKarats ? ` ${o.productKarats}` : ""}`, o.status, asDate(o.createdAt), sold ? asDate(saleDate(o)) : null,
-          o.forReadyStock ? null : p.sellingUsd, sumLines(c.gold), sumLines(c.diamond), sumLines(c.materials), sumLines(c.labour), sumLines(c.other), c.totalInr,
+          o.forReadyStock ? null : p.sellingUsd, sumLines(c.gold), sumLines(c.diamond), sumLines(c.materials), sumLines(c.labour), sumLines(c.other.filter(l => !l.commission)), comm || null, c.totalInr,
           p.fx?.rate ?? null, p.costUsd, o.forReadyStock ? null : p.profitUsd, o.forReadyStock ? null : p.marginPct, o.forReadyStock ? null : p.markupPct,
           c.complete ? "Yes" : "No", cameFrom(db, o), c.missing.map(m => `${m.label} (${m.reason})`).join("; ")];
         // Loss in red, profit in green.
-        const pc = ws.getCell(rr, 18);
+        const pc = ws.getCell(rr, 19);
         if (typeof p.profitUsd === "number" && !o.forReadyStock) pc.font = { size: 10, bold: true, color: { argb: p.profitUsd < 0 ? "FFDC2626" : "FF15803D" } };
       }
       bodyRows(ws, top + 1, rr, heads.length, fmts);
       // bodyRows set every font; the profit colours go back on.
       for (let i = top + 1; i <= rr; i++) {
-        const c = ws.getCell(i, 18);
+        const c = ws.getCell(i, 19);
         if (typeof c.value === "number") c.font = { size: 10, bold: true, color: { argb: c.value < 0 ? "FFDC2626" : "FF15803D" } };
       }
       const margin = selling > 0 ? Math.round((profit / selling) * 1000) / 10 : null;
       const tv: (Cell["value"] | undefined)[] = Array(heads.length).fill(undefined);
-      tv[0] = `Total · ${orders.length}`; tv[8] = r2(selling); tv[14] = r2(cost); tv[16] = r2(costUsd); tv[17] = r2(profit); tv[18] = margin;
+      tv[0] = `Total · ${orders.length}`; tv[8] = r2(selling); tv[14] = r2(commission); tv[15] = r2(cost); tv[17] = r2(costUsd); tv[18] = r2(profit); tv[19] = margin;
       totalsRow(ws, rr + 1, heads.length, tv, fmts);
       ws.autoFilter = { from: { row: top, column: 1 }, to: { row: rr, column: heads.length } };
     }

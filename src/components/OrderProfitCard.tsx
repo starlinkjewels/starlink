@@ -2,8 +2,11 @@ import { useState } from "react";
 import { Link } from "react-router-dom";
 import { fmtMoney, costDataReady, type DB, type Order } from "@/lib/db";
 import { fmtMoneyInr } from "@/lib/manufacturing";
-import { orderProfit, inProfitReport, exchangeDifference, type CostLine } from "@/lib/orderCost";
-import { TrendingUp, TrendingDown, Lock, AlertTriangle, ChevronDown, Loader2 } from "lucide-react";
+import { orderProfit, inProfitReport, exchangeDifference, recognisedSale, saleDate, type CostLine } from "@/lib/orderCost";
+import { commissionable, orderCommissionSet, payeeOf, personRate } from "@/lib/commission";
+import { OrderCommissionSheet } from "@/components/CommissionSheets";
+import { useAuth } from "@/lib/auth";
+import { TrendingUp, TrendingDown, Lock, AlertTriangle, ChevronDown, Loader2, Percent } from "lucide-react";
 
 /**
  * Cost, selling price and profit for one order. ADMIN ONLY — the caller must
@@ -15,6 +18,8 @@ import { TrendingUp, TrendingDown, Lock, AlertTriangle, ChevronDown, Loader2 } f
  */
 export function OrderProfitCard({ db, order }: { db: DB; order: Order }) {
   const [open, setOpen] = useState(false);
+  const [commissionOpen, setCommissionOpen] = useState(false);
+  const { user } = useAuth();
   // Until the purchases, issuances and the rest have arrived, a cost worked out
   // now would be too low and the profit too high. Say it is coming instead.
   if (!costDataReady()) {
@@ -100,6 +105,34 @@ export function OrderProfitCard({ db, order }: { db: DB; order: Order }) {
         </div>
       </div>
 
+      {/* ── The salesperson's commission (lib/commission.ts) — inside the cost above ── */}
+      {!stockBuild && commissionable(order) && (() => {
+        const c = cost.commission;
+        const set = orderCommissionSet(db, order.id);
+        const why = set ? <span className="text-[10px] font-medium text-primary"> · changed for this order{set.note ? ` — ${set.note}` : ""}</span> : null;
+        let body: React.ReactNode;
+        if (c) {
+          body = c.inr > 0
+            ? <><span className="font-semibold text-foreground">{c.payeeName}</span> — {c.pct}%{c.source === "company" ? " (company %)" : ""} of {fmtMoneyInr(c.baseInr)} margin = <span className="font-semibold text-foreground">{fmtMoneyInr(c.inr)}</span>{!recognisedSale(order) ? " · counted once it is shipped" : !cost.complete ? " · at most — part of the cost isn't known yet" : ""}</>
+            : <><span className="font-semibold text-foreground">{c.payeeName}</span> — {c.pct}% of the margin, and there is none: nothing earned</>;
+        } else {
+          const who = payeeOf(db, order);
+          const name = who.userId ? db.users.find(u => u.id === who.userId)?.name : undefined;
+          const r = who.userId ? personRate(db, who.userId, saleDate(order)) : null;
+          body = !name ? "No sales commission — nobody took the order or handles the client"
+            : !r && !(set && set.pct) ? <>No sales commission — {name} has no commission %</>
+            : inProfitReport(order) ? "Needs the exchange rate to work out"
+            : <><span className="font-semibold text-foreground">{name}</span> — {set?.pct ?? r?.pct}% of the margin, worked out once the piece is ready</>;
+        }
+        return (
+          <div className="rounded-xl border border-border/70 bg-secondary/30 p-3 text-xs flex items-start justify-between gap-3">
+            <p className="text-muted-foreground min-w-0"><Percent className="inline h-3.5 w-3.5 -mt-0.5 mr-1 text-primary" />Sales commission: {body}{why}</p>
+            {user?.role === "admin" && <button type="button" onClick={() => setCommissionOpen(true)} className="text-primary hover:underline font-medium shrink-0">Change</button>}
+          </div>
+        );
+      })()}
+      {commissionOpen && <OrderCommissionSheet order={order} onClose={() => setCommissionOpen(false)} />}
+
       {/* ── What converting the payments gained or lost ── */}
       {(() => {
         const x = exchangeDifference(db, order);
@@ -184,7 +217,8 @@ export function OrderProfitCard({ db, order }: { db: DB; order: Order }) {
               {section("Diamonds", cost.diamond)}
               {section("Other materials", cost.materials)}
               {section("Factory", cost.labour)}
-              {section("Shipping & other", cost.other)}
+              {section("Shipping & other", cost.other.filter(l => !l.commission))}
+              {section("Sales commission", cost.other.filter(l => l.commission))}
               <div className="flex items-baseline justify-between gap-3 pt-2 border-t border-border/60 text-sm">
                 <span className="font-semibold text-brand-dark">Total cost</span>
                 <span className="font-semibold tabular-nums">{fmtMoneyInr(cost.totalInr)}</span>

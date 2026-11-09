@@ -34,7 +34,8 @@ export function FreightBacklog() {
   // keyed on it would keep showing parcels that have just been dealt with.
   const parcels = parcelsWithoutFreight(db);
   // Bills already entered as ordinary expenses that could be this freight.
-  const loose = (db.expenses ?? []).filter(e => !(e.orderIds && e.orderIds.length) && e.amount > 0);
+  // A salesperson's commission is never freight (it is already inside its orders' cost).
+  const loose = (db.expenses ?? []).filter(e => !(e.orderIds && e.orderIds.length) && !e.commission && e.amount > 0);
 
   if (!parcels.length) return null;
 

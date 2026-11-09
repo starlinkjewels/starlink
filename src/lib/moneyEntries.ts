@@ -1212,6 +1212,16 @@ export function expenseRefusal(d: DB, e: Expense, p: ExpensePatch): string | und
     const adv = advanceChangeProblem(d, e.id, { amount: p.amount });
     if (adv) return adv;
   }
+  // Sales commission paid (lib/commissionLedger.ts): it settles that person's
+  // commission, which is inside the orders' cost already.
+  if (e.commission) {
+    if (p.paidToEmployeeId !== e.paidToEmployeeId) return "This paid one person's sales commission — it can't be moved to another. Delete it and pay again.";
+    if (p.orderIds?.length) return "Sales commission is already in the cost of the orders it was earned on — it can't be put on an order as well.";
+    // Paid from a dollar (or other) account, it settled the rupees worked out at the rate then.
+    if (e.commissionInr != null && Math.abs(roundCcy(p.amount, ccy(e.currency)) - e.amount) >= 0.005) return "Paid from an account in another currency at a rate — to change the amount, delete it and pay again.";
+    const to = p.lockerId && p.lockerId !== e.lockerId ? d.lockers.find(l => l.id === p.lockerId) : undefined;
+    if (to && ccy(to.currency) !== ccy(e.currency)) return "Sales commission can only move to an account in the same currency — delete it and pay again from the other account.";
+  }
   if (!p.title.trim()) return "Enter a title.";
   if (!(p.amount >= 0) || (p.lockerId && !(p.amount > 0))) return "Enter a valid amount.";
   if (p.category === "Salary" && !p.paidToEmployeeId) return "Choose which team member this salary is for.";
