@@ -38,7 +38,7 @@ import { MoreMenu, type MoreAction } from "@/components/MoreMenu";
 import { OrderDesignBlock } from "@/components/designers/OrderDesignBlock";
 import { OrderEditDialog } from "@/components/OrderEditDialog";
 import { OrderPaymentEditDialog } from "@/components/OrderPaymentEditDialog";
-import { cancelAccess, cancelBlocker, orderEditAccess, orderSpecLocks } from "@/lib/orderGuards";
+import { cancelAccess, cancelBlocker, orderEditAccess, orderSpecLocks, stoneTypeMismatch } from "@/lib/orderGuards";
 import { cancelOrder as cancelOrderNow, cancelQuestion, cancelRefusal, returnIssuedMaterials as returnIssuedFor } from "@/lib/orderCancel";
 import { orderPaymentEditBlocker, paymentReceipt } from "@/lib/orderPaymentEdit";
 import { meltPlan } from "@/lib/melt";
@@ -64,7 +64,7 @@ import { ShippingCostFields } from "@/components/BulkDispatchDialog";
 import { recordShippingCost, EMPTY_SHIPPING_COST, type ShippingCost } from "@/lib/dispatch";
 import { collectionLoaded,
   loadDb, updateDb, updateDbAs, fmtMoney, fmtDate, totalAdvance, orderTotal, orderGrossTotal, balanceDue, returnedCredit, uid, capOrderAdvances, toPureGold, pureFromPurity, CARAT_TO_GRAM, KARAT_PURITY, FACTORY_PURITY, findInvoiceForOrder, invoiceOrderIds, activeGiftCardsFor, maxGiftRedeem, giftMaxRedeemPctFor, cashbackPercentFor, issueGiftCard,
-  type Order, type Purchase, type MaterialIssuance,
+  type Order, type Purchase, type MaterialIssuance, type DB,
   mainDiamondShape,
   isDiamondOnlyOrder, isProductionStep, statusFromTimeline, todayLocal, stampFor, dayOf, logEvent, worksOnOrder, orderImage,
 } from "@/lib/db";
@@ -134,6 +134,17 @@ const ORDER_SECTION = "-mx-4 sm:-mx-6 px-4 sm:px-6 py-4 sm:py-5 border-t border-
 const RATE_BASIS = { bill: "bill rate", average: "bag avg cost", typed: "price entered", "fine gold": "fine gold avg" } as const;
 
 /** One detail of the order: a quiet label over its value — no box around it. */
+/** The stones bought or issued for it are another type than the order says — staff only; Edit puts it right. */
+function StoneTypeNote({ db, order }: { db: DB; order: Order }) {
+  const t = stoneTypeMismatch(db, order);
+  if (!t) return null;
+  return (
+    <p className="col-span-2 text-[11px] text-amber-800 rounded-lg bg-amber-500/10 px-2.5 py-1.5">
+      The stones bought or issued for it are <span className="font-semibold">{t}</span>, the order says {order.diamondType || "no type"} — change it in Edit so the bill says what was sold.
+    </p>
+  );
+}
+
 function OrderSpec({ label, value, wide }: { label: string; value?: string | number | null; wide?: boolean }) {
   if (value == null || value === "") return null;
   return (
@@ -2804,6 +2815,7 @@ It goes back to being our own build, and ${item ? item.name : "its piece"} goes 
             <div className="grid grid-cols-2 gap-x-4 gap-y-3">
               {stoneOf(order) !== "Diamond" && <OrderSpec label="Stone" value={stoneOf(order)} />}
               {hasDiamonds(stoneOf(order)) ? <OrderSpec label="Diamond type" value={order.diamondType} /> : <OrderSpec label="Type" value={order.stoneSpec?.type} />}
+              {isStaffUser && hasDiamonds(stoneOf(order)) && <StoneTypeNote db={db} order={order} />}
               <OrderSpec label="Stones" value={`${order.quantity} ${order.quantity === 1 ? "pc" : "pcs"}`} />
               <OrderSpec label="Shape" value={order.stoneSpec?.shape} />
               <OrderSpec label="Size" value={[order.stoneSpec?.mm, order.stoneSpec?.size].filter(Boolean).join(" · ") || undefined} />
@@ -2839,6 +2851,7 @@ It goes back to being our own build, and ${item ? item.name : "its piece"} goes 
             <div className="grid grid-cols-2 gap-x-4 gap-y-3">
               <OrderSpec label={diamondOnly ? "Estimated" : "Est. diamonds"} value={`${order.diamondWeight} ct`} />
               {!diamondOnly && <OrderSpec label="Diamond type" value={order.diamondType} />}
+              {!diamondOnly && isStaffUser && <StoneTypeNote db={db} order={order} />}
               {!diamondOnly && <OrderSpec label="Diamond shape" value={order.diamondShape} />}
               {!diamondOnly && <OrderSpec label="Est. gross weight" value={order.estimatedGrossWeight ? `${fmtG(order.estimatedGrossWeight)} g` : undefined} />}
               {!diamondOnly && <OrderSpec label="Est. net weight" value={order.estimatedNetWeight ? `${fmtG(order.estimatedNetWeight)} g` : undefined} />}

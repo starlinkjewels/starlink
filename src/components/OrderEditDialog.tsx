@@ -80,7 +80,8 @@ const LABEL: Record<string, string> = {
   createdAt: "order date",
 };
 /** What the printed invoice shows of an order — it reads them from the order itself. */
-const ON_INVOICE = new Set(["jewelleryType", "metal", "productKarats", "productColor", "productSize", "quantity", "designNumber", "stoneSpec", "createdAt"]);
+// The diamond type too: a loose-diamond bill names it ("HPHT loose diamonds").
+const ON_INVOICE = new Set(["jewelleryType", "metal", "productKarats", "productColor", "productSize", "quantity", "designNumber", "stoneSpec", "createdAt", "diamondType"]);
 
 // Outside the panel, so typing in a field never remounts it (and loses focus).
 function Note({ children, info }: { children: ReactNode; info?: boolean }) {
@@ -241,7 +242,8 @@ export function OrderEditDialog({ order, onClose }: { order: Order; onClose: () 
 
     // Whatever is locked now is refused, not quietly skipped.
     const PIECE = ["jewelleryType", "metal", "productKarats", "productColor", "productSize", "quantity", "diamondType", "diamondShape", "diamondWeight", "estimatedGrossWeight", "estimatedNetWeight", "rhodium", "stamping", "engraving"];
-    const FINISHED = ["jewelleryType", "metal", "productKarats", "quantity", "diamondType"];
+    // Not the diamond type: what the stones are stays correctable until the piece is sent.
+    const FINISHED = ["jewelleryType", "metal", "productKarats", "quantity"];
     const MATERIAL = ["metal"];
     const pieceNow = nowLocks.piece, doneNow = nowLocks.piece ?? nowLocks.finished, matNow = doneNow ?? nowLocks.metal;
     const hitPiece = pieceNow && changed.find(k => PIECE.includes(k));
@@ -333,7 +335,7 @@ export function OrderEditDialog({ order, onClose }: { order: Order; onClose: () 
         <section className="space-y-3">
           <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">The piece</p>
           {!all && pieceLock && <Note>{pieceLock}</Note>}
-          {!pieceLock && locks.finished && <Note>Type, metal, karats, quantity and diamond type: {locks.finished}</Note>}
+          {!pieceLock && locks.finished && <Note>Type, metal, karats and quantity: {locks.finished}</Note>}
           {!doneLock && locks.material && (
             <Note info>Already issued for this order: {locks.material}. Change the type, karats or quantity here — then issue more, or return the extra, in Manufacturing.</Note>
           )}
@@ -395,9 +397,17 @@ export function OrderEditDialog({ order, onClose }: { order: Order; onClose: () 
             <Field label={diamondOnly ? "Stones (pcs)" : "Quantity"}>
               <Input type="number" min={1} step={1} value={f.quantity} onChange={e => set("quantity", e.target.value)} disabled={!!doneLock} title={doneLock} className="h-10 rounded-xl" />
             </Field>
+            {/* What the stones ARE — correctable until the piece is sent, even once they
+                are bought (bought HPHT on an order estimated Natural). */}
             {!gemOnly && (
               <Field label="Diamond type">
-                {pickList("diamondType", "diamondTypes", doneLock)}
+                {pickList("diamondType", "diamondTypes", pieceLock)}
+                {!pieceLock && locks.stoneTypes && !locks.stoneTypes.some(t => t.toLowerCase() === (f.diamondType ?? "").trim().toLowerCase()) && (
+                  <p className="text-[11px] text-amber-800 mt-1">
+                    Stones for it are {locks.stoneTypes.join(" + ")}
+                    {locks.stoneTypes.length === 1 && <> — <button type="button" onClick={() => set("diamondType", locks.stoneTypes![0] as Form["diamondType"])} className="text-primary font-medium hover:underline">Use {locks.stoneTypes[0]}</button></>}
+                  </p>
+                )}
               </Field>
             )}
             <Field label="Est. diamond weight (ct)">

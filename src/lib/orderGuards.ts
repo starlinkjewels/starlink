@@ -73,8 +73,14 @@ export interface SpecLocks {
   material?: string;
   /** The metal — metal was issued or bought for it; that issue is cancelled first. */
   metal?: string;
-  /** Type, metal, karats, quantity and diamond type — the piece is made (Final Approval) or the loose stones are bought. */
+  /** Type, metal, karats and quantity — the piece is made (Final Approval) or the loose stones are bought.
+   *  Not the diamond type: it only says what the stones are, and the stones bought
+   *  (HPHT, say) can turn out to differ from the estimate (Natural) — it stays
+   *  correctable until the piece is sent (`piece`). */
   finished?: string;
+  /** What the stones bought or issued for it are (Natural, HPHT, CVD…), as their
+   *  purchase or issue records them — so the order can be matched to them. */
+  stoneTypes?: string[];
   /** Changing to or from a loose-diamond order: its stages were set for one or the other. */
   kind: string;
 }
@@ -123,5 +129,16 @@ export function orderSpecLocks(db: DB, o: Order): SpecLocks {
     : isDiamondOnlyOrder(o) && (issues.length > 0 || bought.length > 0)
       ? "The stones are issued or bought for it — they stay as they are"
       : undefined;
-  return { piece, material, metal, finished, kind };
+  // The type of the stones that went out for it or were bought for it.
+  const types = new Map<string, string>();
+  for (const p of bought) if (p.material === "diamond" && p.diamond?.type?.trim()) types.set(p.diamond.type.trim().toLowerCase(), p.diamond.type.trim());
+  for (const i of issues) if (i.material === "diamond" && i.diamondSpec?.type?.trim()) types.set(i.diamondSpec.type.trim().toLowerCase(), i.diamondSpec.type.trim());
+  return { piece, material, metal, finished, kind, ...(types.size ? { stoneTypes: [...types.values()] } : {}) };
+}
+
+/** The stones bought or issued for an order are all of one type, and the order says another — said on the order page and in Edit. */
+export function stoneTypeMismatch(db: DB, o: Order): string | undefined {
+  const t = orderSpecLocks(db, o).stoneTypes;
+  if (!t || t.length !== 1) return undefined;
+  return (o.diamondType ?? "").trim().toLowerCase() === t[0].toLowerCase() ? undefined : t[0];
 }
