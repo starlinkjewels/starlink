@@ -150,6 +150,7 @@ export type { MaterialDef, MaterialKey } from "./materials";
 import { KARAT_PURITY, toPureGold, pureFromPurity, openingDebitAmt, openingCreditAmt, hasOpeningBalance } from "./pure/basics";
 import { closedTo, isClosedDate, lockBreaches, breachMessage, lockedPart, soldInClosedYear } from "./yearLock";
 import { ensureFileClaims, stampTeamOnce } from "./fileClaims";
+import { reportHealth } from "./health";
 import { policyAllows, POLICY_NOUN, READ_LOCKED, readAllowed, type Op as WriteOp } from "./pure/writePolicy";
 export { KARAT_PURITY, toPureGold, pureFromPurity, openingDebitAmt, openingCreditAmt, hasOpeningBalance };
 
@@ -3616,6 +3617,8 @@ async function persist() {
     const code = (err as { code?: string })?.code ?? "";
     console.error(`[db] Firestore write failed (${[...touched].join(", ")}):`, err);
     if (code === "permission-denied") {
+      // Refused by the security rules: told to the server (Settings → Software health).
+      reportHealth("denied", { what: [...touched].join(", ").slice(0, 80) });
       for (const c of touched) {
         deniedCols.add(c);
         if (deniedReported.has(c)) continue;
@@ -4282,6 +4285,8 @@ export function startDb(scope: Scope = { kind: "full" }): Promise<void> {
         await reconcileRoleIndex();
         // The "who works on this" lists: filled in (and marked done) by an admin's session.
         if (!cache.settings.ownScopeReady) updateDb(() => {});
+        // An admin signing in — a device not seen before alerts the partners (Settings → Software health).
+        reportHealth("signin");
         // Who is who on everyone's sign-in token, for the file rules (lib/fileClaims.ts) — once.
         if (!cache.settings.fileClaimsAt) {
           const done = await stampTeamOnce();

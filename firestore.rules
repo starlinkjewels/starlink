@@ -598,6 +598,13 @@ service cloud.firestore {
       allow delete: if isAdmin() || (isStaff() && resource.data.userId == myAppId() && resource.data.source == 'manual');
     }
 
+    // Software health (functions/src/health/): what the watchers found, and their
+    // last check — read by admins in Settings → Software health, written only by the
+    // server. Its counters and known devices (healthCounters, healthDevices) stay
+    // closed to everyone, by the rule below.
+    match /securityEvents/{id} { allow read: if isAdmin(); allow write: if false; }
+    match /healthState/{id} { allow read: if isAdmin(); allow write: if false; }
+
     // Deny everything else by default.
     match /{document=**} { allow read, write: if false; }
   }

@@ -10,6 +10,7 @@ import "./styles.css";
 import "./studio.css";
 import { applyRememberedAppearance } from "@/lib/appearance";
 import { applyStudio } from "@/lib/studio";
+import { installErrorReporter } from "@/lib/health";
 import { applyBrand, getBrand, loadBrand } from "@/lib/brand";
 import { watchForNewVersion } from "@/lib/appUpdate";
 import { toast } from "sonner";
@@ -18,6 +19,8 @@ import { toast } from "sonner";
 // The new look (preview) first, so the appearance below knows whether to step aside.
 applyStudio();
 applyRememberedAppearance();
+// Screens that crash are reported (Settings → Software health).
+installErrorReporter();
 // The company's own brand: as this device remembers it at once, then as saved (readable before sign-in).
 applyBrand(getBrand());
 void loadBrand();
