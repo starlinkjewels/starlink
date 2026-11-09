@@ -18,7 +18,7 @@ import { CompanyFilter, CompanyPicker, CompanyBadge, useMultiCo, useDefaultCompa
 import { FactoryPoolTransferDialog } from "@/components/FactoryPoolTransfer";
 import { companyOf, coField, workCompanyOf, companyById } from "@/lib/companies";
 import { bySettingsOrder, isOtherMaterial, materialName, materialUnit, type MaterialKey } from "@/lib/materials";
-import { otherFlow, factoryOtherBalances, factoryOtherGrades } from "@/lib/pure/accounts";
+import { otherFlow, factoryOtherBalances, factoryOtherGrades, ourFinishedFine } from "@/lib/pure/accounts";
 import { useMemo, useState, type ReactNode } from "react";
 import { useParams, Link, useNavigate } from "react-router-dom";
 import { collectionLoaded, updateDb, uid, fmtDate, todayLocal, stampFor, DIAMOND_SHAPES, toPureGold, pureFromPurity, hasOpeningBalance, openingDebitAmt, openingCreditAmt, type MaterialIssuance, type LedgerDir, type Factory } from "@/lib/db";
@@ -755,8 +755,9 @@ function FactoryHistoryPageBody() {
       }
       // Finished piece returned by the factory (converted to fine 24KT).
       if (mi.material === "gold" && mi.finishedNetWeight != null) {
-        const fine = mi.finishedPurity != null ? pureFromPurity(mi.finishedNetWeight, mi.finishedPurity) : toPureGold(mi.finishedNetWeight, mi.finishedKarat || "24K");
-        rows.push({ ...zero(), id: mi.id + "-gout", date: mi.issuedAt, ref, particular: `Finished piece — net ${mi.finishedNetWeight}g`, crGold: fine });
+        // Only our part: gold the client gave the factory straight was never ours there.
+        const fine = ourFinishedFine(mi, "24K");
+        rows.push({ ...zero(), id: mi.id + "-gout", date: mi.issuedAt, ref, particular: `Finished piece — net ${mi.finishedNetWeight}g${(mi.clientGoldNet ?? 0) > 0 ? ` (${mi.clientGoldNet}g the client's own)` : ""}`, crGold: fine });
         // A two-tone piece comes back with a second metal in it. Silver gets its
         // own column because it is the common one; anything else (platinum, etc.)
         // shares the Other Metal column and is named in the row.

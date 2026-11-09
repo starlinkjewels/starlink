@@ -230,5 +230,12 @@ export function orderMaterialLines(db: DB, order: Order, faDone: boolean, opts: 
       repair: { key, at, billNo, issues },
     };
   }).sort((a, b) => +new Date(a.repair.at) - +new Date(b.repair.at));
-  return [...lines, ...repairLines];
+  // Metal the client gave the factory straight (Final Approval) — theirs: in the piece, never ours, no cost.
+  const clientLines: MaterialLine[] = (order.clientMetal ?? []).filter(m => m.grams > 0).map((m, i) => ({
+    id: `client-metal-${i}`, href: `/orders/${order.id}`, gold: false,
+    title: m.metal, detail: "Supplied by the client — not charged",
+    qty: `${m.grams} g`, source: "Client's own", dueInr: 0, labourDueInr: 0,
+    costNote: "Theirs", status: "In the piece", tone: "green" as const,
+  }));
+  return [...lines, ...clientLines, ...repairLines];
 }

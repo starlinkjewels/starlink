@@ -18,7 +18,7 @@
 // (lib/pure/accounts.ts: factoryFineGoldBalance, diamondFlow, factoryAccount),
 // so the last line's balances are the card's figures — and `check` says so.
 import type { FactoryPayment, MaterialIssuance, Order } from "./db";
-import { diamondFlow, factoryAccount, factoryFineGoldBalance, factoryOtherBalances, otherFlow } from "./pure/accounts";
+import { diamondFlow, factoryAccount, factoryFineGoldBalance, factoryOtherBalances, otherFlow, ourFinishedFine } from "./pure/accounts";
 import { openingCreditAmt, openingDebitAmt, pureFromPurity, toPureGold } from "./pure/basics";
 import type { OpeningBalanceInfo } from "./db";
 import { groupPaymentsAsMade, labourLineText, factoryMetalLines } from "./manufacturing";
@@ -55,10 +55,8 @@ export interface StatementLine {
   otherBal: Record<string, number>;
 }
 
-/** The fine gold a gold issue's finished piece took. */
-const finishedFine = (mi: MaterialIssuance) => mi.finishedNetWeight == null ? 0
-  : mi.finishedPurity != null ? pureFromPurity(mi.finishedNetWeight, mi.finishedPurity)
-  : mi.finishedKarat ? toPureGold(mi.finishedNetWeight, mi.finishedKarat) : 0;
+/** The fine gold a gold issue's finished piece took — of ours: gold the client gave the factory straight is not. */
+const finishedFine = (mi: MaterialIssuance) => ourFinishedFine(mi);
 
 
 const r3 = (n: number) => Math.round(n * 1000) / 1000;

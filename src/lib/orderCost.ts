@@ -1,3 +1,4 @@
+import { ourFinishedFine, ourFinishedNet } from "./pure/accounts";
 import { orderUse } from "./clientMaterial";
 import { brokerageWePay, landedInr } from "./brokers";
 import { pctText, purchaseGstInr } from "./purchaseGst";
@@ -291,10 +292,8 @@ function fineGoldLots(db: DB, at: string, companyId?: string): { rate: number; b
 /** The fine (24KT) grams in a finished piece's gold: its net weight at the
  *  purity the factory reported, or the karat's standard purity. */
 function finishedFine(mi: MaterialIssuance): number {
-  const net = mi.finishedNetWeight ?? 0;
-  return mi.finishedPurity != null
-    ? pureFromPurity(net, mi.finishedPurity)
-    : toPureGold(net, mi.finishedKarat || mi.purityOrQuality);
+  // Only our part — gold the client gave the factory straight costs us nothing.
+  return ourFinishedFine(mi, mi.purityOrQuality);
 }
 
 export function orderCost(db: DB, order: Order, depth = 0): OrderCost {
@@ -347,7 +346,7 @@ export function orderCost(db: DB, order: Order, depth = 0): OrderCost {
       bucket.push({
         label: clientGold
           ? `Gold we added — the client's gold was ${fine}g fine short × ${fmtRate(fg.rate, "g fine")} (${fg.basis})`
-          : `${mi.finishedNetWeight}g at ${purityTxt} = ${fine}g fine × ${fmtRate(fg.rate, "g fine")} (${fg.basis})`,
+          : `${ourFinishedNet(mi)}g at ${purityTxt} = ${fine}g fine × ${fmtRate(fg.rate, "g fine")} (${fg.basis})${(mi.clientGoldNet ?? 0) > 0 ? ` — ${mi.clientGoldNet}g more was the client's own` : ""}`,
         amountInr: r2(fine * fg.rate), issuanceId: mi.id, rateInr: fg.rate, rateUnit: "g fine",
       });
       continue;

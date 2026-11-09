@@ -1,3 +1,4 @@
+import { ourFinishedFine } from "@/lib/pure/accounts";
 import { useMemo, useState, type ReactNode } from "react";
 import { metalLabel } from "@/lib/metals";
 import { Link } from "react-router-dom";
@@ -191,9 +192,8 @@ export function buildFactoryOrderRows(
       if (mi.source !== "factoryPool") row.goldOut += toPureGold(mi.quantityIssued, mi.purityOrQuality);
       if (mi.finishedNetWeight != null) {
         issueNet.set(key, (issueNet.get(key) ?? 0) + mi.finishedNetWeight);
-        row.goldIn += mi.finishedPurity != null
-          ? pureFromPurity(mi.finishedNetWeight, mi.finishedPurity)
-          : toPureGold(mi.finishedNetWeight, mi.finishedKarat || "24K");
+        // Only our part: gold the client gave the factory straight was never ours there.
+        row.goldIn += ourFinishedFine(mi, "24K");
       }
     }
     if (mi.material === "diamond") {
@@ -218,13 +218,12 @@ export function buildFactoryOrderRows(
         });
       }
       if (mi.finishedNetWeight != null) {
-        const fine = mi.finishedPurity != null
-          ? pureFromPurity(mi.finishedNetWeight, mi.finishedPurity)
-          : toPureGold(mi.finishedNetWeight, mi.finishedKarat || "24K");
+        const fine = ourFinishedFine(mi, "24K");
+        const theirs = (mi.clientGoldNet ?? 0) > 0 ? ` — ${mi.clientGoldNet}g of it the client's own` : "";
         row.entries.push({
           id: mi.id + "-gout", date: mi.issuedAt, kind: "in",
           text: repair ? `Added to the piece in the repair — ${mi.finishedNetWeight}g${mi.finishedKarat ? ` ${mi.finishedKarat}` : ""}`
-            : `Finished piece — net ${mi.finishedNetWeight}g${mi.finishedPurity ? ` @ ${mi.finishedPurity}‰` : ""}`,
+            : `Finished piece — net ${mi.finishedNetWeight}g${mi.finishedPurity ? ` @ ${mi.finishedPurity}‰` : ""}${theirs}`,
           qty: `${fine.toFixed(3)} g fine`,
         });
       }
