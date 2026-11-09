@@ -55,6 +55,7 @@ import { PIECE_PHOTO_MAX, dropDeletedPicture, followOrderPictures, orderPictures
 import { exportAllowed } from "@/lib/access";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { useParams, Link, useNavigate, useSearchParams } from "react-router-dom";
+import { useStepBack } from "@/hooks/useBackNav";
 import { useAuth } from "@/lib/auth";
 import { OrderProfitCard } from "@/components/OrderProfitCard";
 import { BulkInvoiceDialog } from "@/components/BulkInvoiceDialog";
@@ -226,6 +227,8 @@ function OrderDetailPageBody() {
   const addNew = useAddNew();
   const studio = useStudio();
   const nav = useNavigate();
+  // "← Orders" steps back to the list as it was left (its page, search, scroll).
+  const stepBack = useStepBack();
 
   // Barcode band modal state
   const [bandOpen, setBandOpen] = useState(false);
@@ -2642,7 +2645,7 @@ It goes back to being our own build, and ${item ? item.name : "its piece"} goes 
   return (
     <>
     <div className="max-w-7xl mx-auto flex flex-col gap-4">
-      <Link to="/orders" style={{ order: -2 }} className="ui-back self-start inline-flex items-center gap-1 h-9 -ml-2 px-2 rounded-lg text-sm font-medium text-muted-foreground hover:text-foreground hover:bg-secondary/70 transition-colors"><ArrowLeft className="h-4 w-4" />Orders</Link>
+      <Link to="/orders" onClick={stepBack("/orders")} style={{ order: -2 }} className="ui-back self-start inline-flex items-center gap-1 h-9 -ml-2 px-2 rounded-lg text-sm font-medium text-muted-foreground hover:text-foreground hover:bg-secondary/70 transition-colors"><ArrowLeft className="h-4 w-4" />Orders</Link>
 
       <div style={{ order: -1 }} className="card-luxe p-0 overflow-hidden">
       {/* Order Header — the piece at a glance: its picture, where it stands,

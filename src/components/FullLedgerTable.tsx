@@ -74,7 +74,7 @@ export function FullLedgerTable({
     });
   }, [rows, q, from, to, mat]);
 
-  const { paged, page, setPage, totalPages, start, end } = usePagination(filtered, 15);
+  const { paged, page, setPage, totalPages, start, end } = usePagination(filtered, 15, "page", JSON.stringify([q, from, to, mat]));
   const active = !!q.trim() || !!from || !!to || selOn(mat);
 
   // The dates and (with more than one, or one chosen) the material, behind one

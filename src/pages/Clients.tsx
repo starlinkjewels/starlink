@@ -223,7 +223,7 @@ export function ClientsPage() {
     })
     .sort((a, b) => weight(b) - weight(a) || onOrder(b) - onOrder(a) || a.companyName.localeCompare(b.companyName));
 
-  const { paged, page, setPage, totalPages, total, start, end } = usePagination(list, PAGE_SIZE);
+  const { paged, page, setPage, totalPages, total, start, end } = usePagination(list, PAGE_SIZE, "page", JSON.stringify([q, coFilter, byFilter, countryFilter]));
 
   // The company filter, behind one Filters button in the table's (or the
   // grid's) toolbar — only once there is more than one company. "All" is the

@@ -145,7 +145,7 @@ export function ReadyStockPage() {
     .sort((a, b) => officeRank(db.settings, officeOf(a)) - officeRank(db.settings, officeOf(b))
       || officeOf(a).localeCompare(officeOf(b))
       || +new Date(b.createdAt) - +new Date(a.createdAt));
-  const { paged, page, setPage, totalPages, total, start, end } = usePagination(items, PAGE_SIZE);
+  const { paged, page, setPage, totalPages, total, start, end } = usePagination(items, PAGE_SIZE, "page", JSON.stringify([q, office, avail, typeSel, metalSel, karatSel, stoneSel, priceMin, priceMax, coSel]));
 
   // What the office (or all of them) holds: pieces in stock, and what they are worth.
   const scope = shelf.filter(inOffice);
@@ -594,7 +594,7 @@ export function ReadyStockPage() {
             onClearFilters={clearFilters}
             exports={exports}
             summary={<>{summary}{selectionBar}</>}
-            resetKey={JSON.stringify([officeSel, q, coSel, avail, typeSel, metalSel, karatSel, stoneSel, priceMin, priceMax])}
+            resetKey={JSON.stringify([office, q, coSel, avail, typeSel, metalSel, karatSel, stoneSel, priceMin, priceMax])}
             columns={listColumns}
             rowKey={i => i.id}
             rowHref={pieceHref}

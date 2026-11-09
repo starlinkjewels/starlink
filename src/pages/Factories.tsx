@@ -74,7 +74,7 @@ export function FactoriesPage() {
       fac.name.toLowerCase().includes(q.toLowerCase()) || (fac.contactPerson || "").toLowerCase().includes(q.toLowerCase()),
     )
     .sort((a, b) => weight(b) - weight(a) || a.name.localeCompare(b.name));
-  const { paged, page, setPage, totalPages, total, start, end } = usePagination(list, PAGE_SIZE);
+  const { paged, page, setPage, totalPages, total, start, end } = usePagination(list, PAGE_SIZE, "page", q);
 
   // Grand totals across ALL factories: charges we still owe (payable) vs charges
   // we overpaid and the factory owes us back (receivable).

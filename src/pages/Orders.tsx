@@ -223,7 +223,7 @@ export function OrdersPage() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [db, dbVersion, user, q, status, clientFilter, employeeFilter, companyFilter, tracks, multiCo, isStaff]);
 
-  const { paged, page, setPage, totalPages, total, start, end } = usePagination(orders, PAGE_SIZE);
+  const { paged, page, setPage, totalPages, total, start, end } = usePagination(orders, PAGE_SIZE, "page", JSON.stringify([q, status, clientFilter, employeeFilter, companyFilter]));
 
   /**
    * The pieces on screen, with the weights a sale is priced from.

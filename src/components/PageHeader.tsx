@@ -1,8 +1,8 @@
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import type { LucideIcon } from "lucide-react";
 import { ArrowLeft, ChevronRight, LayoutGrid, Rows3 } from "lucide-react";
-import { Link, useNavigate } from "react-router-dom";
-import { previousPath } from "@/hooks/useBackNav";
+import { Link } from "react-router-dom";
+import { useStepBack } from "@/hooks/useBackNav";
 import { Button } from "@/components/ui/button";
 import { MoreMenu, type MoreAction } from "@/components/MoreMenu";
 import { useWideScroll } from "@/components/WideScroll";
@@ -57,10 +57,7 @@ export function PageHeader({ title, subtitle, info, back, eyebrow, primary, seco
   // The back link: when the page before this one IS where it points, it steps back —
   // as the phone's Back does, so the list is where it was left and Back after it
   // doesn't come round to this page again. Otherwise it opens that page.
-  const navigate = useNavigate();
-  const stepBack = (e: React.MouseEvent) => {
-    if (back?.to && previousPath() === back.to) { e.preventDefault(); navigate(-1); }
-  };
+  const stepBack = useStepBack()(back?.to);
   // The new look: where you are as a trail ("Suppliers › Paresh") on a computer; on a
   // phone the top bar has the back arrow, so the page doesn't repeat it.
   const crumb = back ? back.label.replace(/^back to\s+/i, "") : "";

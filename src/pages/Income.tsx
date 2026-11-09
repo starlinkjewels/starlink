@@ -396,7 +396,7 @@ export function IncomePage() {
                 { label: "Net", value: fmt(net), tone: "strong", op: "=" },
               ]} />
             }
-            resetKey={`${tab}|${dateFrom}|${dateTo}|${clientFilter}`}
+            resetKey={`${curTab}|${dateFrom}|${dateTo}|${clientFilter}`}
             id="passbook"
             noun="transaction"
             rows={filtered}
