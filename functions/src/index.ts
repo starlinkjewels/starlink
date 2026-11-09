@@ -20,6 +20,8 @@ export { setClientLogin } from "./clientLogin";
 export { makeWebVideo } from "./videoWeb";
 // Documents: opening a password link without signing in (see docShare.ts).
 export { openDocShare } from "./docShare";
+// Who someone is, on their sign-in token, for the file rules (see fileClaims.ts).
+export { fileClaimsOnIndex, syncFileClaims } from "./fileClaims";
 // Smart Pipelines — the business's own automations (Settings → Autopilot; see pipelines/).
 export { pipelineOnOrder, pipelineOnClient, pipelineOnInvoice, pipelineOnAnswer, pipelineTick, pipelineTest, pipelineRunNow } from "./pipelines";
 

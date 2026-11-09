@@ -5,6 +5,7 @@
 import { webVideoUrl } from "./webVideo";
 import { ref, uploadString, uploadBytesResumable, getDownloadURL, deleteObject } from "firebase/storage";
 import { storage } from "./firebase";
+import { ensureFileClaims } from "./fileClaims";
 
 /** Non-random unique-ish suffix (Math.random is fine for storage paths). */
 function key() {
@@ -24,6 +25,7 @@ export async function uploadDataUrl(dataUrl: string, folder: string): Promise<st
   const mime = mimeMatch?.[1] ?? "image/jpeg";
   const ext = mime.split("/")[1]?.split("+")[0] || "jpg";
   const path = `${folder}/${key()}.${ext}`;
+  await ensureFileClaims(); // the file rules read who they are from it (lib/fileClaims.ts)
   const r = ref(storage, path);
   await uploadString(r, dataUrl, "data_url");
   return getDownloadURL(r);
@@ -45,6 +47,7 @@ export async function uploadFile(
 ): Promise<string> {
   const ext = file.name.split(".").pop() || "bin";
   const path = `${folder}/${key()}.${ext}`;
+  await ensureFileClaims(); // the file rules read who they are from it (lib/fileClaims.ts)
   const r = ref(storage, path);
   const task = uploadBytesResumable(r, file, { contentType: file.type || undefined });
   await new Promise<void>((resolve, reject) => {

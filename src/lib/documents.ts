@@ -21,6 +21,7 @@ import { db as fsdb, storage } from "./firebase";
 import { uid, logEvent } from "./db";
 import { makePreview } from "./photoPreview";
 import { uploadDataUrl } from "./storage";
+import { ensureFileClaims } from "./fileClaims";
 import {
   DOC_FOLDERS, DOC_ITEMS, DOC_SHARES, hashSharePassword, SHARE_PASSWORD_MIN,
   type DocFolder, type DocItem, type DocKind, type DocShare,
@@ -207,6 +208,7 @@ export function safeFileName(name: string): string {
 /** One file to Storage at documents/<itemId>/<name>, sent in chunks with progress. */
 async function putFile(itemId: string, file: Blob, name: string, onProgress?: (pct: number) => void): Promise<{ url: string; path: string }> {
   const path = `documents/${itemId}/${safeFileName(name)}`;
+  await ensureFileClaims(); // the file rules read who they are from it (lib/fileClaims.ts)
   const r = ref(storage, path);
   const task = uploadBytesResumable(r, file, { contentType: file.type || undefined });
   await new Promise<void>((resolve, reject) => {
