@@ -9,6 +9,7 @@ import { purchaseQty, materialUnit, materialName, isOtherMaterial } from "@/lib/
 import { companyOf } from "@/lib/companies";
 import { deriveStockBalances, estimatedPureGoldNeeded } from "./manufacturing";
 import { metalHasKarats } from "./metals";
+import { commissionFor, type CommissionLine } from "./commission";
 
 /** In one company's books — or every company's when none is given. */
 const inCo = (r: { companyId?: string }, companyId?: string) => !companyId || companyId === "all" || companyOf(r) === companyId;
@@ -106,6 +107,8 @@ export interface CostLine {
   rateInr?: number;
   /** What the rate is per, when not the material's own unit ("g fine"). */
   rateUnit?: string;
+  /** The salesperson's commission (lib/commission.ts) — under "Shipping & other". */
+  commission?: boolean;
 }
 
 export interface MissingCost {
@@ -130,6 +133,9 @@ export interface OrderCost {
   complete: boolean;
   /** Part of it is still an estimate (the gold, before any has gone out). */
   estimated?: boolean;
+  /** Who earns commission on it and how much (lib/commission.ts) — 0 on no margin.
+   *  Its rupees are a line in `other` and inside the total. */
+  commission?: CommissionLine;
 }
 
 const r2 = (n: number) => Math.round(n * 100) / 100;
@@ -596,6 +602,26 @@ export function orderCost(db: DB, order: Order, depth = 0): OrderCost {
     out.other.push({ label: `Returned by the client — ${back} of ${of} piece${of !== 1 ? "s" : ""}, cost moves to Ready Stock with ${back !== 1 ? "them" : "it"}`, amountInr: -r2(out.pieceInr * Math.min(back, of) / of) });
   }
   out.totalInr = r2([...out.gold, ...out.diamond, ...out.materials, ...out.labour, ...out.other].reduce((s, l) => s + l.amountInr, 0));
+  // The salesperson's commission (lib/commission.ts): a share of what the sale
+  // leaves once every other cost is paid, so it comes last — and only on
+  // finished work, when that margin means something (a piece still being made
+  // has no factory charge yet). Not part of what the pieces cost (pieceInr):
+  // a piece sent back carries its making cost into Ready Stock, not this.
+  // An estimate until the sale is shipped with every cost known.
+  if (depth === 0 && inProfitReport(order)) {
+    const fx = rateOn(db, saleDate(order));
+    const c = fx ? commissionFor(db, order, orderTotal(order) * fx.rate, out.totalInr, saleDate(order)) : null;
+    if (c) {
+      out.commission = c;
+      if (c.inr > 0) {
+        out.other.push({
+          label: `Sales commission — ${c.payeeName}, ${c.pct}% of the margin`, amountInr: c.inr, commission: true,
+          ...(recognisedSale(order) && out.missing.length === 0 ? {} : { estimate: true }),
+        });
+        out.totalInr = r2(out.totalInr + c.inr);
+      }
+    }
+  }
   out.complete = out.missing.length === 0;
   return out;
 }
@@ -669,6 +695,8 @@ export interface ProfitRow {
   complete: boolean;
   missing: MissingCost[];
   fx: FxRate | null;
+  /** The salesperson's commission inside the cost, ₹ (0 when none). */
+  commissionInr: number;
 }
 
 export interface ProfitGroup {
@@ -684,6 +712,9 @@ export interface ProfitGroup {
   profitInr: number | null;
   /** Orders in the group whose cost is not fully known. */
   incomplete: number;
+  /** Salespeople's commission inside the cost (lib/commission.ts) — ₹, and $ at each sale's rate. */
+  commissionInr: number;
+  commissionUsd: number;
 }
 
 function summarise(key: string, rows: ProfitRow[]): ProfitGroup {
@@ -699,7 +730,10 @@ function summarise(key: string, rows: ProfitRow[]): ProfitGroup {
   const marginPct = profitUsd === null || sellingUsd <= 0 ? null : Math.round((profitUsd / sellingUsd) * 1000) / 10;
   const sellingInr = rows.length && rows.every(r => r.fx) ? Math.round(rows.reduce((s, r) => s + r.sellingUsd * r.fx!.rate, 0)) : rows.length ? null : 0;
   const profitInr = sellingInr === null ? null : Math.round(sellingInr - costInr);
-  return { key, count: rows.length, sellingUsd, costInr, costUsd, profitUsd, marginPct, sellingInr, profitInr, incomplete: rows.filter(r => !r.complete).length };
+  // The commission inside that cost — each at its own sale day's rate, like the cost.
+  const commissionInr = r2(rows.reduce((s, r) => s + r.commissionInr, 0));
+  const commissionUsd = r2(rows.reduce((s, r) => s + (r.fx && r.commissionInr ? r.commissionInr / r.fx.rate : 0), 0));
+  return { key, count: rows.length, sellingUsd, costInr, costUsd, profitUsd, marginPct, sellingInr, profitInr, incomplete: rows.filter(r => !r.complete).length, commissionInr, commissionUsd };
 }
 
 function groupBy(rows: ProfitRow[], keyOf: (r: ProfitRow) => string): ProfitGroup[] {
@@ -724,7 +758,7 @@ export function profitReport(db: DB, orders: Order[]) {
     return {
       order: o, sellingUsd: p.sellingUsd, costInr: p.cost.totalInr, costUsd: p.costUsd,
       profitUsd: p.profitUsd, marginPct: p.marginPct, complete: p.cost.complete, missing: p.cost.missing,
-      fx: p.fx,
+      fx: p.fx, commissionInr: p.cost.commission?.inr ?? 0,
     };
   });
   const clientName = (id: string) => db.clients.find(c => c.id === id)?.companyName ?? "Unknown";
@@ -764,7 +798,9 @@ export function profitReport(db: DB, orders: Order[]) {
  * "2 expenses in AUD not counted — add an AUD rate in Settings".
  */
 export function operatingExpenses(db: DB, inPeriod: (iso: string) => boolean) {
-  const rows = (db.expenses ?? []).filter(e => !(e.orderIds && e.orderIds.length) && inPeriod(e.createdAt));
+  // Commission paid to a salesperson is already inside the cost of the orders it
+  // was earned on (lib/commission.ts) — counting the payment too would take it twice.
+  const rows = (db.expenses ?? []).filter(e => !(e.orderIds && e.orderIds.length) && !e.commission && inPeriod(e.createdAt));
   let usd = 0;
   let inr = 0;
   let convertible = true;

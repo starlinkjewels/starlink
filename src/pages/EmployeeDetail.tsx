@@ -43,6 +43,7 @@ import { closedWhy } from "@/lib/yearLock";
 import { confirmBox } from "@/lib/confirm";
 import { updateDbAs } from "@/lib/db";
 import { HandCoins, Undo2, Eraser, ArrowRightLeft } from "lucide-react";
+import { CommissionPanel } from "@/components/CommissionPanel";
 
 export function EmployeeDetailPage() {
   const mayExport = useMayExport();
@@ -566,6 +567,9 @@ export function EmployeeDetailPage() {
           })}
         </div>
       )}
+
+      {/* Sales commission — their %, earned order by order, paid, owed (admins only). */}
+      <CommissionPanel employee={employee} />
 
       {/* Assigned Clients — how many, and their orders, are the strip's above. */}
       <div className="card-luxe overflow-hidden">

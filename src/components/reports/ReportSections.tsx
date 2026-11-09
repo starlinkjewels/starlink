@@ -1411,8 +1411,12 @@ export function ReportSections({ embedded = false, show, period, clientId, scope
               <div className="rounded-2xl border border-border/70 bg-secondary/20 px-4 py-2">
                 {line(`Sales — ${profit.totals.count} order${profit.totals.count !== 1 ? "s" : ""} shipped`, fmtMoney(profit.totals.sellingUsd),
                   profit.totals.sellingInr != null ? { sub: fmtMoneyInr(profit.totals.sellingInr) } : undefined)}
-                {line("Cost of goods sold", usd(profit.totals.costUsd, "− "),
-                  { sub: `material, factory, freight · ${fmtMoneyInr(profit.totals.costInr)}`, indent: true })}
+                {/* The salespeople's commission is inside each order's cost (lib/commission.ts) —
+                    shown as its own line here, so the goods' own cost reads as it is. */}
+                {line("Cost of goods sold", usd(profit.totals.costUsd === null ? null : Math.round((profit.totals.costUsd - profit.totals.commissionUsd) * 100) / 100, "− "),
+                  { sub: `material, factory, freight · ${fmtMoneyInr(Math.round((profit.totals.costInr - profit.totals.commissionInr) * 100) / 100)}`, indent: true })}
+                {profit.totals.commissionInr > 0 && line("Sales commission", usd(profit.totals.costUsd === null ? null : profit.totals.commissionUsd, "− "),
+                  { sub: `the salespeople's share of the margin · ${fmtMoneyInr(profit.totals.commissionInr)}`, indent: true })}
                 {line("Gross profit", profit.totals.profitUsd === null ? "—" : le + fmtMoney(profit.totals.profitUsd),
                   { strong: true, tone: tone(profit.totals.profitUsd),
                     sub: [profit.totals.profitInr != null ? `${le}${fmtMoneyInr(profit.totals.profitInr)}` : "", profit.totals.marginPct === null ? "" : `${le}${profit.totals.marginPct}% gross margin`].filter(Boolean).join(" · ") || undefined })}

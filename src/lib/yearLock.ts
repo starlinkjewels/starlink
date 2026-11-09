@@ -40,6 +40,17 @@ export function isClosedDate(iso: string | Date | undefined | null, s: Settingsi
   return onOrBefore(dayOf(iso ?? ""), closedTo(s));
 }
 
+/** A sale shipped in a closed year — what it sold for, and who took it (and so earned its
+ *  sales commission, lib/commission.ts), stay as they were. The same test as the lock's. */
+export function soldInClosedYear(o: { forReadyStock?: boolean; status?: string; amount?: number; dispatchedAt?: string; createdAt?: string; timeline?: { step: string; status: string; date?: string }[] }, s: Settingsish): boolean {
+  const until = closedTo(s);
+  if (!until) return false;
+  const sold = !o.forReadyStock && o.status !== "Rejected" && num(o.amount) > 0 && (o.status === "Dispatched" || o.status === "Delivered");
+  if (!sold) return false;
+  const step = (o.timeline ?? []).find(t => t.step === "Dispatch" && t.status === "done");
+  return dated(String(o.dispatchedAt || step?.date || o.createdAt || ""), until);
+}
+
 /** The words a screen shows when an entry is in a closed year, or null when it is not. */
 export function closedWhy(iso: string | Date | undefined | null, s: Settingsish): string | null {
   if (!isClosedDate(iso, s)) return null;
@@ -125,6 +136,8 @@ function orderPart(o: Rec, until: string): Rec | null {
         clientId: o.clientId ?? null, sold: true, deleted: !!o.deletedAt,
         gross: Math.round((num(o.amount) + num(o.shippingCharge) + num(o.certificateFee) + charges) * 100) / 100,
         giftCardRedeemed: num(o.giftCardRedeemed), quantity: num(o.quantity),
+        // Who took it: who earned its sales commission (lib/commission.ts).
+        assignedEmployeeId: o.assignedEmployeeId ?? null,
       };
     }
   }
@@ -196,6 +209,21 @@ export function lockedPart(col: string, r: Rec | null | undefined, until: string
       return dated(r.createdAt, until) ? pick(r, ["carat", "ratePerCaratInr", "purchaseId", "companyId", "createdAt"]) : null;
     case "lockers":
       return dated(r.createdAt, until) ? pick(r, ["openingBalance", "currency", "createdAt"]) : null;
+    case "adminRecords": {
+      // Sales commission rates (lib/commission.ts): a % that starts in a closed
+      // year paid that year's sales — it stays as it was. A new % starts later.
+      if (r.kind !== "commission") return null;
+      const plan = (r.plan ?? {}) as Rec;
+      const closedSteps = (steps: unknown) => arr(steps).filter(st => dated(st.from, until))
+        .map(st => ({ from: st.from, pct: st.pct ?? null })).sort((a, b) => String(a.from).localeCompare(String(b.from)));
+      const company = closedSteps(plan.company);
+      const staff: Rec = {};
+      for (const id of Object.keys((plan.staff ?? {}) as Rec).sort()) {
+        const k = closedSteps(((plan.staff ?? {}) as Rec)[id]);
+        if (k.length) staff[id] = k;
+      }
+      return company.length || !empty(staff) ? { company, staff } : null;
+    }
     default:
       if (PARTIES.has(col)) {
         const o = pick(r, OPENING);
@@ -218,7 +246,7 @@ const NOUN: Record<string, string> = {
   invoices: "invoice", orders: "order", materialIssuances: "factory issue", cadJobs: "design charge",
   diamondPackets: "certified stone", lockers: "account's opening balance", clients: "client's opening balance",
   suppliers: "supplier's opening balance", factories: "factory's opening balance", brokers: "broker's opening balance",
-  designers: "designer's opening balance", users: "employee's opening advance",
+  designers: "designer's opening balance", users: "employee's opening advance", adminRecords: "commission %",
 };
 
 /**

@@ -27,6 +27,9 @@ export function employeeDeleteBlock(db: DB, u: User): string | undefined {
   const clients = db.clients.filter(c => c.accountManagerId === u.id).length;
   const assigned = [orders && plural(orders, "order"), clients && plural(clients, "client")].filter(Boolean);
   if (assigned.length) return `Assigned to ${assigned.join(" / ")} — deactivate instead`;
+  // Named on an order to earn its sales commission (lib/commission.ts).
+  const earns = (db.adminRecords ?? []).filter(r => r.kind === "commissionOrder" && r.set.payeeId === u.id).length;
+  if (earns) return `Earns the commission on ${plural(earns, "order")} — deactivate instead`;
   if (!collectionsFresh(EMPLOYEE_REF_COLS)) return CHECKING;
   const paid = (db.expenses ?? []).filter(e => e.paidToEmployeeId === u.id).length;
   if (paid) return `Has ${plural(paid, "salary payment")} — deactivate instead`;

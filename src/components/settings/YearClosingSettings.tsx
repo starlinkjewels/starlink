@@ -536,6 +536,8 @@ function BookBody({ book }: { book: YearBook }) {
           ]} note={[
             p.incomplete ? `${p.incomplete} sale${p.incomplete === 1 ? "" : "s"} counted on part of their cost.` : "",
             p.fxUsd ? `Exchange difference ${usd(p.fxUsd)}.` : "",
+            // A book closed before commission existed has no figure — nothing to say.
+            p.commissionInr ? `Sales commission ${inr(p.commissionInr)} — inside the cost of the sales.` : "",
             p.supplierSales.count ? `Sales to suppliers: profit ${inr(p.supplierSales.profitInr)}.` : "",
           ].filter(Boolean).join(" ") || undefined} />
         </div>

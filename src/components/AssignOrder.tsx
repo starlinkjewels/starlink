@@ -7,6 +7,7 @@ import { useAuth } from "@/lib/auth";
 import { hasFeature } from "@/lib/permissions";
 import { reachOf } from "@/lib/permissions";
 import { salesStaff } from "@/lib/clientHandlers";
+import { soldInClosedYear } from "@/lib/yearLock";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -101,6 +102,8 @@ export function AssignOrderField({ order }: { order: Order }) {
     return <div className="min-w-0"><p className="text-xs text-muted-foreground mb-1.5">Assigned to</p><PersonLine u={current} /></div>;
   }
   const change = (v: string) => {
+    // Sold in a closed year: who took it (and earned its commission) stays as it was.
+    if (soldInClosedYear(order, db.settings)) { toast.error(`${order.orderNumber} was sold in a closed year — who took it stays as it was. The main admin can reopen the year in Settings → Year closing.`); return; }
     const to = v === NOBODY ? null : v;
     const name = to ? db.users.find(u => u.id === to)?.name ?? "them" : "nobody";
     let moved = 0;
@@ -159,7 +162,10 @@ export function AssignOrdersDialog({ orders, onClose }: { orders: Order[]; onClo
     updateDbAs({ summary: `Assigned ${orders.length} order${orders.length !== 1 ? "s" : ""} to ${name}` }, d => {
       moved = assignOrders(d, orders.map(o => o.id), target, { id: user.id, name: user.name }, new Date().toISOString());
     });
-    toast.success(moved ? `${moved} order${moved !== 1 ? "s" : ""} now assigned to ${name}` : "Nothing to change — they were already assigned there");
+    // Any sold in a closed year stay with who took them (lib/yearLock.ts) — said so.
+    const kept = orders.filter(o => (o.assignedEmployeeId ?? null) !== target && soldInClosedYear(o, db.settings)).length;
+    const keptNote = kept ? ` — ${kept} sold in a closed year stay${kept === 1 ? "s" : ""} with who took ${kept === 1 ? "it" : "them"}` : "";
+    toast.success(moved ? `${moved} order${moved !== 1 ? "s" : ""} now assigned to ${name}${keptNote}` : kept ? `Nothing moved${keptNote}` : "Nothing to change — they were already assigned there");
     onClose();
   };
 

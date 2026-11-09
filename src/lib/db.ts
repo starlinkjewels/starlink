@@ -148,7 +148,7 @@ import type { MaterialDef, MaterialKey } from "./materials";
 import type { ItemDesign, ItemSpecs } from "./pure/catalogMedia";
 export type { MaterialDef, MaterialKey } from "./materials";
 import { KARAT_PURITY, toPureGold, pureFromPurity, openingDebitAmt, openingCreditAmt, hasOpeningBalance } from "./pure/basics";
-import { closedTo, isClosedDate, lockBreaches, breachMessage, lockedPart } from "./yearLock";
+import { closedTo, isClosedDate, lockBreaches, breachMessage, lockedPart, soldInClosedYear } from "./yearLock";
 import { policyAllows, POLICY_NOUN, READ_LOCKED, readAllowed, type Op as WriteOp } from "./pure/writePolicy";
 export { KARAT_PURITY, toPureGold, pureFromPurity, openingDebitAmt, openingCreditAmt, hasOpeningBalance };
 
@@ -1013,6 +1013,11 @@ export interface Expense {
   /** An employee's advance written off (they left; it won't come back): a cost,
    *  no account. */
   advanceWriteOff?: boolean;
+  /** Sales commission paid to `paidToEmployeeId` (lib/commissionLedger.ts). Already a
+   *  cost inside the orders it was earned on, so it is left out of the running costs. */
+  commission?: boolean;
+  /** The rupees of commission it settles — set when paid from an account in another currency. */
+  commissionInr?: number;
   /** The orders this expense was incurred FOR — freight and insurance on a
    *  shipment, a lab fee on a stone. Set, it is a direct cost of those orders
    *  (split across them by value) and is left out of overheads; unset, it is
@@ -2329,7 +2334,12 @@ export type AdminRecord =
    *  one-megabyte limit of a single record. */
   | { id: string; kind: "yearBook"; key: string; part: string; book: unknown }
   /** The company's sales target for a business year (lib/salesTargets.ts). id "target_<from>". */
-  | { id: string; kind: "salesTarget"; plan: import("./salesTargets").TargetPlan };
+  | { id: string; kind: "salesTarget"; plan: import("./salesTargets").TargetPlan }
+  /** Sales commission rules (lib/commission.ts): the company's % of margin for its
+   *  salespeople and each person's own, by day. id "commission". */
+  | { id: "commission"; kind: "commission"; plan: import("./commission").CommissionPlan }
+  /** One order's commission changed by an admin — someone else, another %, or none. id "com_<orderId>". */
+  | { id: string; kind: "commissionOrder"; orderId: string; set: import("./commission").OrderCommissionSet };
 
 const LEGACY_KEY = "starlink_db_v2"; // pre-Firebase localStorage blob (migrated on first run)
 
@@ -4930,6 +4940,8 @@ export function assignOrders(d: DB, orderIds: string[], employeeId: string | nul
   for (const id of orderIds) {
     const o = d.orders.find((x) => x.id === id);
     if (!o || (o.assignedEmployeeId ?? null) === employeeId) continue;
+    // Sold in a closed year: who took it earned its commission then — it stays (lib/yearLock.ts).
+    if (soldInClosedYear(o, d.settings)) continue;
     if (employeeId) o.assignedEmployeeId = employeeId;
     else delete o.assignedEmployeeId;
     moved.push(o);

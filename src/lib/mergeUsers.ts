@@ -23,6 +23,8 @@ const USER_REF_KEYS = new Set([
   "fromUserId",
   "toUserId",
   "userId",
+  // Who earns the sales commission on an order an admin changed (lib/commission.ts).
+  "payeeId",
 ]);
 
 export interface DuplicateUserGroup {
@@ -107,6 +109,17 @@ export function mergeUsers(keepId: string, dropIds: string[]): void {
     for (const col of Object.keys(d) as (keyof DB)[]) {
       if (col === "users" || col === "session" || col === "settings") continue;
       repoint(d[col], map);
+    }
+    // Commission rates are kept by person (lib/commission.ts) — a dropped account's
+    // own % goes to the survivor when the survivor has none of their own.
+    for (const r of d.adminRecords ?? []) {
+      if (r.kind !== "commission") continue;
+      for (const id of drops) {
+        const steps = r.plan.staff[id];
+        if (!steps) continue;
+        if (!r.plan.staff[keepId]?.length) r.plan.staff[keepId] = steps;
+        delete r.plan.staff[id];
+      }
     }
     // Keep the survivor; drop the rest.
     d.users = d.users.filter(u => !map.has(u.id));
