@@ -1,4 +1,6 @@
 import { DataTable, CellTag, CellAmount, CellDate, type DataColumn } from "@/components/DataTable";
+import { customColumns } from "@/components/CustomFields";
+import { fieldsFor, filledPairs, searchWords, valuesOf } from "@/lib/customFields";
 import { WebVideo } from "@/components/ProductVideo";
 import { metalFamily, metalLabel } from "@/lib/metals";
 import { useCan, useMayExport } from "@/hooks/useCan";
@@ -77,6 +79,9 @@ export function ReadyStockPage() {
   const can = useCan();
   const mayExport = useMayExport();
   const db = useDb();
+  // Custom fields on pieces this person sees — a client only those shown to clients (lib/customFields.ts).
+  const cfDefs = fieldsFor(db.settings, "readyStock", user);
+  const cfOf = (i: ReadyStockItem) => valuesOf(db, "readyStock", i.id, i);
   // Kept in the address: Back from a record returns to the list as it was left.
   const [q, setQ] = useUrlState("q");
   // The filters stay as they were left (this browser, this person) until cleared.
@@ -136,7 +141,8 @@ export function ReadyStockPage() {
   const items = shelf
     .filter(inOffice)
     .filter(i => !terms.length || terms.some(t =>
-      i.name.toLowerCase().includes(t) || (i.sku || "").toLowerCase().includes(t)))
+      i.name.toLowerCase().includes(t) || (i.sku || "").toLowerCase().includes(t)
+      || (cfDefs.length > 0 && searchWords(cfDefs, cfOf(i)).toLowerCase().includes(t))))
     .filter(i => avail === "all" ? true : avail === "available" ? i.quantity > 0 : i.quantity === 0)
     .filter(i => selHas(typeSel, i.jewelleryType) && selHas(metalSel, metalFamily(i.metal) || NONE)
       && selHas(karatSel, (i.productKarats ?? "").trim() || NONE) && selHas(stoneSel, stoneOf(i))
@@ -286,6 +292,8 @@ export function ReadyStockPage() {
         cell: (i: ReadyStockItem) => costOf(i) != null ? <CellAmount tone={i.price - costOf(i)! >= 0 ? "in" : "out"}>{i.price - costOf(i)! >= 0 ? "+" : "−"}{fmtMoney(Math.abs(i.price - costOf(i)!))}</CellAmount> : <span className="text-muted-foreground/50">—</span> },
     ] : []),
     { key: "added", header: "Added", kind: "date", hidden: true, sortValue: i => i.createdAt, cell: i => <CellDate>{fmtDate(i.createdAt)}</CellDate> },
+    // The business's own fields — a column each, shown from View.
+    ...customColumns<ReadyStockItem>(cfDefs, cfOf),
   ];
 
   // What an opened row adds — the piece page's facts. A client sees the shop
@@ -296,7 +304,8 @@ export function ReadyStockPage() {
   const pieceDetails = (item: ReadyStockItem): Detail[] => {
     const lots = otherLots(db.readyStock, item).filter(l => canManage || l.quantity > 0);
     const lotLinks = linkList(lots.map(l => ({ key: l.id, node: refLink(`/ready-stock/${l.id}`, `${officeLabel(officeOf(l))} · ${l.quantity > 0 ? `${l.quantity} in stock` : "sold out"}`) })));
-    if (!canManage) return filled([{ label: "Also at", value: lotLinks }]);
+    const cfRows = filledPairs(cfDefs, cfOf(item)).map(([label, value]) => ({ label, value }));
+    if (!canManage) return filled([{ label: "Also at", value: lotLinks }, ...cfRows]);
     const fr = item.fromReturn;
     const retOrder = fr ? db.orders.find(o => o.id === fr.orderId) : undefined;
     const ret = fr ? retOrder?.returns?.find(r => r.id === fr.returnId) : undefined;
@@ -316,6 +325,7 @@ export function ReadyStockPage() {
       { label: "Other lots", value: lotLinks },
       !!last && { label: "Last change", value: `${last.text} — ${[lastWho, when(last.at)].filter(Boolean).join(" · ")}` },
       { label: "Notes", value: noteText(item.notes) },
+      ...cfRows,
     ]);
   };
 

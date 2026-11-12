@@ -87,6 +87,8 @@ export interface User {
 }
 
 export interface Client {
+  /** Custom fields shown to the client too (lib/customFields.ts) — staff-only ones are in customValues, admin-only in adminRecords. */
+  custom?: import("./customFields").CfValues;
   id: string;
   /** Who works on it — the employees it belongs to (lib/db.ts deriveStaffIds): what an employee
    *  limited to their own work loads, and what the database rules let them read. Kept at save time. */
@@ -578,6 +580,8 @@ export interface StockSaleRecord {
 }
 
 export interface Order {
+  /** Custom fields shown to the client too (lib/customFields.ts) — staff-only ones are in customValues, admin-only in adminRecords. */
+  custom?: import("./customFields").CfValues;
   id: string;
   /** Who works on it — the employees it belongs to (lib/db.ts deriveStaffIds): what an employee
    *  limited to their own work loads, and what the database rules let them read. Kept at save time. */
@@ -1134,6 +1138,8 @@ export interface SharePiece {
   weightsEstimated?: boolean;
   /** USD; only when prices are shown. */
   price?: number;
+  /** The business's own fields shown to clients (lib/customFields.ts) — label and value. */
+  extra?: { label: string; value: string }[];
 }
 
 /** The company a piece share is from, as its header shows it. */
@@ -1217,6 +1223,8 @@ export interface Company {
 }
 
 export interface Settings {
+  /** Custom fields the admin added (Settings → Custom fields, lib/customFields.ts). Admin-only to change. */
+  customFields?: import("./customFields").CustomFieldDef[];
   companyName: string;
   currency: string;
   language: string;
@@ -1457,6 +1465,8 @@ export interface LockerTransaction {
 }
 
 export interface Supplier {
+  /** Custom fields shown to the client too (lib/customFields.ts) — staff-only ones are in customValues, admin-only in adminRecords. */
+  custom?: import("./customFields").CfValues;
   id: string;
   name: string;
   contactPerson?: string;
@@ -1519,6 +1529,8 @@ export interface SupplierGoldEntry {
  * movements of that lot; the bag only names it.
  */
 export interface DiamondBag {
+  /** Custom fields shown to the client too (lib/customFields.ts) — staff-only ones are in customValues, admin-only in adminRecords. */
+  custom?: import("./customFields").CfValues;
   id: string;
   /** "BAG-0001" */
   no: string;
@@ -1712,6 +1724,8 @@ export interface ReadyPiecePurchaseDetail {
  * total per shape in stockLevels (src/lib/stock.ts).
  */
 export interface DiamondPacket {
+  /** Custom fields shown to the client too (lib/customFields.ts) — staff-only ones are in customValues, admin-only in adminRecords. */
+  custom?: import("./customFields").CfValues;
   id: string;
   /** The company this belongs to — each company holds its own stock. Unset = the first company. */
   companyId?: string;
@@ -2121,6 +2135,8 @@ export interface FactoryLabour {
 // by clients too (like the Catalog) so they can pick a piece to buy directly
 // in New Order; only staff can add/edit/adjust it (see firestore.rules).
 export interface ReadyStockItem {
+  /** Custom fields shown to the client too (lib/customFields.ts) — staff-only ones are in customValues, admin-only in adminRecords. */
+  custom?: import("./customFields").CfValues;
   id: string;
   name: string;
   jewelleryType: Order["jewelleryType"];
@@ -2375,6 +2391,8 @@ export interface DB {
   cadJobs: CadJob[];
   /** Loose-diamond bags, one per lot (staff only). */
   diamondBags: DiamondBag[];
+  /** Custom-field values every staff member may see — one doc per record (lib/customFields.ts). Staff only. */
+  customValues: import("./customFields").CustomValuesDoc[];
   factoryPayments: FactoryPayment[];
   clientReceipts: ClientReceipt[];
   factories: Factory[];
@@ -2423,7 +2441,9 @@ export type AdminRecord =
   /** One order's commission changed by an admin — someone else, another %, or none. id "com_<orderId>". */
   | { id: string; kind: "commissionOrder"; orderId: string; set: import("./commission").OrderCommissionSet }
   /** One import from Excel (lib/excelImport.ts): the file, what it brought in, its undo. id "imp_…". */
-  | { id: string; kind: "import"; batch: import("./excelImport").ImportBatch };
+  | { id: string; kind: "import"; batch: import("./excelImport").ImportBatch }
+  /** One record's admin-only custom-field values (lib/customFields.ts). id "cfa_<target>_<recordId>". */
+  | { id: string; kind: "customValues"; target: import("./customFields").CfTarget; recId: string; values: import("./customFields").CfValues };
 
 const LEGACY_KEY = "starlink_db_v2"; // pre-Firebase localStorage blob (migrated on first run)
 
@@ -2475,6 +2495,7 @@ function emptyDb(): DB {
     designers: [],
     cadJobs: [],
     diamondBags: [],
+    customValues: [],
     factoryPayments: [],
     clientReceipts: [],
     factories: [],
@@ -2983,6 +3004,7 @@ type ArrayCol =
   | "designers"
   | "cadJobs"
   | "diamondBags"
+  | "customValues"
   | "factoryPayments"
   | "clientReceipts"
   | "factories"
@@ -3021,6 +3043,7 @@ const ARRAY_COLS: ArrayCol[] = [
   "designers",
   "cadJobs",
   "diamondBags",
+  "customValues",
   "factoryPayments",
   "clientReceipts",
   "factories",
@@ -3854,6 +3877,13 @@ export function adminStoreReady(): boolean {
   return adminStoreLive && !deniedCols.has("adminRecords");
 }
 
+/** The staff list of custom-field values (lib/customFields.ts) can be written — its
+ *  database rules are live. Until they are, a save that wrote there would be
+ *  refused whole, so those values are held back instead. */
+export function staffValuesReady(): boolean {
+  return !deniedCols.has("customValues");
+}
+
 /* ── Activity log ── */
 
 /** Set by a caller that knows better what its save means — an undo, chiefly. */
@@ -4564,6 +4594,7 @@ function subscribeAll(scope: Scope): Promise<void> {
         col === "designers" ||
         col === "cadJobs" ||
         col === "diamondBags" ||
+        col === "customValues" ||
         col === "factoryPayments" ||
         col === "clientReceipts" ||
         col === "factories" ||

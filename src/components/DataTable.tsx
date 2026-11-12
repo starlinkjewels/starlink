@@ -52,7 +52,9 @@ export interface DataColumn<T> {
 }
 
 type Sort = { key: string; dir: "asc" | "desc" } | null;
-type Prefs = { sort?: Sort; hidden?: string[]; dense?: Density; pageSize?: number; layout?: "cards" | "table"; forced?: string[] };
+/** `seen`: the columns there were when `hidden` was saved — a column added since (a custom
+ *  field, lib/customFields.ts) that starts hidden stays hidden until it is shown. */
+type Prefs = { sort?: Sort; hidden?: string[]; seen?: string[]; dense?: Density; pageSize?: number; layout?: "cards" | "table"; forced?: string[] };
 
 /** A card's facts in the order the columns ask: "first" ones first, "hide" ones left off. */
 const cardOrder = <C extends { card?: DataColumn<never>["card"] }>(list: C[]): C[] =>
@@ -183,7 +185,10 @@ export function DataTable<T>({
   const [prefs, setPrefs] = useState<Prefs>(() => read(id));
   const save = (p: Prefs) => { setPrefs(p); write(id, p); };
   const sort: Sort = prefs.sort === undefined ? defaultSort : prefs.sort;
-  const hidden = new Set(prefs.hidden ?? columns.filter(c => c.hidden).map(c => c.key));
+  const hidden = new Set(prefs.hidden
+    ? [...prefs.hidden, ...columns.filter(c => c.hidden && (prefs.seen ? !prefs.seen.includes(c.key) : c.key.startsWith("cf:"))).map(c => c.key)]
+    : columns.filter(c => c.hidden).map(c => c.key));
+  const seenNow = columns.map(c => c.key);
   const dense = prefs.dense ?? "normal";
   // Chosen for this table in its View menu: wins over the row spacing set for every table (Settings → Table Style).
   const padCls = prefs.dense ? `dt-pad-${prefs.dense}` : "";
@@ -309,12 +314,12 @@ export function DataTable<T>({
       // An empty column: shown only on request, and the request remembered.
       const f = new Set(forced), h = new Set(hidden);
       if (f.has(k) && !h.has(k)) f.delete(k); else { f.add(k); h.delete(k); }
-      save({ ...prefs, forced: [...f], hidden: [...h] });
+      save({ ...prefs, forced: [...f], hidden: [...h], seen: seenNow });
       return;
     }
     const h = new Set(hidden);
     if (h.has(k)) h.delete(k); else h.add(k);
-    save({ ...prefs, hidden: [...h] });
+    save({ ...prefs, hidden: [...h], seen: seenNow });
   };
   const exportCsv = () => {
     if (!exportName) return;

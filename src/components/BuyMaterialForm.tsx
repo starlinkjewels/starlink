@@ -1,4 +1,6 @@
 import { AddNewItem, useAddNew } from "@/components/create/QuickCreate";
+import { CustomFieldInputs } from "@/components/CustomFields";
+import { customProblem, writeValues, type CfValues } from "@/lib/customFields";
 import { useStudio } from "@/lib/studio";
 import { useEffect, useId, useRef, useState } from "react";
 import { useAuth } from "@/lib/auth";
@@ -126,6 +128,8 @@ export interface Line {
   materialId: string; grade: string;
   /** kind "ready": the piece (qty is its pieces, rate its cost a piece). */
   pc?: ReadyDraft;
+  /** kind "certified": the stone's custom fields (lib/customFields.ts). */
+  cf?: CfValues;
 }
 
 const emptyLine = (): Line => ({
@@ -336,6 +340,7 @@ export function BuyMaterialForm({ open, onOpenChange, supplierId: fixedSupplier,
       if (l.kind === "other" && !materialDef(db.settings, l.materialId)) { toast.error(`Item ${i + 1}: choose the material`); return; }
       if (!q || q <= 0) { toast.error(`Item ${i + 1}: enter the ${l.kind === "gold" ? "weight" : l.kind === "other" ? "quantity" : l.kind === "ready" ? "pieces" : "carat"}`); return; }
       if (l.kind === "certified" && !l.certNo.trim()) { toast.error(`Item ${i + 1}: enter the report number`); return; }
+      if (l.kind === "certified") { const why = customProblem(db.settings, "packets", l.cf, user); if (why) { toast.error(`Item ${i + 1}: ${why}`); return; } }
       if (l.kind === "ready") {
         const pc = l.pc ?? emptyReady();
         if (!Number.isInteger(q)) { toast.error(`Item ${i + 1}: pieces are whole — 1, 2, 3…`); return; }
@@ -500,6 +505,7 @@ export function BuyMaterialForm({ open, onOpenChange, supplierId: fixedSupplier,
               ...(target ? { orderId: target.id } : {}),
               createdBy: user!.id, createdAt: now,
             });
+            writeValues(d, "packets", packetIds[i], l.cf, user, user?.id);
           }
         });
         // The order: its purchases, and a line in its manufacturing log for each.
@@ -848,6 +854,7 @@ function LineCard({ line: l, n, currency, removable, onChange, onRemove, base, i
               ...(p.measurement !== undefined ? { measure: p.measurement } : {}), ...(p.lab !== undefined ? { lab: p.lab } : {}),
               ...(p.certNo !== undefined ? { certNo: p.certNo } : {}),
             })} />
+          <CustomFieldInputs target="packets" values={l.cf ?? {}} onChange={v => onChange({ cf: v })} title={null} />
         </div>
       ) : isGemLine(l, db.settings) ? (
         // A gem: which one, then its lot as a diamond's is asked (shape · type · mm · sieve · colour · grade), then how much at what.
@@ -1092,6 +1099,7 @@ export function OpeningStockForm({ open, onOpenChange }: { open: boolean; onOpen
       if (l.kind === "other" && !materialDef(db.settings, l.materialId)) { toast.error(`Item ${i + 1}: choose the material`); return; }
       if (!(Number(l.qty) > 0)) { toast.error(`Item ${i + 1}: enter the opening ${l.kind === "gold" ? "weight (g)" : l.kind === "other" ? "quantity" : "carats"}`); return; }
       if (l.kind === "certified" && !l.certNo.trim()) { toast.error(`Item ${i + 1}: enter the report / certificate number`); return; }
+      if (l.kind === "certified") { const why = customProblem(db.settings, "packets", l.cf, user); if (why) { toast.error(`Item ${i + 1}: ${why}`); return; } }
     }
     // Carries the time of day, so several entries on one date keep the order they were typed in.
     const createdAt = stampFor(asOf);
@@ -1105,8 +1113,9 @@ export function OpeningStockForm({ open, onOpenChange }: { open: boolean; onOpen
           // A certified stone is its own packet — never pooled — with no supplier or purchase.
           updateDb(d => {
             if (!d.diamondPackets) d.diamondPackets = [];
+            const pid = uid("dp_");
             d.diamondPackets.unshift({
-              id: uid("dp_"), stockNumber: nextDiamondStockNumber(d), shape: l.shape, type: l.type.trim() || undefined, carat: q, ...coField(companyId),
+              id: pid, stockNumber: nextDiamondStockNumber(d), shape: l.shape, type: l.type.trim() || undefined, carat: q, ...coField(companyId),
               color: l.color.trim() || undefined, clarity: l.clarity.trim() || undefined,
               cut: l.cut.trim() || undefined, polish: l.polish.trim() || undefined, symmetry: l.sym.trim() || undefined,
               fluorescence: l.fluor.trim() || undefined, measurement: l.measure.trim() || undefined,
@@ -1115,6 +1124,7 @@ export function OpeningStockForm({ open, onOpenChange }: { open: boolean; onOpen
               note: note.trim() || undefined,
               status: "in_stock", createdBy: user!.id, createdAt,
             });
+            writeValues(d, "packets", pid, l.cf, user, user?.id);
           });
         } else {
           // Gold, a loose lot (its bag) or another material pools into Stock.

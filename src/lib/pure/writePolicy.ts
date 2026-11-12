@@ -102,6 +102,9 @@ export const WRITE_POLICY: Policy = {
   // Kept by the app on every stock write (and rebuilt from history when off).
   stockLevels: { create: MFG, update: MFG, delete: [] },
   diamondBags: { create: MFG, update: MFG, delete: [] },
+  // Custom-field values every staff member may see (lib/customFields.ts) — filled from the
+  // record's own form, which is what decides who may change that record.
+  customValues: { create: ["*staff"], update: ["*staff"], delete: ["*staff"] },
   cadJobs: { create: ["orders.design", "orders.edit"], update: ["orders.design", "orders.edit"], delete: [] },
 
   // ── Ready Stock: its staff side (a client's order changes a piece too — its own rule) ──
@@ -161,7 +164,7 @@ export const POLICY_NOUN: Record<string, string> = {
   supplierReceipts: "money from suppliers", supplierPayments: "supplier payments", factoryPayments: "factory payments",
   supplierSales: "sales to suppliers", diamondSales: "diamond sales", memos: "memos",
   purchases: "purchases", materialIssuances: "material given to factories", diamondPackets: "certified stones",
-  stockMovements: "stock", stockLevels: "stock", diamondBags: "diamond bags", cadJobs: "design jobs",
+  stockMovements: "stock", stockLevels: "stock", diamondBags: "diamond bags", customValues: "custom fields", cadJobs: "design jobs",
   readyStock: "Ready Stock", catalogFolders: "catalogue folders", catalogItems: "catalogue designs",
   productPhotoFolders: "Design Studio folders", productPhotoItems: "Design Studio items",
 };

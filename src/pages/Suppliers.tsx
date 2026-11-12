@@ -1,4 +1,6 @@
 import { studioOn } from "@/lib/studio";
+import { customColumns } from "@/components/CustomFields";
+import { fieldsFor, filledPairs, searchWords, valuesOf } from "@/lib/customFields";
 import { supplierFigures } from "@/lib/partyTotals";
 import { SupplierCreateDialog } from "@/components/create/SupplierCreateDialog";
 import { useState, type MouseEvent } from "react";
@@ -47,6 +49,8 @@ const OWN_CLICK = "button,a,input,label,[role=menu],[role=menuitem],[data-no-row
 export function SuppliersPage() {
   const db = useDb();
   const { user } = useAuth();
+  // Custom fields on suppliers this person sees (lib/customFields.ts).
+  const cfDefs = fieldsFor(db.settings, "suppliers", user);
   const can = useCan();
   // Suppliers and brokers: added, changed and removed by an admin, or by access
   // that gives Suppliers → Add / Edit / Delete (before 2026-11 an admin's alone).
@@ -86,7 +90,8 @@ export function SuppliersPage() {
   // suppliers fall to the bottom, alphabetically.
   const list = db.suppliers
     .filter(s =>
-      s.name.toLowerCase().includes(q.toLowerCase()) || (s.contactPerson || "").toLowerCase().includes(q.toLowerCase()),
+      s.name.toLowerCase().includes(q.toLowerCase()) || (s.contactPerson || "").toLowerCase().includes(q.toLowerCase())
+      || (!!q.trim() && cfDefs.length > 0 && searchWords(cfDefs, valuesOf(db, "suppliers", s.id, s)).toLowerCase().includes(q.trim().toLowerCase())),
     )
     .sort((a, b) => Math.abs(netOf(b)) - Math.abs(netOf(a)) || a.name.localeCompare(b.name));
   const { paged, page, setPage, totalPages, total, start, end } = usePagination(list, PAGE_SIZE, "page", q);
@@ -183,6 +188,8 @@ export function SuppliersPage() {
     ...(goldOwed?.size ? [{ key: "gold", header: "Gold owed", align: "right" as const, kind: "number" as const,
       sortValue: (s: Supplier) => goldOf(s), csv: (s: Supplier) => goldOf(s) ?? "",
       cell: (s: Supplier) => <GoldOwedCell g={goldOf(s)} /> }] : []),
+    // The business's own fields — a column each, shown from View.
+    ...customColumns<Supplier>(cfDefs, s => valuesOf(db, "suppliers", s.id, s)),
   ];
 
   // What an opened row adds: the contact details the Contact column leaves out,
@@ -200,6 +207,7 @@ export function SuppliersPage() {
       showOwed && a.advanced > 0 && { label: "Advances / loans paid", value: fmtMoneyInr(a.advanced) },
       showOwed && a.received > 0 && { label: "Received back", value: fmtMoneyInr(a.received) },
       showOwed && hasOpeningBalance(s) && { label: "Opening balance", value: `${fmtMoneyInr(s.openingBalance || 0)} ${s.openingDir === "debit" ? "debit (they owed us)" : "credit (we owed them)"}${s.openingDate ? ` · as of ${fmtDate(s.openingDate)}` : ""}` },
+      ...filledPairs(cfDefs, valuesOf(db, "suppliers", s.id, s)).map(([label, value]) => ({ label, value })),
     ]);
   };
 

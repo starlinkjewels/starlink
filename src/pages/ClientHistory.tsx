@@ -1,4 +1,5 @@
 import { stageLabel } from "@/lib/stages";
+import { CustomFieldsView } from "@/components/CustomFields";
 import { PartyMemos } from "@/components/MemoSheets";
 import { isDiamondOnlyOrder, orderImage, hiddenFromMe } from "@/lib/db";
 import { looseLabel } from "@/lib/orderText";
@@ -753,6 +754,8 @@ function ClientHistoryPageBody() {
             <div className="min-w-0"><p className="text-xs text-muted-foreground">Username</p><p className="font-medium font-mono text-xs truncate" title={client.username}>{client.username}</p></div>
           </div>
         </div>
+        {/* The business's own fields (lib/customFields.ts). */}
+        <CustomFieldsView target="clients" recId={client.id} title="More details" className="mt-4 pt-4 border-t border-border/60" />
       </motion.div>
 
       {/* Shipped work with no invoice yet — nothing else asks for it to be

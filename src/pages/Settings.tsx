@@ -4,6 +4,7 @@ import { LiveRatesSettings } from "@/components/settings/LiveRatesSettings";
 import { YearClosingSettings } from "@/components/settings/YearClosingSettings";
 import { HealthSettings } from "@/components/settings/HealthSettings";
 import { ImportSettings } from "@/components/settings/ImportSettings";
+import { CustomFieldsSettings } from "@/components/settings/CustomFieldsSettings";
 import { HeartPulse, FileUp } from "lucide-react";
 import { CatalogReadingSettings } from "@/components/settings/CatalogReadingSettings";
 import { ProductPricingSettings } from "@/components/settings/ProductPricingSettings";
@@ -837,6 +838,7 @@ export function SettingsPage() {
     { id: "etsy", label: "Etsy", icon: Store, show: isAdmin, group: "Integrations", hint: "Your Etsy shops' orders on the board, tracking back" },
     { id: "expenses", label: "Categories", icon: SlidersHorizontal, show: isAdmin, group: "Lists & categories", hint: "Expense and account categories" },
     { id: "lists", label: "Dropdown lists", icon: ListChecks, show: isAdmin, group: "Lists & categories", hint: "The choices in every dropdown" },
+    { id: "customfields", label: "Custom fields", icon: SlidersHorizontal, show: isAdmin, group: "Lists & categories", hint: "Your own boxes on orders, clients, suppliers, Ready Stock and stones" },
     { id: "videos", label: "Videos", icon: Film, show: isAdmin, group: "Photos & videos", hint: "Make every video play on every device" },
     { id: "previews", label: "Photo previews", icon: Images, show: isAdmin, group: "Photos & videos", hint: "Small copies so shared links open fast" },
     { id: "catalogread", label: "Catalogue reading", icon: ScanText, show: isAdmin, group: "Photos & videos", hint: "Each sheet's gold and stones read by themselves; files grouped by design" },
@@ -1620,6 +1622,7 @@ export function SettingsPage() {
 
       {/* The business's own dropdown choices — admin only */}
       {activeId === "lists" && <OptionListsSettings />}
+      {activeId === "customfields" && isAdmin && <CustomFieldsSettings />}
 
       {/* Expense Categories — admin only */}
       {activeId === "expenses" && (

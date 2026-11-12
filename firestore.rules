@@ -164,6 +164,9 @@ service cloud.firestore {
     function pol_diamondBags_create() { return ['orders.edit', 'orders.production', 'orders.finalApproval', 'orders.approve', 'orders.cancel', 'orders.delete', 'orders.melt', 'orders.fixPurchase', 'orders.toReadyStock', 'factories.issue', 'factories.companies', 'buyAssign.add', 'buyAssign.edit', 'buyAssign.delete', 'buyAssign.assign', 'buyAssign.sell', 'buyAssign.changeAssign', 'suppliers.purchase', 'suppliers.sell', 'suppliers.gold', 'stock.add', 'stock.edit', 'stock.delete', 'stock.companies', 'stock.memo', 'payments.add', 'payments.edit', 'payments.delete', 'invoices.returns']; }
     function pol_diamondBags_update() { return ['orders.edit', 'orders.production', 'orders.finalApproval', 'orders.approve', 'orders.cancel', 'orders.delete', 'orders.melt', 'orders.fixPurchase', 'orders.toReadyStock', 'factories.issue', 'factories.companies', 'buyAssign.add', 'buyAssign.edit', 'buyAssign.delete', 'buyAssign.assign', 'buyAssign.sell', 'buyAssign.changeAssign', 'suppliers.purchase', 'suppliers.sell', 'suppliers.gold', 'stock.add', 'stock.edit', 'stock.delete', 'stock.companies', 'stock.memo', 'payments.add', 'payments.edit', 'payments.delete', 'invoices.returns']; }
     function pol_diamondBags_delete() { return []; }
+    function pol_customValues_create() { return ['*staff']; }
+    function pol_customValues_update() { return ['*staff']; }
+    function pol_customValues_delete() { return ['*staff']; }
     function pol_cadJobs_create() { return ['orders.design', 'orders.edit']; }
     function pol_cadJobs_update() { return ['orders.design', 'orders.edit']; }
     function pol_cadJobs_delete() { return []; }
@@ -405,6 +408,9 @@ service cloud.firestore {
     match /cadJobs/{id}            { allow read: if isStaff(); allow create: if staffMay(pol_cadJobs_create()); allow update: if staffMay(pol_cadJobs_update()); allow delete: if staffMay(pol_cadJobs_delete()); }
     // Bags of loose diamonds, one per lot (lib/diamondBags.ts). Staff only.
     match /diamondBags/{id}        { allow read: if isStaff(); allow create: if staffMay(pol_diamondBags_create()); allow update: if staffMay(pol_diamondBags_update()); allow delete: if staffMay(pol_diamondBags_delete()); }
+    // Custom-field values every staff member may see (lib/customFields.ts) — never a client.
+    // Values shown to the client are on the record; admin-only ones in adminRecords.
+    match /customValues/{id}       { allow read: if isStaff(); allow create: if staffMay(pol_customValues_create()); allow update: if staffMay(pol_customValues_update()); allow delete: if staffMay(pol_customValues_delete()); }
     match /factoryPayments/{id}    { allow read: if staffMay(rd_factoryPayments()); allow create: if staffMay(pol_factoryPayments_create()); allow update: if staffMay(pol_factoryPayments_update()); allow delete: if staffMay(pol_factoryPayments_delete()); }
     // Money received from a client, one numbered receipt per payment.
     match /clientReceipts/{id}     { allow read: if isStaff(); allow create: if staffMay(pol_clientReceipts_create()); allow update: if staffMay(pol_clientReceipts_update()); allow delete: if staffMay(pol_clientReceipts_delete()); }

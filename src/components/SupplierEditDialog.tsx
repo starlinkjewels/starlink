@@ -1,4 +1,8 @@
 import { useEffect, useState } from "react";
+import { useDb } from "@/hooks/useDb";
+import { useAuth } from "@/lib/auth";
+import { CustomFieldInputs } from "@/components/CustomFields";
+import { customProblem, sameValues, valuesOf, writeValues, type CfValues } from "@/lib/customFields";
 import { toast } from "sonner";
 import { Truck } from "lucide-react";
 import { updateDb, type Supplier } from "@/lib/db";
@@ -23,13 +27,20 @@ const formOf = (s: Supplier | null): Form => ({
  * corrected there; their purchases and payments are not touched by this.
  */
 export function SupplierEditDialog({ supplier, onClose }: { supplier: Supplier | null; onClose: () => void }) {
+  const db = useDb();
+  const { user } = useAuth();
   const [f, setF] = useState<Form>(formOf(supplier));
+  // Custom fields (lib/customFields.ts) — the ones this person may see.
+  const [cf, setCf] = useState<CfValues>({});
   // A different supplier opened: start from what is saved for them.
-  useEffect(() => { if (supplier) setF(formOf(supplier)); }, [supplier]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => { if (supplier) { setF(formOf(supplier)); setCf(valuesOf(db, "suppliers", supplier.id)); } }, [supplier]);
 
   const save = () => {
     if (!supplier) return;
     if (!f.name.trim()) { toast.error("Enter a supplier name"); return; }
+    const cfWhy = customProblem(db.settings, "suppliers", cf, user, valuesOf(db, "suppliers", supplier.id));
+    if (cfWhy) { toast.error(cfWhy); return; }
     updateDb(d => {
       const s = d.suppliers.find(x => x.id === supplier.id);
       if (!s) return;
@@ -40,6 +51,7 @@ export function SupplierEditDialog({ supplier, onClose }: { supplier: Supplier |
         const v = f[k].trim();
         if (v) s[k] = v; else delete s[k];
       }
+      if (!sameValues(cf, valuesOf(d, "suppliers", s.id))) writeValues(d, "suppliers", s.id, cf, user, user?.id);
     });
     toast.success("Supplier updated");
     onClose();
@@ -77,6 +89,7 @@ export function SupplierEditDialog({ supplier, onClose }: { supplier: Supplier |
           </div>
         ))}
       </div>
+      <CustomFieldInputs target="suppliers" values={cf} onChange={setCf} className="mt-4" />
     </ActionSheet>
   );
 }

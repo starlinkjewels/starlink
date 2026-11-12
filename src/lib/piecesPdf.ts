@@ -237,12 +237,14 @@ export async function downloadPiecesPdf(pieces: SharePiece[], brand: ShareBrand,
 
     // ── The details, two columns ──
     const g = goldRows(p), dRows = diamondRows(p);
+    const xRows = (p.extra ?? []).map(x => [x.label, x.value] as [string, string]);
     const cols = [g.length ? ["Metal & weight", g] : null, dRows.length ? ["Diamonds", dRows] : null].filter(Boolean) as [string, [string, string][]][];
     if (cols.length) {
       const cw = cols.length === 2 ? (W - 2 * M - 12) / 2 : W - 2 * M;
       const hs = cols.map(([t, rows], i) => specList(doc, t, rows, M + i * (cw + 12), y, cw));
       y += Math.max(...hs) + 8;
     }
+    if (xRows.length) y += specList(doc, "Details", xRows, M, y, W - 2 * M) + 8;
 
     // ── Links: the video, the piece online ──
     const online = opts.links?.[p.id];

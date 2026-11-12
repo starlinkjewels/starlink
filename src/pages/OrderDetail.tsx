@@ -1,3 +1,4 @@
+import { CustomFieldsView } from "@/components/CustomFields";
 import { ourFinishedNet } from "@/lib/pure/accounts";
 import { ShopifyOrderCard } from "@/components/order/ShopifyOrderCard";
 import { EtsyOrderCard } from "@/components/order/EtsyOrderCard";
@@ -2899,6 +2900,8 @@ It goes back to being our own build, and ${item ? item.name : "its piece"} goes 
             <div className="mt-2"><AssignOrderField order={order} /></div>
           </div>
         </div>
+        {/* The business's own fields (lib/customFields.ts) — a client sees only those shown to clients. */}
+        <CustomFieldsView target="orders" recId={order.id} title="More details" className="px-4 sm:px-6 pb-4" />
 
         <div className="px-4 sm:px-6 pb-4 sm:pb-6">
 

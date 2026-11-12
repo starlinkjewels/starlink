@@ -1,4 +1,6 @@
 import { showPrintPage } from "@/lib/printView";
+import { customColumns } from "@/components/CustomFields";
+import { fieldsFor, filledPairs, searchWords, valuesOf } from "@/lib/customFields";
 import { FillHandlersSheet } from "@/components/FillHandlersSheet";
 import { handlerName, handlerOf } from "@/lib/clientHandlers";
 import { studioOn } from "@/lib/studio";
@@ -153,6 +155,8 @@ export function ClientsPage() {
   const has = useHas();
   const mayExport = useMayExport();
   const db = useDb();
+  // Custom fields on clients this person sees (lib/customFields.ts).
+  const cfDefs = fieldsFor(db.settings, "clients", user);
   const navigate = useNavigate();
   // Kept in the address: Back from a record returns to the list as it was left.
   const [q, setQ] = useUrlState("q");
@@ -218,7 +222,7 @@ export function ClientsPage() {
       const t = q.trim().toLowerCase();
       if (!t) return true;
       const digits = t.replace(/\D/g, "");
-      return [c.companyName, countryOf(c), c.ownerName, c.email, c.username, c.gstVat].some(v => (v ?? "").toLowerCase().includes(t))
+      return [c.companyName, countryOf(c), c.ownerName, c.email, c.username, c.gstVat, cfDefs.length ? searchWords(cfDefs, valuesOf(db, "clients", c.id, c)) : ""].some(v => (v ?? "").toLowerCase().includes(t))
         || (digits.length >= 3 && (c.phone ?? "").replace(/\D/g, "").includes(digits));
     })
     .sort((a, b) => weight(b) - weight(a) || onOrder(b) - onOrder(a) || a.companyName.localeCompare(b.companyName));
@@ -361,6 +365,8 @@ export function ClientsPage() {
         if (!u) return <span className="text-muted-foreground/50">—</span>;
         return isOnline(u.lastActiveAt) ? <CellTag tone="green">Online</CellTag> : <CellDate>{timeAgo(u.lastActiveAt)}</CellDate>;
       } },
+    // The business's own fields — a column each, shown from View.
+    ...customColumns<Client>(cfDefs, c => valuesOf(db, "clients", c.id, c)),
   ];
 
   // What an opened row adds: how to reach them, where they are, and the
@@ -382,6 +388,7 @@ export function ClientsPage() {
       staff && hasOpeningBalance(c) && { label: "Opening balance", value: `${fmtMoney(c.openingBalance || 0)} ${c.openingDir === "credit" ? "credit (their advance)" : "debit (they owed us)"}${c.openingDate ? ` · as of ${fmtDate(c.openingDate)}` : ""}` },
       has("clients.giftCards") && !!c.giftCardEnabled && { label: "Gift card & cashback", value: `On · ${cashbackPercentFor(db, c)}% cashback · a card covers up to ${Math.round(giftMaxRedeemPctFor(db, c) * 100)}% of an order` },
       staff && { label: "Product Photos", value: c.productPhotoAccess ? "Access on" : "Access off" },
+      ...filledPairs(cfDefs, valuesOf(db, "clients", c.id, c)).map(([label, value]) => ({ label, value })),
     ]);
   };
 

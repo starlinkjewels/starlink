@@ -1,4 +1,6 @@
 import { hasDiamonds, looseLabel, stonesLine } from "@/lib/orderText";
+import { CustomFieldInputs } from "@/components/CustomFields";
+import { customProblem, valuesOf, writeValues, type CfValues } from "@/lib/customFields";
 import { activeMaterials, materialDef } from "@/lib/materials";
 import { COPY_PARAM, copyBlocker, copyFields, copyHref, copyKind } from "@/lib/orderCopy";
 import { chargeDrafts } from "@/components/OtherCharges";
@@ -141,6 +143,8 @@ function NewOrderForm() {
   const defaultShipping = initDb.settings.defaultShippingCharge  ?? 0;
   const firstMetal      = listOf("metals")[0] ?? "Yellow Gold";
 
+  // Custom fields (lib/customFields.ts) — the ones this person may see; a client only those shown to clients.
+  const [cf, setCf] = useState<CfValues>({});
   const [f, setF] = useState({
     clientId: isClient ? (user!.clientId ?? "") : "",
     // The first of each of the business's own lists (Settings → Dropdown lists).
@@ -463,6 +467,7 @@ function NewOrderForm() {
     if (src.forReadyStock && src.companyId) setBuildCompany(src.companyId);
     if (src.stoneSpec?.stone) { stoneChosen.current = true; setStoneState(src.stoneSpec.stone); }
     setImages((src.images ?? []).slice(0, 3));
+    setCf(valuesOf(db, "orders", src.id));
     // A colour its metal doesn't give (two-tone on yellow gold) was chosen by hand: it stays.
     colourByHand.current = !!src.productColor && src.productColor !== namedColour(src.metal);
     setF(prev => ({
@@ -612,6 +617,8 @@ function NewOrderForm() {
     }
     const designOn = mayPlan && sw("orders.design") && kind === "piece" && !isDiamondOnly && !!designerPick.designerId;
     if (designOn && designerPick.rate.trim() && !(Number(designerPick.rate) >= 0)) { toast.error("CAD designer: enter a charge of 0 or more."); return; }
+    const cfWhy = customProblem(db.settings, "orders", cf, user);
+    if (cfWhy) { toast.error(cfWhy); return; }
     // The advance's locker and amount were checked with the other missing fields (fixesNow).
 
     setSaving(true);
@@ -764,6 +771,7 @@ function NewOrderForm() {
         if (extras.some((x, n) => extraBuildIds[n] && buildToSell(d, x.itemId, Math.round(Number(x.qty)) || 1)?.id !== extraBuildIds[n])) { raced = true; return; }
         d.orders.unshift(order);
       }
+      writeValues(d, "orders", order.id, cf, user, user?.id);
       // Invoices are no longer auto-created per order — they're generated at
       // dispatch time by selecting orders on the Invoices page.
       // In-house Ready-Stock builds have no client, so skip the marketing notice.
@@ -847,6 +855,7 @@ function NewOrderForm() {
         }
         if (!ex.orderNumber) { extraShort.push(`${item.name} (changed meanwhile — sell it again)`); return; }
         d.orders.unshift(ex);
+        writeValues(d, "orders", ex.id, cf, user, user?.id);
         const had = item.quantity;
         item.quantity = had - q;
         logItem(item, { ...whoOf(user), at: ex.createdAt, kind: "sold", text: `Sold on ${ex.orderNumber} · ${had} → ${item.quantity}`, ref: { orderId: ex.id } });
@@ -1243,6 +1252,7 @@ function NewOrderForm() {
                   <Textarea value={f.instructions} onChange={e => set("instructions", e.target.value)} rows={2} className="rounded-xl resize-none" placeholder="Delivery notes, engraving, etc." />
                 </Field>
               </div>
+              <CustomFieldInputs target="orders" values={cf} onChange={setCf} className="col-span-2" />
             </div>
           )}
 
@@ -1422,6 +1432,7 @@ function NewOrderForm() {
               rows={3} className="rounded-xl resize-none"
               placeholder="Design notes, stone preferences, reference details" />
           </Field>
+          <CustomFieldInputs target="orders" values={cf} onChange={setCf} className="mt-4" />
         </SectionCard>
         )}
 

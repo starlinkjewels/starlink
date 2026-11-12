@@ -1,4 +1,6 @@
 import { handlerChoices } from "@/lib/clientHandlers";
+import { CustomFieldInputs } from "@/components/CustomFields";
+import { customProblem, writeValues, type CfValues } from "@/lib/customFields";
 import { AddNewItem, useAddNew } from "@/components/create/QuickCreate";
 import { useState } from "react";
 import { toast } from "sonner";
@@ -39,6 +41,8 @@ export function ClientCreateDialog({ open, onOpenChange, onCreated }: {
   const myCompanies = companiesForUser(dbNow.settings, meUser);
   const staff = handlerChoices(dbNow);
   const [saving, setSaving] = useState(false);
+  // Custom fields (lib/customFields.ts).
+  const [cf, setCf] = useState<CfValues>({});
   // Handled by whoever adds the client, unless they hand it to someone else.
   const [f, setF] = useState<Partial<Client>>({
     companyName: "", ownerName: "", email: "", phone: "",
@@ -59,6 +63,8 @@ export function ClientCreateDialog({ open, onOpenChange, onCreated }: {
     if (multiCo && !sellerId) { toast.error("Choose which of our companies this client buys from"); return; }
     if (multiCo && !myCompanies.some(c => c.id === sellerId)) { toast.error("You don't sell for that company"); return; }
     if (withLogin && loadDb().users.some(u => (u.email ?? "").toLowerCase() === email)) { toast.error("That email is already in use"); return; }
+    const cfWhy = customProblem(loadDb().settings, "clients", cf, user);
+    if (cfWhy) { toast.error(cfWhy); return; }
     setSaving(true);
     try {
       // Create the client's Firebase Auth account (password lives in Auth).
@@ -80,6 +86,7 @@ export function ClientCreateDialog({ open, onOpenChange, onCreated }: {
           name: f.ownerName || f.companyName!, email, phone: f.phone,
           status: "active", clientId: id, createdAt: new Date().toISOString(),
         });
+        writeValues(d, "clients", id, cf, user, user?.id);
       });
       // Wait for the login's permission record to reach the server before
       // saying it is done. It goes up just after the profile; close the tab in
@@ -89,6 +96,7 @@ export function ClientCreateDialog({ open, onOpenChange, onCreated }: {
       onOpenChange(false);
       onCreated?.(id);
       setF({ companyName: "", ownerName: "", email: "", phone: "", country: "", zip: "", gstVat: "", address: "", shippingAddress: "", username: "", password: "", accountManagerId: user!.role === "admin" ? user!.id : undefined });
+      setCf({});
     } catch (e) {
       toast.error(authErrorMessage(e));
     } finally { setSaving(false); }
@@ -155,6 +163,7 @@ export function ClientCreateDialog({ open, onOpenChange, onCreated }: {
           hint="Owed or prepaid when you started using the app."
         />
       </div>
+      <CustomFieldInputs target="clients" values={cf} onChange={setCf} className="mt-4" />
       {multiCo && (
         <div className="mt-4">
           <Label className="text-xs">Our company — who bills this client *</Label>

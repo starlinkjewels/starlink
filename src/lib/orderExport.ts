@@ -6,6 +6,7 @@
 // What things cost us (purchase cost, factory labour) is on the admin's copy
 // only — like the Profit sheet, it is never meant to leave the office.
 import { balanceDue, fmtDate, fmtMoney, orderTotal, totalAdvance, type DB, type Order } from "./db";
+import { fieldsFor, filledPairs, valuesOf } from "./customFields";
 import { downloadCsv, downloadLedgerPdfMulti, type PdfSection } from "./ledgerExport";
 import { orderMaterialLines } from "./orderMaterials";
 import { isSelfMetal, otherMetalsOf, pieceWeights } from "./weights";
@@ -51,6 +52,8 @@ export function buildSheet(db: DB, order: Order, opts: { faDone: boolean; withCo
     ["Final Approval", fa?.status === "done" && fa.date ? fmtDate(fa.date) : ""],
     ["Dispatched", order.dispatchedAt ? [fmtDate(order.dispatchedAt), order.courierName, order.trackingNumber].filter(Boolean).join(" · ") : ""],
     ["Instructions", order.instructions ?? ""],
+    // The business's own fields (lib/customFields.ts): those shown to the client — every one on the admin's copy.
+    ...filledPairs(fieldsFor(db.settings, "orders", { role: opts.withCost ? "admin" : "client" }), valuesOf(db, "orders", order.id, order)),
   ] as [string, string][]).filter(([, v]) => !!String(v).trim());
   const weights: [string, string][] = ([
     ["Weights are", pw.estimated ? "Estimated (no Final Approval yet)" : "Actual"],

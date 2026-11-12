@@ -1,4 +1,5 @@
 import { BuyMaterialForm } from "@/components/BuyMaterialForm";
+import { CustomFieldsView } from "@/components/CustomFields";
 import { Undo2, Printer } from "lucide-react";
 import { PurchaseReturnSheet, printDebitNote } from "@/components/PurchaseReturnSheet";
 import { PartyMemos } from "@/components/MemoSheets";
@@ -838,6 +839,8 @@ function SupplierHistoryPageBody() {
       {/* Where the account stands, first: what we owe them (or they owe us),
           what was paid, what was bought — the statement's own figures. Who
           they are is the line under the name. */}
+      {/* The business's own fields (lib/customFields.ts). */}
+      <CustomFieldsView target="suppliers" recId={supplier.id} className="card-luxe p-4" />
       {/* What they hold of ours on memo — on approval (lib/memos.ts). */}
       <PartyMemos party={{ kind: "supplier", id: supplier.id }} />
       <StatStrip items={[

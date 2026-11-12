@@ -1,4 +1,6 @@
 import { ClientLoginSection } from "@/components/ClientLoginSection";
+import { CustomFieldInputs } from "@/components/CustomFields";
+import { customProblem, sameValues, valuesOf, writeValues, type CfValues } from "@/lib/customFields";
 import { handlerChoices } from "@/lib/clientHandlers";
 import { useState } from "react";
 import { Pencil } from "lucide-react";
@@ -50,6 +52,8 @@ export function ClientEditDialog({ clientId, onClose }: { clientId: string | nul
   const [ef, setEf] = useState<Partial<Client>>({});
   const [shown, setShown] = useState<string | null>(null);
   const [savingEdit, setSavingEdit] = useState(false);
+  // Custom fields (lib/customFields.ts) — the ones this person may see.
+  const [cf, setCf] = useState<CfValues>({});
   // With a sign-in, their email is that login — changed in the login section (through the server).
   // Without one, it is only how we reach them, and is corrected here like any other detail.
   const hasLogin = !!clientId && db.users.some(u => u.clientId === clientId && !!u.authUid);
@@ -57,7 +61,7 @@ export function ClientEditDialog({ clientId, onClose }: { clientId: string | nul
   // Start from the client's current details each time one is opened.
   if (clientId !== shown && (!clientId || client)) {
     setShown(clientId);
-    if (client) setEf(fieldsOf(client));
+    if (client) { setEf(fieldsOf(client)); setCf(valuesOf(db, "clients", client.id)); }
   }
 
   const saveEdit = async () => {
@@ -65,6 +69,8 @@ export function ClientEditDialog({ clientId, onClose }: { clientId: string | nul
     if (!ef.companyName?.trim()) { toast.error("Company name is required"); return; }
     const email = (ef.email ?? "").trim().toLowerCase();
     if (!hasLogin && email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { toast.error("Check the email"); return; }
+    const cfWhy = customProblem(db.settings, "clients", cf, user, valuesOf(db, "clients", clientId));
+    if (cfWhy) { toast.error(cfWhy); return; }
     setSavingEdit(true);
     try {
       updateDbAs({ summary: `Edited client ${ef.companyName.trim()}` }, d => {
@@ -92,6 +98,7 @@ export function ClientEditDialog({ clientId, onClose }: { clientId: string | nul
         }
         const u = d.users.find(x => x.clientId === c.id);
         if (u) { u.name = c.ownerName || c.companyName; u.phone = c.phone; }
+        if (!sameValues(cf, valuesOf(d, "clients", c.id))) writeValues(d, "clients", c.id, cf, user, user?.id);
       });
       toast.success("Client details updated");
       onClose();
@@ -148,6 +155,7 @@ export function ClientEditDialog({ clientId, onClose }: { clientId: string | nul
           hint="Carried in from your previous system."
         />
       </div>
+      <CustomFieldInputs target="clients" values={cf} onChange={setCf} className="mt-4" />
       {mayHandler && multiCo && (
         <div className="mt-4">
           <Label className="text-xs">Our company — who bills this client</Label>
