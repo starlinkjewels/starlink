@@ -1,8 +1,10 @@
 import { useEffect, useMemo, useState } from "react";
+import { customColumns } from "@/components/CustomFields";
+import { fieldsFor, searchWords, valuesOf } from "@/lib/customFields";
 import { useDb } from "@/hooks/useDb";
 import { useHas } from "@/hooks/useCan";
 import { useAuth } from "@/lib/auth";
-import { bagNoOf, giveBags, printBagLabels } from "@/lib/diamondBags";
+import { bagNoOf, bagOf, giveBags, printBagLabels } from "@/lib/diamondBags";
 import { companyById, hasCompanies } from "@/lib/companies";
 import { toast } from "sonner";
 import { deriveStockBalances, fmtMoneyInr } from "@/lib/manufacturing";
@@ -202,7 +204,10 @@ export function StockLotsTable({ material, companyId, selected, onSelect }: {
   }, [together, ordered]);
   // The search is kept in the address, so a search result ("BAG-0007") opens the table already narrowed.
   const [q, setQ] = useUrlState("q");
-  const textOf = (r: Row) => (r.members ?? [r]).flatMap(m => [m.bag, m.key, m.variety, m.type, m.mm, m.size, m.color, m.clarity]).concat(r.label).filter(Boolean).join(" ").toLowerCase();
+  // A lot's own custom fields, kept on its bag (lib/customFields.ts) — diamonds only.
+  const bagDefs = diamond ? fieldsFor(db.settings, "bags", user) : [];
+  const cfOf = (key: string) => { const b = bagDefs.length ? bagOf(db, key) : undefined; return b ? valuesOf(db, "bags", b.id, b) : {}; };
+  const textOf = (r: Row) => (r.members ?? [r]).flatMap(m => [m.bag, m.key, m.variety, m.type, m.mm, m.size, m.color, m.clarity, bagDefs.length ? searchWords(bagDefs, cfOf(m.key)) : ""]).concat(r.label).filter(Boolean).join(" ").toLowerCase();
   // A bag picked in the app's search ("?q=BAG-0007&open=bag") opens, once; the
   // search stays, so closing it leaves the table on that bag.
   const [openBag, setOpenBag] = useUrlState("open");
@@ -252,6 +257,8 @@ export function StockLotsTable({ material, companyId, selected, onSelect }: {
       cell: r => (r.avg != null ? <span className="tabular-nums whitespace-nowrap">{fmtMoneyInr(r.avg)}</span> : dash) },
     { key: "value", card: "first" as const, header: "Value", align: "right", kind: "number", sortValue: r => r.value,
       cell: r => (r.value != null ? <CellAmount>{fmtMoneyInr(r.value)}</CellAmount> : dash) },
+    // Each lot's own custom fields — a column each, shown from View (one bag a row only).
+    ...customColumns<Row>(bagDefs, r => (r.members ? {} : cfOf(r.key))),
   ] : [
     { key: "lot", header: gold ? (together ? "Karat" : "Purity") : "Grade", always: true, sortValue: r => r.label ?? r.key, csv: r => r.label ?? r.key,
       cell: r => <CellMain title={r.label ?? r.key} sub={r.members ? (r.members.length > 1 ? r.members.map(m => m.key).join(" · ") : r.members[0].key !== r.label ? r.members[0].key : undefined) : undefined} /> },

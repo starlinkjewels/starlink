@@ -220,6 +220,7 @@ function PieceView({ p, brand, link, note }: { p: SharePiece; brand: ShareBrand;
           <div className="mt-8 border-t border-stone-200">
             {gold.length > 0 && <Fold title="Materials" rows={gold} open />}
             {dia.length > 0 && <Fold title="Diamonds" rows={dia} open={!gold.length} />}
+            {(p.extra?.length ?? 0) > 0 && <Fold title="Details" rows={p.extra!.map(x => [x.label, x.value] as [string, string])} open={!gold.length && !dia.length} />}
           </div>
         </div>
       </div>

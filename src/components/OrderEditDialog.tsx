@@ -1,4 +1,6 @@
 import { LooseLotFields } from "@/components/LotFields";
+import { CustomFieldInputs } from "@/components/CustomFields";
+import { customProblem, sameValues, valuesOf, writeValues, type CfValues } from "@/lib/customFields";
 import { ListCombo } from "@/components/ListCombo";
 import type { ListKey } from "@/lib/optionLists";
 import { useState, type ReactNode } from "react";
@@ -103,6 +105,8 @@ export function OrderEditDialog({ order, onClose }: { order: Order; onClose: () 
   const { user } = useAuth();
   const can = useCan();
   const [f, setF] = useState<Form>(() => formOf(order));
+  // Custom fields (lib/customFields.ts) — the ones this person may see.
+  const [cf, setCf] = useState<CfValues>(() => valuesOf(db, "orders", order.id));
   const set = <K extends keyof Form>(k: K, v: Form[K]) => setF(p => ({ ...p, [k]: v }));
   // The metals besides the main one, estimated (as New Order took them); Final Approval records the real weights.
   const othersOf = (o: Order) => otherMetalsOf(o).map(m => ({ metal: m.metal, weight: m.weight != null ? String(m.weight) : "", purity: m.purity != null ? String(m.purity) : "" }));
@@ -238,7 +242,9 @@ export function OrderEditDialog({ order, onClose }: { order: Order; onClose: () 
       const why = nowLocks.piece ?? (approved(o) ? "Approved — the metals' weights are changed in Final Approval" : undefined);
       if (why) { toast.error(`The other metals can't change: ${why}`); return; }
     }
-    if (!changed.length && !metalsChanged) { toast.message("Nothing changed"); onClose(); return; }
+    const cfChanged = !sameValues(cf, valuesOf(fresh, "orders", o.id));
+    if (cfChanged) { const why = customProblem(fresh.settings, "orders", cf, user); if (why) { toast.error(why); return; } }
+    if (!changed.length && !metalsChanged && !cfChanged) { toast.message("Nothing changed"); onClose(); return; }
 
     // Whatever is locked now is refused, not quietly skipped.
     const PIECE = ["jewelleryType", "metal", "productKarats", "productColor", "productSize", "quantity", "diamondType", "diamondShape", "diamondWeight", "estimatedGrossWeight", "estimatedNetWeight", "rhodium", "stamping", "engraving"];
@@ -264,7 +270,7 @@ export function OrderEditDialog({ order, onClose }: { order: Order; onClose: () 
     ))) return;
 
     const dueMoved = changed.includes("expectedDelivery");
-    const what = [...changed.map(k => LABEL[k] ?? k), ...(metalsChanged ? ["other metals"] : [])].join(", ");
+    const what = [...changed.map(k => LABEL[k] ?? k), ...(metalsChanged ? ["other metals"] : []), ...(cfChanged ? ["more details"] : [])].join(", ");
     updateDbAs({ summary: `Edited ${o.orderNumber}: ${what}` }, d => {
       const x = d.orders.find(y => y.id === o.id);
       if (!x) return;
@@ -274,6 +280,7 @@ export function OrderEditDialog({ order, onClose }: { order: Order; onClose: () 
         if (sub?.date && dayOf(sub.date) === dayOf(o.createdAt)) sub.date = next.createdAt;
       }
       for (const k of changed) (x as unknown as Record<string, unknown>)[k] = next[k];
+      if (cfChanged) writeValues(d, "orders", x.id, cf, user, user?.id);
       // The first metal in its own fields (every screen reads them); the list when there are more.
       if (metalsChanged) {
         const [first, ...more] = othersNext;
@@ -484,6 +491,7 @@ export function OrderEditDialog({ order, onClose }: { order: Order; onClose: () 
             </Field>
           </div>
         </section>
+        <CustomFieldInputs target="orders" values={cf} onChange={setCf} disabled={!!all} />
       </div>
     </ActionSheet>
   );

@@ -1,7 +1,10 @@
 import { useState } from "react";
+import { useAuth } from "@/lib/auth";
+import { CustomFieldInputs } from "@/components/CustomFields";
+import { customProblem, writeValues, type CfValues } from "@/lib/customFields";
 import { toast } from "sonner";
 import { Truck } from "lucide-react";
-import { updateDb, uid, type Supplier } from "@/lib/db";
+import { updateDb, uid, loadDb, type Supplier } from "@/lib/db";
 import { OpeningBalanceFields } from "@/components/OpeningBalanceFields";
 import { ActionSheet } from "@/components/ActionSheet";
 import { Button } from "@/components/ui/button";
@@ -21,19 +24,25 @@ export function SupplierCreateDialog({ open, onOpenChange, onCreated }: {
 }) {
   const [saving, setSaving] = useState(false);
   const [f, setF] = useState<Partial<Supplier>>(EMPTY);
+  const { user } = useAuth();
+  // Custom fields (lib/customFields.ts).
+  const [cf, setCf] = useState<CfValues>({});
 
   const create = () => {
     if (!f.name?.trim()) { toast.error("Enter a supplier name"); return; }
+    const cfWhy = customProblem(loadDb().settings, "suppliers", cf, user);
+    if (cfWhy) { toast.error(cfWhy); return; }
     setSaving(true);
     try {
       const id = uid("sup_");
       updateDb(d => {
         if (!d.suppliers) d.suppliers = [];
         d.suppliers.unshift({ ...f, name: f.name!.trim(), id, active: true, createdAt: new Date().toISOString() } as Supplier);
+        writeValues(d, "suppliers", id, cf, user, user?.id);
       });
       toast.success("Supplier added");
       onOpenChange(false);
-      setF(EMPTY);
+      setF(EMPTY); setCf({});
       onCreated?.(id);
     } finally { setSaving(false); }
   };
@@ -85,6 +94,7 @@ export function SupplierCreateDialog({ open, onOpenChange, onCreated }: {
           hint="Owed either way when you started using the app (₹)."
         />
       </div>
+      <CustomFieldInputs target="suppliers" values={cf} onChange={setCf} className="mt-4" />
     </ActionSheet>
   );
 }

@@ -1,4 +1,6 @@
 import { stageLabel } from "@/lib/stages";
+import { customColumns } from "@/components/CustomFields";
+import { fieldsFor, filledPairs, searchWords, valuesOf } from "@/lib/customFields";
 import { looseLabel, pieceLine, stoneOf } from "@/lib/orderText";
 import { Facets } from "@/components/Facets";
 import { deleteHint, deleteOrderFlow, orderDeleteBlocker, restoreOrderFlow } from "@/lib/orderAdmin";
@@ -95,6 +97,8 @@ function stageNow(o: Order) {
 export function OrdersPage() {
   const { user } = useAuth();
   const db = useDb();
+  // Custom fields on orders this person sees — a client only those shown to clients.
+  const orderCfDefs = fieldsFor(db.settings, "orders", user);
   // The store is edited in place; this changes whenever the data does, so the
   // filtered list follows an order that moves stage or status.
   const dbVersion = useDbVersion();
@@ -200,7 +204,10 @@ export function OrdersPage() {
     // A client's name finds their orders too — as do the person who placed it,
     // the parcel's tracking no., the factory's bill no. and an earlier order no.
     const clientName = new Map(db.clients.map(c => [c.id, `${c.companyName} ${c.ownerName}`.toLowerCase()]));
+    // …and the order's own custom fields (lib/customFields.ts) this person sees.
+    const cfWords = (o: Order) => (orderCfDefs.length ? searchWords(orderCfDefs, valuesOf(db, "orders", o.id, o)).toLowerCase() : "");
     if (terms.length) list = list.filter(o => terms.some(t =>
+      cfWords(o).includes(t) ||
       o.orderNumber.toLowerCase().includes(t) ||
       o.jewelleryType.toLowerCase().includes(t) ||
       (o.designNumber ?? "").toLowerCase().includes(t) ||
@@ -406,6 +413,8 @@ export function OrdersPage() {
         const due = balanceDue(o);
         return due > 0.005 ? <CellAmount tone="out">{fmtMoney(due)}</CellAmount> : <span className="text-success text-xs font-semibold">Paid</span>;
       } },
+    // The business's own fields — a column each, shown from View.
+    ...customColumns<Order>(orderCfDefs, o => valuesOf(db, "orders", o.id, o)),
   ];
 
   // What an opened row adds to its columns: the order page's own facts —
@@ -458,6 +467,7 @@ export function OrdersPage() {
       ) },
       isStaff && !!o.melted && { label: "Melted", value: `${fmtDate(o.melted.at)} by ${o.melted.byName}${o.melted.reason ? ` — ${o.melted.reason}` : ""}` },
       { label: "Instructions", value: noteText(o.instructions) },
+      ...filledPairs(orderCfDefs, valuesOf(db, "orders", o.id, o)).map(([label, value]) => ({ label, value })),
     ]);
   };
 

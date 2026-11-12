@@ -65,7 +65,7 @@ const COL_MODULE: Record<string, ModuleKey> = {
   suppliers: "suppliers", purchases: "suppliers", supplierReceipts: "suppliers", supplierPayments: "suppliers", brokers: "suppliers",
   factories: "factories", materialIssuances: "factories", factoryPayments: "factories",
   designers: "designers", cadJobs: "designers",
-  stockMovements: "stock", diamondPackets: "stock", diamondSales: "stock", supplierSales: "suppliers", memos: "stock", diamondBags: "stock",
+  stockMovements: "stock", diamondPackets: "stock", diamondSales: "stock", supplierSales: "suppliers", memos: "stock", diamondBags: "stock", customValues: "settings",
   readyStock: "readyStock", giftCards: "giftCards", clientReceipts: "payments",
   catalogFolders: "catalog", catalogItems: "catalog", shares: "catalog",
   productPhotoFolders: "productPhotos", productPhotoItems: "productPhotos",
@@ -78,7 +78,7 @@ const COL_NOUN: Record<string, string> = {
   suppliers: "supplier", purchases: "purchase", supplierReceipts: "money from supplier",
   supplierPayments: "supplier payment", brokers: "broker", factories: "factory", materialIssuances: "material issue",
   factoryPayments: "factory payment", designers: "designer", cadJobs: "design job", stockMovements: "stock movement", diamondPackets: "certified stone",
-  diamondSales: "diamond sale", supplierSales: "sale to a supplier", memos: "memo", diamondBags: "diamond bag", readyStock: "ready-stock item", giftCards: "gift card",
+  diamondSales: "diamond sale", supplierSales: "sale to a supplier", memos: "memo", diamondBags: "diamond bag", customValues: "custom fields", readyStock: "ready-stock item", giftCards: "gift card",
   clientReceipts: "receipt", catalogFolders: "catalog folder", catalogItems: "catalog item",
   shares: "share link", productPhotoFolders: "photo folder", productPhotoItems: "product photo",
   tasks: "task", meta: "settings", adminRecords: "admin figure",
@@ -141,6 +141,7 @@ export function docLabel(col: string, d: Record<string, unknown> | null | undefi
     case "supplierSales": return d.returnOf ? `Debit note ${String((d.returnOf as { noteNo?: string }).noteNo ?? "")}` : `₹${num(d.totalInr)} sale`;
     case "memos": return `Memo ${String(d.no ?? "")}`;
     case "diamondBags": return s(d.no) ? `${s(d.no)} · ${s(d.key)}` : s(d.key) || id;
+    case "customValues": return `custom fields of a${/^[aeiou]/.test(s(d.target)) ? "n" : ""} ${s(d.target) === "readyStock" ? "Ready Stock piece" : s(d.target) === "bags" ? "stone lot" : s(d.target) === "packets" ? "certified stone" : s(d.target).replace(/s$/, "")}`;
     case "readyStock": return s(d.sku) ? `${s(d.sku)} ${s(d.name)}` : s(d.name) || id;
     case "giftCards": return `$${num(d.amount)}`;
     case "clientReceipts": return `${s(d.receiptNo)} · $${num(d.amountUsd)}`;
@@ -149,7 +150,7 @@ export function docLabel(col: string, d: Record<string, unknown> | null | undefi
       return s(d.name) || s(d.title) || id;
     case "tasks": return s(d.title) || id;
     case "meta": return "settings";
-    case "adminRecords": return d.kind === "fx" ? "exchange rates" : d.kind === "stockCost" ? "a ready-stock cost" : d.kind === "yearBook" ? `the Year book ${String(d.key ?? "")}` : d.kind === "import" ? `the import of ${String((d.batch as { file?: string } | undefined)?.file ?? "a file")}` : id;
+    case "adminRecords": return d.kind === "fx" ? "exchange rates" : d.kind === "stockCost" ? "a ready-stock cost" : d.kind === "yearBook" ? `the Year book ${String(d.key ?? "")}` : d.kind === "customValues" ? "admin-only custom fields" : d.kind === "import" ? `the import of ${String((d.batch as { file?: string } | undefined)?.file ?? "a file")}` : id;
     default: return s(d.name) || s(d.title) || id;
   }
 }

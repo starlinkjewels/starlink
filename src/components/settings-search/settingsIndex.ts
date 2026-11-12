@@ -41,6 +41,7 @@ export const SETTINGS_INDEX: readonly SettingsEntry[] = [
   { key: "expenses", words: ["Expense categories", "Account categories", "Locker categories", "Salary category"] },
   // The dropdown lists themselves, so a list's own name (Rhodium, Stamping,
   // Clarities…) and where it shows both find this section.
+  { key: "customfields", words: ["Custom fields", "Extra fields", "My own fields", "Ring size", "Birthday", "Extra details", "Additional fields"] },
   { key: "lists", words: ["Dropdown lists", "Options", "Karats", ...LIST_DEFS.flatMap(d => [d.title, d.hint])] },
   { key: "timeline", words: [
     "Production timeline", "Stages", "Steps", "Board columns", "A piece is delayed after", "Late",

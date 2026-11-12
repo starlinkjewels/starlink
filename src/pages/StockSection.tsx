@@ -1,4 +1,6 @@
 import { useState } from "react";
+import { CustomFieldInputs, customColumns } from "@/components/CustomFields";
+import { customProblem, fieldsFor, filledPairs, sameValues, searchWords, valuesOf, writeValues, type CfValues } from "@/lib/customFields";
 import { memoHolding, memoPartyName } from "@/lib/memos";
 import { SectionTitle } from "@/components/SectionTitle";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
@@ -432,6 +434,8 @@ function CertifiedSection() {
   const isAdmin = user?.role === "admin";
   const db = useDb();
   const [editPacket, setEditPacket] = useState<DiamondPacket | null>(null);
+  // The stone's custom fields while it is being edited (lib/customFields.ts).
+  const [pkCf, setPkCf] = useState<CfValues>({});
   // Rate is edited as free text so a half-typed number does not snap to 0.
   const [editRate, setEditRate] = useState("");
   const [savingPacket, setSavingPacket] = useState(false);
@@ -558,8 +562,11 @@ function CertifiedSection() {
   const gradeOf = (p: DiamondPacket) => [p.type, p.color, p.clarity, [p.cut, p.polish, p.symmetry].filter(Boolean).join("/"), p.fluorescence]
     .filter(Boolean).join(" · ");
   const sumCarat = (list: DiamondPacket[]) => Math.round(list.reduce((s, p) => s + p.carat, 0) * 100) / 100;
+  // The stones' custom fields (lib/customFields.ts): searched, a column each (from View), in the opened row.
+  const pkDefs = fieldsFor(db.settings, "packets", user);
+  const pkVals = (p: DiamondPacket) => valuesOf(db, "packets", p.id, p);
   const packetSearch = (p: DiamondPacket) =>
-    [p.stockNumber, p.shape, p.type, p.certificateNumber, p.certificateLab, p.color, p.clarity, supplierName(p.supplierId)].filter(Boolean).join(" ");
+    [p.stockNumber, p.shape, p.type, p.certificateNumber, p.certificateLab, p.color, p.clarity, supplierName(p.supplierId), searchWords(pkDefs, pkVals(p))].filter(Boolean).join(" ");
   const dash = <span className="text-muted-foreground/50">—</span>;
   const STATUS_TONE: Record<DiamondPacket["status"], "green" | "blue" | "neutral" | "violet" | "amber"> = { in_stock: "green", issued: "blue", used: "neutral", sold: "violet", memo: "amber" };
   const packetCols = {
@@ -586,6 +593,7 @@ function CertifiedSection() {
     packetCols.supplier,
     packetCols.rate,
     packetCols.bought,
+    ...customColumns(pkDefs, pkVals),
   ];
   // History: when it was bought, what it cost and where it went.
   const historyColumns: DataColumn<DiamondPacket>[] = [
@@ -601,6 +609,7 @@ function CertifiedSection() {
       cell: p => <CellTag tone={STATUS_TONE[p.status]}>{STATUS_LABEL[p.status]}</CellTag> },
     { key: "order", header: "Order", sortValue: p => orderNoOf(p.orderId),
       cell: p => (p.orderId ? <Link to={`/orders/${p.orderId}`} className="text-xs text-primary hover:underline whitespace-nowrap">{orderNoOf(p.orderId) ?? "Order"}</Link> : dash) },
+    ...customColumns(pkDefs, pkVals),
   ];
   // An opened stone: each grade on its own line, its bill (and what a dollar
   // bill came to), where it went — the factory it was issued to, who bought it
@@ -624,6 +633,7 @@ function CertifiedSection() {
       { label: "Symmetry", value: p.symmetry },
       { label: "Fluorescence", value: p.fluorescence },
       { label: "Quality", value: p.quality },
+      ...filledPairs(pkDefs, pkVals(p)).map(([label, value]) => ({ label, value })),
       table === "history" && { label: "Measurement", value: p.measurement },
       table === "stock" && !!p.ratePerCaratInr && { label: "Cost", value: fmtMoneyInr(p.ratePerCaratInr * p.carat) },
       c.totalUsd != null && { label: "Billed", value: `${fmtCcy(c.totalUsd, "USD")}${c.exchangeRate ? ` at ${rateText("USD", "INR", c.exchangeRate)}` : ""}` },
@@ -664,6 +674,8 @@ function CertifiedSection() {
     if (!p.certificateNumber.trim()) { toast.error("Report number is required"); return; }
     const rateInr = editRate.trim() === "" ? undefined : Number(editRate);
     if (rateInr !== undefined && (!isFinite(rateInr) || rateInr < 0)) { toast.error("Enter a valid rate per carat"); return; }
+    const cfWhy = customProblem(db.settings, "packets", pkCf, user, valuesOf(db, "packets", p.id));
+    if (cfWhy) { toast.error(cfWhy); return; }
 
     const live = loadDb();
     const before = (live.diamondPackets ?? []).find(x => x.id === p.id);
@@ -763,6 +775,7 @@ function CertifiedSection() {
           pu.diamond.certificateNumber = pk.certificateNumber || pu.diamond.certificateNumber;
           if (pk.certificateLab) pu.diamond.certificateLab = pk.certificateLab; else delete pu.diamond.certificateLab;
         }
+        if (!sameValues(pkCf, valuesOf(d, "packets", pk.id))) writeValues(d, "packets", pk.id, pkCf, user, user?.id);
       }
     });
     toast.success(`Certified diamond updated${billNote}`);
@@ -842,7 +855,7 @@ function CertifiedSection() {
         onSelect: () => navigate(`/suppliers/${p.supplierId}`) },
       { label: "Edit", icon: Pencil, disabled: !can("stock", "edit") || !inStock,
         hint: !can("stock", "edit") ? ADMIN_ONLY : !inStock ? STATUS_REASON[p.status as Exclude<DiamondPacket["status"], "in_stock">] : "Certificate, grading and cost",
-        onSelect: () => { setEditPacket({ ...p }); setEditRate(p.ratePerCaratInr ? String(p.ratePerCaratInr) : ""); } },
+        onSelect: () => { setEditPacket({ ...p }); setPkCf(valuesOf(db, "packets", p.id)); setEditRate(p.ratePerCaratInr ? String(p.ratePerCaratInr) : ""); } },
       { label: "Delete", icon: Trash2, danger: true, disabled: !can("stock", "delete") || !del.ok, onSelect: () => deletePacket(p),
         hint: !can("stock", "delete") ? "Your access does not include removing stock" : !del.ok ? del.reason : del.purchase ? "Removes the purchase it came from too" : "Only the stone — no purchase is on file for it" },
     ];
@@ -1019,6 +1032,7 @@ function CertifiedSection() {
                     ...(p.certNo !== undefined ? { certificateNumber: p.certNo } : {}),
                   })} />
               </div>
+              <CustomFieldInputs target="packets" values={pkCf} onChange={setPkCf} className="col-span-2" />
             </div>
             <DialogFooter>
               <button onClick={() => setEditPacket(null)} className="h-10 px-4 rounded-xl border border-border bg-card text-sm font-medium hover:bg-secondary">Cancel</button>

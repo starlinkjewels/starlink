@@ -1,12 +1,14 @@
 import { useEffect, useMemo, useState } from "react";
+import { CustomFieldInputs, CustomFieldsView } from "@/components/CustomFields";
+import { customProblem, fieldsFor, valuesOf, writeValues, type CfValues } from "@/lib/customFields";
 import { Link } from "react-router-dom";
 import { toast } from "sonner";
-import { ArrowRightLeft, Gem, Hash, Layers, Package, Printer, Wallet } from "lucide-react";
+import { ArrowRightLeft, Gem, Hash, Layers, Package, Pencil, Printer, Wallet } from "lucide-react";
 import { useDb } from "@/hooks/useDb";
 import { useAuth } from "@/lib/auth";
 import { useCan, useHas } from "@/hooks/useCan";
-import { fmtDate, loadDb, ensureCollections } from "@/lib/db";
-import { bagMoveLabel, bagNoOf, printBagLabels } from "@/lib/diamondBags";
+import { fmtDate, loadDb, ensureCollections, updateDbAs } from "@/lib/db";
+import { addBags, bagMoveLabel, bagNoOf, bagOf, printBagLabels } from "@/lib/diamondBags";
 import { lotBalances, lotHistory, lotKey, lotLabel, lotParts, type LotSpec } from "@/lib/diamondLots";
 import { stockAverageRate } from "@/lib/orderCost";
 import { fmtMoneyInr, stockBucketHistory } from "@/lib/manufacturing";
@@ -23,7 +25,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 
-type Mode = "view" | "move" | "recount";
+type Mode = "view" | "move" | "recount" | "details";
 
 const r3 = (n: number) => Math.round(n * 1000) / 1000;
 const draftOf = (s: LotSpec): LooseLotDraft => ({ shape: s.shape, variety: s.variety ?? "", type: s.type ?? "", mm: s.mm ?? "", size: s.size ?? "", color: s.color ?? "", clarity: s.clarity ?? "" });
@@ -81,6 +83,24 @@ export function BagPanel({ keys, label, companyId, start = "view", onClose }: {
   const priced = shownKeys.some(k => avgOf(k) != null && holding(k));
   const no = bag ? bagNoOf(db, bag) : undefined;
   const spec = bag ? (holding(bag)?.spec ?? lotParts(bag)) : null;
+  // The lot's own custom fields (lib/customFields.ts) — kept on its bag.
+  const bagRec = bag ? bagOf(db, bag) : undefined;
+  const cfDefs = fieldsFor(db.settings, "bags", user);
+  const [cf, setCf] = useState<CfValues>({});
+  const openDetails = () => { setCf(bagRec ? valuesOf(db, "bags", bagRec.id) : {}); setMode("details"); };
+  const saveDetails = async () => {
+    if (!bag) return;
+    if (!mayEdit) { toast.error(needsAccess("stock", "edit")); return; }
+    const why = customProblem(db.settings, "bags", cf, user, bagRec ? valuesOf(db, "bags", bagRec.id) : undefined);
+    if (why) { toast.error(why); return; }
+    updateDbAs({ summary: `Details of ${bagRec?.no ?? lotLabel(bag)}` }, d => {
+      addBags(d, [bag], user?.id);
+      const b = bagOf(d, bag);
+      if (b) writeValues(d, "bags", b.id, cf, user, user?.id);
+    });
+    toast.success("Saved");
+    setMode("view");
+  };
 
   // ── Its history, oldest first worked out, newest first shown ──
   const linked = useMemo(() => new Map(stockBucketHistory(movements, "diamond", shownKeys, {
@@ -223,6 +243,11 @@ export function BagPanel({ keys, label, companyId, start = "view", onClose }: {
         <AsyncButton onClick={doMove} disabled={!mayEdit || tooMuch || sameBag} className="btn-hero rounded-xl h-10">Move stones</AsyncButton>
       </div>
     </div>
+  ) : mode === "details" ? (
+    <div className="flex justify-end gap-2.5">
+      <Button variant="outline" onClick={() => setMode("view")} className="rounded-xl h-10">Cancel</Button>
+      <AsyncButton onClick={saveDetails} disabled={!mayEdit} className="btn-hero rounded-xl h-10">Save details</AsyncButton>
+    </div>
   ) : mode === "recount" ? (
     <div className="flex justify-end gap-2.5">
       <Button variant="outline" onClick={() => setMode("view")} className="rounded-xl h-10">Cancel</Button>
@@ -232,6 +257,7 @@ export function BagPanel({ keys, label, companyId, start = "view", onClose }: {
     <div className="flex items-center gap-2.5 flex-wrap justify-end">
       {keys && keys.length > 1 && <Button variant="ghost" onClick={() => setBag(null)} className="rounded-xl h-10 mr-auto">All {keys.length} bags</Button>}
       <Button variant="outline" onClick={() => print([bag])} disabled={!no} className="rounded-xl h-10"><Printer className="h-4 w-4 mr-1.5" />Label</Button>
+      {cfDefs.length > 0 && <Button variant="outline" onClick={openDetails} disabled={!mayEdit} title={editHint} className="rounded-xl h-10"><Pencil className="h-4 w-4 mr-1.5" />Details</Button>}
       <Button variant="outline" onClick={() => setMode("recount")} disabled={!mayEdit || ct <= 0} title={editHint} className="rounded-xl h-10"><Hash className="h-4 w-4 mr-1.5" />Recount</Button>
       <Button onClick={() => setMode("move")} disabled={!mayEdit || ct <= 0} title={editHint} className="btn-hero rounded-xl h-10"><ArrowRightLeft className="h-4 w-4 mr-1.5" />Move to another bag</Button>
     </div>
@@ -294,6 +320,14 @@ export function BagPanel({ keys, label, companyId, start = "view", onClose }: {
           )}
           {sameBag && <p className="text-xs text-destructive">That is this bag — choose another, or change the grade for a new bag.</p>}
         </div>
+      ) : mode === "details" && bag ? (
+        <div className="space-y-4">
+          <div className="rounded-xl border border-border bg-secondary/40 px-3 py-2.5 text-sm">
+            <span className="font-mono font-semibold text-primary mr-1.5">{no ?? "—"}</span>
+            <span>{lotLabel(bag)}</span>
+          </div>
+          <CustomFieldInputs target="bags" values={cf} onChange={setCf} title={null} />
+        </div>
       ) : mode === "recount" && bag ? (
         <div className="space-y-4">
           <div className="rounded-xl border border-border bg-secondary/40 px-3 py-2.5 text-sm">
@@ -326,6 +360,7 @@ export function BagPanel({ keys, label, companyId, start = "view", onClose }: {
                 ))}
             </div>
           )}
+          {bagRec && <CustomFieldsView target="bags" recId={bagRec.id} />}
           <StatStrip items={[
             { label: "Carats", value: `${ct} ct`, icon: Gem, sub: bag ? (ct > 0 ? "In the bag" : "Empty") : `${members.length} bags` },
             { label: "Pieces", value: pcs != null ? pcs.toLocaleString() : "—", icon: Layers, sub: pcs != null ? "Counted" : "Not counted — recount" },

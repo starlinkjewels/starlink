@@ -14,6 +14,7 @@
 //     stock (no supplier, no dues; the loose ones into their bags, at the rate
 //     given), a piece as Add to Ready Stock with its history line — under one
 //     import record, so…
+import { cleanValue, fieldsFor, writeValues, KIND_LABEL, type CfTarget, type CfValues } from "./customFields";
 //   • …Undo (undoImport) removes everything that file brought in, in one step —
 //     except a record used since (an order on the client, a bill from the
 //     supplier, stones issued, a piece sold or changed), which stays and is
@@ -97,7 +98,23 @@ interface SheetDef { kind: ImportKind; name: string; aliases: string[]; intro: s
 const companyNames = (db: DB) => companiesOf(db.settings, true).map(c => c.name);
 const stoneMaterials = (db: DB) => activeMaterials(db.settings).filter(m => m.kind === "stone");
 
+/** The business's own fields as template columns (lib/customFields.ts) — "cf:<id>". Loose lots get theirs on the bag page. */
+const CF_TARGET: Partial<Record<ImportKind, CfTarget>> = { clients: "clients", suppliers: "suppliers", certified: "packets", ready: "readyStock" };
+function customCols(db: DB, kind: ImportKind): Col[] {
+  const t = CF_TARGET[kind];
+  if (!t) return [];
+  return fieldsFor(db.settings, t, { role: "admin" }).map(d => ({
+    key: `cf:${d.id}`, header: d.label, req: !!d.required,
+    help: `${KIND_LABEL[d.kind]}${d.kind === "list" ? ` — one of: ${(d.options ?? []).join(", ")}` : d.kind === "date" ? " — e.g. 2026-04-01" : d.kind === "yesno" ? " — Yes or No" : ""}${d.hint ? ` · ${d.hint}` : ""}`,
+    ...(d.kind === "list" ? { list: d.options ?? [] } : d.kind === "yesno" ? { list: ["Yes", "No"] } : {}),
+  }));
+}
+
 export function sheetDefs(db: DB): SheetDef[] {
+  return baseDefs(db).map(s => ({ ...s, cols: [...s.cols, ...customCols(db, s.kind)] }));
+}
+
+function baseDefs(db: DB): SheetDef[] {
   const multi = hasCompanies(db.settings);
   const company: Col[] = multi ? [{ key: "company", header: "Our company", help: `Whose it is — blank = ${companiesOf(db.settings)[0].name}`, list: companyNames(db), aliases: ["company"] }] : [];
   const staff = handlerChoices(db).map(u => u.name).filter(Boolean);
@@ -263,11 +280,11 @@ const karatOf = (s: string) => { const m = s.trim().match(/^(\d{1,2})\s*(k|kt|ka
 
 /* ── What a row becomes ─────────────────────────────────────────────────── */
 
-type ClientRec = { kind: "clients"; v: Omit<Client, "id" | "createdAt" | "username" | "status"> };
-type SupplierRec = { kind: "suppliers"; v: Omit<Supplier, "id" | "createdAt" | "active"> };
+type ClientRec = { kind: "clients"; v: Omit<Client, "id" | "createdAt" | "username" | "status">; cf?: CfValues };
+type SupplierRec = { kind: "suppliers"; v: Omit<Supplier, "id" | "createdAt" | "active">; cf?: CfValues };
 type LooseRec = { kind: "loose"; material: MaterialKey; bucket: string; lot: LotSpec; qty: number; pieces?: number; valueInr?: number; companyId: string; note?: string };
-type CertRec = { kind: "certified"; v: Omit<DiamondPacket, "id" | "stockNumber" | "createdBy" | "createdAt" | "status"> };
-type ReadyRec = { kind: "ready"; v: Omit<ReadyStockItem, "id" | "createdBy" | "createdAt" | "images">; cost?: number };
+type CertRec = { kind: "certified"; v: Omit<DiamondPacket, "id" | "stockNumber" | "createdBy" | "createdAt" | "status">; cf?: CfValues };
+type ReadyRec = { kind: "ready"; v: Omit<ReadyStockItem, "id" | "createdBy" | "createdAt" | "images">; cost?: number; cf?: CfValues };
 export type ImportRec = ClientRec | SupplierRec | LooseRec | CertRec | ReadyRec;
 
 export interface PlanRow {
@@ -365,7 +382,7 @@ export async function readImportFile(file: File, db: DB, asOf: string): Promise<
       if (!any) continue;
       if (plan.rows.length >= MAX_ROWS) { plan.blocked = `More than ${MAX_ROWS.toLocaleString("en-IN")} rows — import it in parts`; break; }
       if (missing.length) { plan.rows.push({ kind: def.kind, row: r, status: "error", label: Object.values(val).find(Boolean) ?? "", why: `The sheet has no ${missing.join(" / ")} column` }); continue; }
-      plan.rows.push(checkRow(def.kind, r, val, ctx, asOf));
+      plan.rows.push(withCustom(checkRow(def.kind, r, val, ctx, asOf), val, db));
     }
   }
   if (!plan.sheets.length && !plan.blocked) plan.blocked = `No sheet here is one of: ${defs.map(d => d.name).join(", ")} — start from the template`;
@@ -632,6 +649,24 @@ function checkRow(kind: ImportKind, row: number, v: Record<string, string>, ctx:
   };
 }
 
+/** The row's custom-field values (columns "cf:<id>"), checked by kind — a required one empty, or a wrong value, is a row to fix. */
+function withCustom(row: PlanRow, val: Record<string, string>, db: DB): PlanRow {
+  if (row.status !== "ok" || !row.rec || row.rec.kind === "loose") return row;
+  const t = CF_TARGET[row.kind];
+  if (!t) return row;
+  const cf: CfValues = {};
+  for (const d of fieldsFor(db.settings, t, { role: "admin" })) {
+    const raw = (val[`cf:${d.id}`] ?? "").trim();
+    if (!raw) { if (d.required) return { ...row, status: "error", why: `No ${d.label}` }; continue; }
+    if (d.kind === "number") { const n = parseNum(raw); if (n === undefined || !isFinite(n)) return { ...row, status: "error", why: `${d.label}: “${raw}” is not a number` }; cf[d.id] = n; }
+    else if (d.kind === "date") { const day = parseDay(raw); if (!day) return { ...row, status: "error", why: `${d.label}: “${raw}” is not a date — write it 2026-04-01` }; cf[d.id] = day; }
+    else if (d.kind === "yesno") { const y = cleanValue(d, raw); if (y === undefined) return { ...row, status: "error", why: `${d.label}: write Yes or No` }; cf[d.id] = y; }
+    else if (d.kind === "list") { const o = (d.options ?? []).find(x => x.toLowerCase() === raw.toLowerCase()); if (!o) return { ...row, status: "error", why: `${d.label}: “${raw}” is not one of ${(d.options ?? []).join(", ")}` }; cf[d.id] = o; }
+    else cf[d.id] = raw;
+  }
+  return Object.keys(cf).length ? { ...row, rec: { ...row.rec, cf } as ImportRec } : row;
+}
+
 /* ── The template ───────────────────────────────────────────────────────── */
 
 export async function downloadImportTemplate(db: DB): Promise<void> {
@@ -782,6 +817,7 @@ export async function runImport(plan: ImportPlan, asOf: string, user: User, prog
             if (live.clientName.has(nameKey(v.companyName)) || (v.email && live.clientEmail.has(v.email)) || (phoneKey(v.phone) && live.clientPhone.has(phoneKey(v.phone)))) { skippedNow++; continue; }
             const id = uid("c_");
             d.clients.unshift({ ...v, id, accountManagerId: v.accountManagerId ?? user.id, username: "", status: "active", createdAt: new Date().toISOString() } as Client);
+            writeValues(d, "clients", id, r.cf, user, user.id, { only: true });
             live.clientName.set(nameKey(v.companyName), "x");
             made.push({ kind: "clients", id });
           } else if (r.kind === "suppliers") {
@@ -789,6 +825,7 @@ export async function runImport(plan: ImportPlan, asOf: string, user: User, prog
             if (live.supName.has(nameKey(v.name)) || (certKey(v.gstin).length >= 10 && live.supGst.has(certKey(v.gstin)))) { skippedNow++; continue; }
             const id = uid("sup_");
             d.suppliers.unshift({ ...v, id, active: true, createdAt: new Date().toISOString() });
+            writeValues(d, "suppliers", id, r.cf, user, user.id, { only: true });
             live.supName.set(nameKey(v.name), "x");
             made.push({ kind: "suppliers", id });
           } else if (r.kind === "certified") {
@@ -797,6 +834,7 @@ export async function runImport(plan: ImportPlan, asOf: string, user: User, prog
             const id = uid("dp_");
             const clean = Object.fromEntries(Object.entries(r.v).filter(([, x]) => x !== undefined)) as CertRec["v"];
             d.diamondPackets.unshift({ ...clean, id, stockNumber: nextDiamondStockNumber(d), status: "in_stock", createdBy: user.id, createdAt } as DiamondPacket);
+            writeValues(d, "packets", id, r.cf, user, user.id, { only: true });
             live.cert.set(certKey(r.v.certificateNumber), "x");
             made.push({ kind: "certified", id });
           } else if (r.kind === "ready") {
@@ -809,6 +847,7 @@ export async function runImport(plan: ImportPlan, asOf: string, user: User, prog
             logItem(item, { ...whoOf(user), at: now, kind: "added", text: `Added to Ready Stock at the ${officeLabel(item.location)} — ${item.quantity} piece${item.quantity !== 1 ? "s" : ""} at ${fmtMoney(item.price)} · imported from Excel` });
             d.readyStock.unshift(item);
             if (r.cost) writeStockCost(d, id, r.cost);
+            writeValues(d, "readyStock", id, r.cf, user, user.id, { only: true });
             if (r.v.sku) live.sku.set(skuKey(r.v.sku), "x");
             made.push({ kind: "ready", id });
           }
@@ -950,8 +989,9 @@ export async function undoImport(batchId: string, user: User, progress?: (done: 
     d.suppliers = d.suppliers.filter(x => !go.has(x.id));
     d.diamondPackets = (d.diamondPackets ?? []).filter(x => !go.has(x.id));
     d.readyStock = (d.readyStock ?? []).filter(x => !go.has(x.id));
-    // A piece's cost, kept apart for the admin, goes with it.
-    d.adminRecords = (d.adminRecords ?? []).filter(r => !(r.kind === "stockCost" && go.has(r.itemId)));
+    // A piece's cost, kept apart for the admin, goes with it — and every record's custom fields.
+    d.adminRecords = (d.adminRecords ?? []).filter(r => !(r.kind === "stockCost" && go.has(r.itemId)) && !(r.kind === "customValues" && go.has(r.recId)));
+    d.customValues = (d.customValues ?? []).filter(x => !go.has(x.recId));
     removed = go.size;
   });
   await flush();

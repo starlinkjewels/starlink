@@ -1,4 +1,5 @@
 import { useState, type ReactNode } from "react";
+import { CustomFieldsView } from "@/components/CustomFields";
 import { ProductVideo } from "@/components/ProductVideo";
 import { OrderThumb } from "@/components/OrderThumb";
 import { metalLabel } from "@/lib/metals";
@@ -398,6 +399,8 @@ function PieceBody({ item }: { item: ReadyStockItem }) {
               <Fact label="Net weight">{item.netWeight ? `${item.netWeight} g` : <span className="text-muted-foreground/60 font-normal">—</span>}</Fact>
               <Fact label="Diamond">{item.diamondWeight ? `${item.diamondWeight} ct${item.diamondType ? ` · ${item.diamondType}` : ""}` : <span className="text-muted-foreground/60 font-normal">None</span>}</Fact>
             </dl>
+            {/* The business's own fields (lib/customFields.ts) — a client sees only those shown to clients. */}
+            <CustomFieldsView target="readyStock" recId={item.id} className="mt-3 pt-3 border-t border-border/60" />
           </div>
 
           {/* Notes can name the client a piece came back from — staff only, as on the list. */}

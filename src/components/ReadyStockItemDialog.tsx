@@ -1,4 +1,6 @@
 import { ListCombo } from "@/components/ListCombo";
+import { CustomFieldInputs } from "@/components/CustomFields";
+import { customProblem, sameValues, fieldsFor, filledPairs, valuesOf, writeValues, type CfValues } from "@/lib/customFields";
 import { requestPlayable } from "@/lib/webVideo";
 import { ProductVideo } from "@/components/ProductVideo";
 import { useRef, useState } from "react";
@@ -91,6 +93,8 @@ export function ReadyStockItemDialog({ item, defaults, onClose, onSaved }: {
   const [video, setVideo] = useState<string>(() => item?.video || "");
   const [videoFile, setVideoFile] = useState<File | null>(null);
   const [saving, setSaving] = useState(false);
+  // Custom fields (lib/customFields.ts) — the ones this person may see.
+  const [cf, setCf] = useState<CfValues>(() => (item ? valuesOf(db, "readyStock", item.id) : {}));
   const imgRef = useRef<HTMLInputElement>(null);
   const vidRef = useRef<HTMLInputElement>(null);
   const offices = readyStockOffices(db.settings);
@@ -130,6 +134,8 @@ export function ReadyStockItemDialog({ item, defaults, onClose, onSaved }: {
     const quantity = Math.max(0, Math.round(Number(f.quantity) || 0));
     const wp = weightProblem({ gross: Number(f.grossWeight), net: Number(f.netWeight), diamondCt: Number(f.diamondWeight) });
     if (wp) { toast.error(wp); return; }
+    const cfWhy = customProblem(db.settings, "readyStock", cf, user, item ? valuesOf(db, "readyStock", item.id) : undefined);
+    if (cfWhy) { toast.error(cfWhy); return; }
     setSaving(true);
     try {
       const itemId = editingId || uid("rs_");
@@ -172,6 +178,8 @@ export function ReadyStockItemDialog({ item, defaults, onClose, onSaved }: {
           ...(prev?.splitFrom ? { splitFrom: prev.splitFrom } : {}),
           // …and its history, which this save adds a line to.
           ...(prev?.history ? { history: [...prev.history] } : {}),
+          // …and its custom fields shown to clients (the rest are kept apart — lib/customFields.ts).
+          ...(prev?.custom ? { custom: { ...prev.custom } } : {}),
           createdBy: prev ? prev.createdBy : user!.id,
           createdAt: prev ? prev.createdAt : new Date().toISOString(),
         };
@@ -192,6 +200,17 @@ export function ReadyStockItemDialog({ item, defaults, onClose, onSaved }: {
           d.readyStock.unshift(base);
         }
         if (isAdmin) writeStockCost(d, base.id, Number(f.cost) > 0 ? Number(f.cost) : undefined);
+        // Custom fields. A change to one the client sees goes in the piece's history (only those —
+        // its history is read by clients too).
+        const shownBefore = prev ? filledPairs(fieldsFor(d.settings, "readyStock", { role: "client" }), valuesOf(d, "readyStock", itemId)) : [];
+        if (!prev || !sameValues(cf, valuesOf(d, "readyStock", itemId))) writeValues(d, "readyStock", itemId, cf, user, user?.id);
+        if (prev) {
+          const after = filledPairs(fieldsFor(d.settings, "readyStock", { role: "client" }), valuesOf(d, "readyStock", itemId));
+          const was = new Map(shownBefore), now = new Map(after);
+          const parts = [...new Set([...was.keys(), ...now.keys()])].filter(k => was.get(k) !== now.get(k)).map(k => `${k} ${was.get(k) || "none"} → ${now.get(k) || "none"}`);
+          const it = d.readyStock.find(x => x.id === itemId);
+          if (parts.length && it) logItem(it, { ...whoOf(user), kind: "edited", text: parts.join(" · ") });
+        }
       });
       toast.success(editingId ? "Item updated" : `Added to Ready Stock at the ${officeLabel(f.location)}`);
       onSaved?.(itemId);
@@ -376,6 +395,7 @@ export function ReadyStockItemDialog({ item, defaults, onClose, onSaved }: {
             <Textarea value={f.notes} onChange={e => setF({ ...f, notes: e.target.value })} className="rounded-xl mt-1" rows={2} />
           </div>
         </section>
+        <CustomFieldInputs target="readyStock" values={cf} onChange={setCf} />
       </div>
     </ActionSheet>
   );

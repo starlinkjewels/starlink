@@ -7,6 +7,7 @@
 // A piece made from an order carries that order's CAD, colour and diamonds;
 // the order is found from the piece (made for stock, split off, or returned).
 import { doc, setDoc } from "firebase/firestore";
+import { fieldsFor, filledPairs, valuesOf } from "./customFields";
 import { db as fsdb } from "./firebase";
 import { brandFor, companyOf, companyOfOrder } from "./companies";
 import { mainDiamondShape, uid, updateDb, type DB, type Order, type ReadyStockItem, type Share, type ShareBrand, type SharePiece } from "./db";
@@ -87,6 +88,9 @@ export function buildSharePieces(d: DB, items: ReadyStockItem[], c: PieceShareCh
       piece.diamondSize = o ? diamondSize(d, o.id) : undefined;
     }
     if (c.cad && o?.cadImage) piece.cad = o.cadImage;
+    // The business's own fields marked "shown to the client" (lib/customFields.ts) — never the staff or admin ones.
+    const extra = filledPairs(fieldsFor(d.settings, "readyStock", { role: "client" }), valuesOf(d, "readyStock", item.id, item)).map(([label, value]) => ({ label, value }));
+    if (extra.length) piece.extra = extra;
     const video = item.video || o?.productVideo;
     if (c.video && video) piece.video = video;
     const price = c.prices?.[item.id];
