@@ -81,6 +81,7 @@ export const FEATURES: FeatureDef[] = [
 
   // ── Stock, Buy & Assign ──────────────────────────────────────────────────
   { key: "stock.companies", module: "stock", needs: "edit", std: false, label: "Move stock between companies", help: "Only when there is more than one company." },
+  { key: "stock.memo", module: "stock", needs: "view", std: false, risky: true, label: "Memo (goods on approval)", help: "Send stock out on memo, take it back, or sell it to whoever holds it." },
   { key: "buyAssign.sell", module: "buyAssign", needs: "add", std: true, risky: true, label: "Sell stock", help: "Sell a diamond, or sell stock to a supplier, from Buy & Assign." },
   { key: "buyAssign.assign", module: "buyAssign", needs: "add", std: true, label: "Assign to a factory", help: "Give material to a factory from Buy & Assign." },
   { key: "buyAssign.changeAssign", module: "buyAssign", needs: "edit", std: false, label: "Change or cancel an assignment", help: "Edit or cancel material already given to a factory." },

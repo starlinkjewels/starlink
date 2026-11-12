@@ -19,7 +19,7 @@ export interface ShellItem { to: string; label: string; icon: LucideIcon }
 export const STUDIO_SIDEBAR: { title: string; paths: string[] }[] = [
   { title: "", paths: ["/", "/targets", "/orders", "/catalog"] },
   { title: "Sales", paths: ["/clients", "/invoices", "/ready-stock", "/gift-cards", "/giftcard", "/product-photos"] },
-  { title: "Production", paths: ["/suppliers", "/factories", "/designers", "/stock", "/buy-assign"] },
+  { title: "Production", paths: ["/suppliers", "/factories", "/designers", "/stock", "/buy-assign", "/memo"] },
   { title: "Money", paths: ["/payments", "/income", "/locker", "/expenses", "/reports"] },
   { title: "Workspace", paths: ["/messages", "/notifications", "/reminders", "/ai", "/employees", "/activity", "/autopilot", "/campaigns", "/documents", "/stock-api", "/settings"] },
 ];
@@ -42,7 +42,7 @@ const MONEY: [string, string][] = [
 /** The phone's More sheet: everything else, by job. */
 const MORE: { title: string; paths: string[] }[] = [
   { title: "Sales", paths: ["/catalog", "/invoices", "/ready-stock", "/gift-cards", "/giftcard", "/product-photos"] },
-  { title: "Production", paths: ["/stock", "/buy-assign"] },
+  { title: "Production", paths: ["/stock", "/buy-assign", "/memo"] },
   { title: "Money", paths: ["/income", "/reports", "/targets"] },
   { title: "Workspace", paths: ["/messages", "/notifications", "/reminders", "/ai", "/employees", "/activity", "/autopilot", "/campaigns", "/documents", "/stock-api", "/settings"] },
   { title: "You", paths: ["/profile", "/search"] },

@@ -1,4 +1,5 @@
 import { BuyMaterialForm } from "@/components/BuyMaterialForm";
+import { PartyMemos } from "@/components/MemoSheets";
 import { brokerSuppliers } from "@/lib/brokers";
 import { useCan, useHas, useMayExport } from "@/hooks/useCan";
 import type { MoreAction } from "@/components/MoreMenu";
@@ -813,6 +814,8 @@ function SupplierHistoryPageBody() {
       {/* Where the account stands, first: what we owe them (or they owe us),
           what was paid, what was bought — the statement's own figures. Who
           they are is the line under the name. */}
+      {/* What they hold of ours on memo — on approval (lib/memos.ts). */}
+      <PartyMemos party={{ kind: "supplier", id: supplier.id }} />
       <StatStrip items={[
         ...(!showOwed ? [] : [account.net < 0
           ? { label: "They owe us", value: fmtMoneyInr(-account.net), icon: ArrowDownCircle, tone: "in" as const, sub: "After refunds and overpaid bills" }

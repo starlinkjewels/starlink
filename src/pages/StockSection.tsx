@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { memoHolding, memoPartyName } from "@/lib/memos";
 import { SectionTitle } from "@/components/SectionTitle";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
@@ -459,7 +460,7 @@ function CertifiedSection() {
   const purchaseOf = (id?: string) => (id ? db.purchases.find(p => p.id === id) : undefined);
   const orderNoOf = (id?: string) => (id ? db.orders.find(o => o.id === id)?.orderNumber : undefined);
   const boughtDate = (p: DiamondPacket) => purchaseOf(p.purchaseId)?.invoiceDate || purchaseOf(p.purchaseId)?.createdAt || p.createdAt;
-  const STATUS_LABEL: Record<DiamondPacket["status"], string> = { in_stock: "In stock", issued: "Issued", used: "Used in order", sold: "Sold" };
+  const STATUS_LABEL: Record<DiamondPacket["status"], string> = { in_stock: "In stock", issued: "Issued", used: "Used in order", sold: "Sold", memo: "Out on memo" };
 
   const allPackets = [...(db.diamondPackets ?? [])].filter(inCo).sort((a, b) => +new Date(boughtDate(b)) - +new Date(boughtDate(a)));
   const histFromDate = histFrom ? new Date(histFrom + "T00:00:00") : null;
@@ -560,7 +561,7 @@ function CertifiedSection() {
   const packetSearch = (p: DiamondPacket) =>
     [p.stockNumber, p.shape, p.type, p.certificateNumber, p.certificateLab, p.color, p.clarity, supplierName(p.supplierId)].filter(Boolean).join(" ");
   const dash = <span className="text-muted-foreground/50">—</span>;
-  const STATUS_TONE: Record<DiamondPacket["status"], "green" | "blue" | "neutral" | "violet"> = { in_stock: "green", issued: "blue", used: "neutral", sold: "violet" };
+  const STATUS_TONE: Record<DiamondPacket["status"], "green" | "blue" | "neutral" | "violet" | "amber"> = { in_stock: "green", issued: "blue", used: "neutral", sold: "violet", memo: "amber" };
   const packetCols = {
     stock: { key: "stock", header: "Stock #", sortValue: p => p.stockNumber, csv: p => p.stockNumber ?? "",
       cell: p => (p.stockNumber ? <span className="font-mono text-xs font-semibold text-primary whitespace-nowrap">{p.stockNumber}</span> : dash) },
@@ -613,6 +614,8 @@ function CertifiedSection() {
     const buyer = sale?.clientId ? db.clients.find(x => x.id === sale.clientId) : undefined;
     // Or sold to one of our suppliers (lib/supplierSales.ts).
     const supSale = p.status === "sold" && !sale ? (db.supplierSales ?? []).find(x => x.lines.some(l => l.packetId === p.id)) : undefined;
+    // Out on approval (lib/memos.ts): the slip, and who holds it.
+    const onMemo = p.status === "memo" ? memoHolding(db, { packetId: p.id }) : undefined;
     return filled([
       { label: "Color", value: p.color },
       { label: "Clarity", value: p.clarity },
@@ -629,6 +632,7 @@ function CertifiedSection() {
       !!sale && { label: "Sold to", value: buyer ? refLink(`/clients/${buyer.id}`, buyer.companyName, can("clients")) : sale.buyerName || "Buyer" },
       !!supSale && { label: "Sold to", value: refLink(`/suppliers/${supSale.supplierId}`, `${supplierName(supSale.supplierId) ?? "A supplier"} (supplier)`, can("suppliers")) },
       !!sale && { label: "Sold on", value: fmtDate(sale.createdAt) },
+      !!onMemo && { label: "Out on memo", value: <>{refLink("/memo", onMemo.no, true)} · {memoPartyName(db, onMemo.party)} · since {fmtDate(onMemo.at)}</> },
       multiCo && { label: "Company", value: companyById(db.settings, p.companyId).name },
       { label: "Added", value: recorded(db, p.createdAt, p.createdBy) },
     ]);
@@ -770,6 +774,7 @@ function CertifiedSection() {
     issued: "Issued to an order — cancel the issue on the order instead",
     used: "Used in a finished piece — it can't be changed here",
     sold: "Sold — cancel the sale in Buy & Assign instead",
+    memo: "Out on memo — take it back on the Memo page first",
   };
   /**
    * Whether a stone can be deleted, and through what. One bought from a

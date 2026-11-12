@@ -204,7 +204,9 @@ export function brokerageForLines(b: BillBrokerage, lineTotals: number[]): Pick<
 }
 
 /** May this broker be deleted? Not once anything refers to them. */
-export function brokerDeleteWhy(db: Pick<DB, "purchases" | "lockerTransactions"> & Partial<Pick<DB, "supplierSales" | "supplierReceipts">>, broker: Broker): string | undefined {
+export function brokerDeleteWhy(db: Pick<DB, "purchases" | "lockerTransactions"> & Partial<Pick<DB, "supplierSales" | "supplierReceipts" | "memos">>, broker: Broker): string | undefined {
+  // Goods on memo with them, now or before (lib/memos.ts).
+  if ((db.memos ?? []).some(m => m.party.kind === "broker" && m.party.id === broker.id)) return "Has memos — switch them off instead";
   const bills = (db.purchases ?? []).filter(p => p.brokerId === broker.id).length;
   const pays = brokerPayments(db, broker.id).length;
   if (bills || pays) return `On ${bills} purchase line${bills === 1 ? "" : "s"} and ${pays} payment${pays === 1 ? "" : "s"} — switch them off instead`;

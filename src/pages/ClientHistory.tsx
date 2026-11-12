@@ -1,4 +1,5 @@
 import { stageLabel } from "@/lib/stages";
+import { PartyMemos } from "@/components/MemoSheets";
 import { isDiamondOnlyOrder, orderImage, hiddenFromMe } from "@/lib/db";
 import { looseLabel } from "@/lib/orderText";
 import { ListCombo } from "@/components/ListCombo";
@@ -782,6 +783,8 @@ function ClientHistoryPageBody() {
           is what their invoices say is due (the Invoice Statement's figure);
           on order is work not billed yet. Together they are everything owed,
           which is order value less what was received. Credit stands on its own. */}
+      {/* What they hold of ours on memo — on approval (lib/memos.ts). */}
+      <PartyMemos party={{ kind: "client", id: client.id }} />
       <StatStrip items={[
         { label: "Due now", value: account.dueNow > 0 ? fmtMoney(account.dueNow) : "✓ Cleared", tone: account.dueNow > 0 ? "out" : "in", icon: AlertCircle,
           sub: openingDebitAmt(client) > 0 ? "Billed, unpaid · with balance brought forward" : "Billed, not paid" },

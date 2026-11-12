@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { PartyMemos } from "@/components/MemoSheets";
 import { Link, useParams } from "react-router-dom";
 import { Handshake, Pencil, Wallet, Truck, Receipt, Coins, ArrowDownRight, Tag, ArrowDownCircle } from "lucide-react";
 import { fmtDate, type Purchase, type SupplierSale } from "@/lib/db";
@@ -142,6 +143,8 @@ export function BrokerHistoryPage() {
       />
 
       {/* What we owe through the broker: only with fig.payables — an admin always. */}
+      {/* What they hold of ours on memo — on approval (lib/memos.ts). */}
+      <PartyMemos party={{ kind: "broker", id: broker.id }} />
       {has("fig.payables") && <StatStrip items={[
         { label: "Bills pending", value: fmtMoneyInr(acc.billsPending), icon: Receipt, tone: acc.billsPending > 0.5 ? "out" : undefined,
           sub: `${bills.filter(p => purchasePending(p) > 0.5).length} of ${bills.length} bill${bills.length === 1 ? "" : "s"}` },
