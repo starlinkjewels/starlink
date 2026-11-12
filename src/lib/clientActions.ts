@@ -29,6 +29,8 @@ export function clientDeleteBlocker(db: DB, clientId: string): string | undefine
   const c = db.clients.find(x => x.id === clientId);
   if (!c) return "That client is no longer there";
   if (!collectionsFresh(CLIENT_REF_COLS)) return checkingFor(CLIENT_REF_COLS);
+  // Goods on memo with them, now or before (lib/memos.ts): the slips name them.
+  if ((db.memos ?? []).some(m => m.party.kind === "client" && m.party.id === clientId)) return "Has memos — goods given on approval; deactivate instead";
   const orders = db.orders.filter(o => o.clientId === clientId).length;
   const invoices = (db.invoices ?? []).filter(i => i.clientId === clientId).length;
   const receipts = collectionsFresh(["clientReceipts"]) ? (db.clientReceipts ?? []).filter(r => r.clientId === clientId).length : 0;

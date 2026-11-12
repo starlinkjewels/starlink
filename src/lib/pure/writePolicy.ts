@@ -34,7 +34,7 @@ const MFG = [
   "factories.issue", "factories.companies",
   "buyAssign.add", "buyAssign.edit", "buyAssign.delete", "buyAssign.assign", "buyAssign.sell", "buyAssign.changeAssign",
   "suppliers.purchase", "suppliers.sell", "suppliers.gold",
-  "stock.add", "stock.edit", "stock.delete", "stock.companies",
+  "stock.add", "stock.edit", "stock.delete", "stock.companies", "stock.memo",
   "payments.add", "payments.edit", "payments.delete",
   "invoices.returns",
 ];
@@ -84,8 +84,10 @@ export const WRITE_POLICY: Policy = {
   factoryPayments: { create: ["payments.add", "payments.edit"], update: ["payments.edit"], delete: ["payments.delete", "payments.edit"] },
 
   // ── Sales out of stock ──
-  supplierSales: { create: ["suppliers.sell", "buyAssign.sell"], update: ["suppliers.sell", "buyAssign.sell"], delete: ["suppliers.sell", "buyAssign.sell"] },
-  diamondSales: { create: ["buyAssign.sell"], update: ["payments.add", "payments.delete", "buyAssign.delete"], delete: ["buyAssign.delete"] },
+  // A memo sold to its holder makes the sale (lib/memos.ts) — so Memo may create one.
+  supplierSales: { create: ["suppliers.sell", "buyAssign.sell", "stock.memo"], update: ["suppliers.sell", "buyAssign.sell"], delete: ["suppliers.sell", "buyAssign.sell"] },
+  memos: { create: ["stock.memo"], update: ["stock.memo"], delete: ["stock.memo"] },
+  diamondSales: { create: ["buyAssign.sell", "stock.memo"], update: ["payments.add", "payments.delete", "buyAssign.delete"], delete: ["buyAssign.delete"] },
 
   // ── Material, stock and manufacturing ──
   purchases: {
@@ -156,7 +158,7 @@ export const POLICY_NOUN: Record<string, string> = {
   clients: "clients", invoices: "invoices", giftCards: "gift cards",
   lockerTransactions: "account entries", expenses: "expenses", clientReceipts: "client receipts",
   supplierReceipts: "money from suppliers", supplierPayments: "supplier payments", factoryPayments: "factory payments",
-  supplierSales: "sales to suppliers", diamondSales: "diamond sales",
+  supplierSales: "sales to suppliers", diamondSales: "diamond sales", memos: "memos",
   purchases: "purchases", materialIssuances: "material given to factories", diamondPackets: "certified stones",
   stockMovements: "stock", stockLevels: "stock", diamondBags: "diamond bags", cadJobs: "design jobs",
   readyStock: "Ready Stock", catalogFolders: "catalogue folders", catalogItems: "catalogue designs",

@@ -39,6 +39,8 @@ export function supplierDeleteGuard(db: DB, s: Supplier, figures?: SupplierFigur
   if ((s.openingGoldFine ?? 0) > 0) return { ok: false, reason: "Has opening gold owed — deactivate instead" };
   // Gold on loan (lib/supplierGold.ts): stock lines naming them. The delete itself loads them (deleteRefusal).
   if ((db.stockMovements ?? []).some(m => m.refType === "supplierLoan" && m.refId === s.id)) return { ok: false, reason: "Has a gold account — deactivate instead" };
+  // Goods on memo with them, now or before (lib/memos.ts).
+  if ((db.memos ?? []).some(m => m.party.kind === "supplier" && m.party.id === s.id)) return { ok: false, reason: "Has memos — deactivate instead" };
   if (figures) {
     // Purchased includes an opening balance, which is the supplier's own field
     // and goes with them; anything beyond it is a real purchase.

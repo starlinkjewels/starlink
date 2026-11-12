@@ -35,6 +35,7 @@ import { companiesOf } from "./companies";
 import { materialDefs, materialName, materialUnit } from "./materials";
 import { dayOf, type FiscalYear } from "./fiscalYear";
 import { advanceOwed } from "./employeeAdvances";
+import { memoOutAsAt } from "./memos";
 
 /** Bumped when the book's shape changes, so an older book is read for what it holds. */
 export const YEAR_BOOK_VERSION = 1;
@@ -183,6 +184,10 @@ export function packetsAsAt(db: DB, day: string) {
   const gone = new Map<string, string>(); // packet → the day it left
   for (const i of db.materialIssuances) for (const id of i.diamondPacketIds ?? []) if (!gone.has(id) || i.issuedAt < gone.get(id)!) gone.set(id, i.issuedAt);
   for (const s of db.diamondSales ?? []) if (s.packetId && (!gone.has(s.packetId) || s.createdAt < gone.get(s.packetId)!)) gone.set(s.packetId, s.createdAt);
+  // Out on memo now (lib/memos.ts): held in stock until the day it went — after that it is
+  // counted with the goods out on memo (memoOutAsAt), not here.
+  const memoDay = new Map<string, string>();
+  for (const m of db.memos ?? []) if (m.dir === "out") for (const l of m.lines) if (l.packetId) memoDay.set(l.packetId, m.at);
   let count = 0, ct = 0, valueInr = 0, unpriced = 0, undated = 0;
   for (const p of db.diamondPackets ?? []) {
     if (!by(p.createdAt, day)) continue;
@@ -190,6 +195,7 @@ export function packetsAsAt(db: DB, day: string) {
     let held: boolean;
     if (left) held = !by(left, day);
     else if (p.status === "in_stock") held = true;
+    else if (p.status === "memo") held = !by(memoDay.get(p.id) ?? p.createdAt, day);
     else { undated++; held = false; } // left stock by a way that keeps no date
     if (!held) continue;
     count++; ct += p.carat || 0;
@@ -209,6 +215,15 @@ export function readyStockAsAt(db: DB, day: string) {
       else if (o.readyStockBackAt && !by(o.readyStockBackAt, day)) backAfter.set(o.readyStockItemId, (backAfter.get(o.readyStockItemId) || 0) + q);
     }
     if (o.stockSale && !by(o.stockSale.soldAt, day)) soldAfter.set(o.stockSale.itemId, (soldAfter.get(o.stockSale.itemId) || 0) + o.stockSale.qty);
+  }
+  // Pieces out on memo (lib/memos.ts): off the shelf from the day they went, back on it the day they returned.
+  for (const m of db.memos ?? []) {
+    if (m.dir !== "out") continue;
+    for (const l of m.lines) {
+      if (!l.readyStockItemId) continue;
+      if (!by(m.at, day)) soldAfter.set(l.readyStockItemId, (soldAfter.get(l.readyStockItemId) || 0) + l.qty);
+      for (const e of m.events ?? []) if (!by(e.at, day)) for (const x of e.lines) if (x.lineId === l.id) backAfter.set(l.readyStockItemId, (backAfter.get(l.readyStockItemId) || 0) + x.qty);
+    }
   }
   let pieces = 0, costUsd = 0, unpriced = 0, priceUsd = 0;
   for (const it of db.readyStock ?? []) {
@@ -255,6 +270,8 @@ export interface YearBook {
   key: string; from: string; to: string;
   builtAt: string;
   pnl: ReturnType<typeof yearPnl>;
+  /** Our goods out on memo on the last day — still ours, beside the stock (absent in books closed before memos). */
+  memoOut?: ReturnType<typeof memoOutAsAt>;
   /** USD: + they owe us, − we hold their money. */
   clients: (PartyLine & { net: number })[];
   /** ₹: + we owe them, − they hold ours. Gold: fine grams we owe in gold. */
@@ -366,6 +383,7 @@ export function buildYearBook(db: DB, fy: FiscalYear): YearBook {
     brokers, designers, lockers, employees,
     stock: stockAsAt(db, day),
     packets: packetsAsAt(db, day),
+    memoOut: memoOutAsAt(db, day),
     readyStock: readyStockAsAt(db, day),
     checks,
   };

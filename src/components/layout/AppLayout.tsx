@@ -15,8 +15,8 @@ import { pageNeeds, isLightPage } from "@/lib/pageData";
 import { totalsCovered } from "@/lib/partyTotals";
 import { useDb } from "@/hooks/useDb";
 import { Suspense, useEffect, useRef, useState } from "react";
-import { Loader2, Lock } from "lucide-react";
-import { can, nextAccessChange } from "@/lib/permissions";
+import { Loader2, Lock, FileOutput } from "lucide-react";
+import { can, hasFeature, nextAccessChange } from "@/lib/permissions";
 import { pageRequirement } from "@/lib/modules";
 import { GiftCardPopup } from "@/components/GiftCardPopup";
 import { ReminderHost } from "@/components/autopilot/Reminders";
@@ -51,6 +51,7 @@ const NAV: NavItem[] = [
   { to: "/ready-stock", label: "Ready Stock", icon: Gem, roles: ["admin","employee","client"] },
   { to: "/payments", label: "Payments", icon: CreditCard, roles: ["admin","employee"] },
   { to: "/buy-assign", label: "Buy & Assign", icon: ShoppingCart, roles: ["admin","employee"] },
+  { to: "/memo", label: "Memo", icon: FileOutput, roles: ["admin","employee"] },
   { to: "/ai", label: "Assistant", icon: Sparkles },
   { to: "/messages", label: "Messages", icon: MessageSquare },
   { to: "/notifications", label: "Alerts", icon: Bell },
@@ -89,6 +90,8 @@ const NAV_GROUPS: { title: string; items: NavItem[] }[] = [
     { to: "/designers", label: "Designers", icon: PenTool, roles: ["admin", "employee"] },
     { to: "/stock", label: "Stock", icon: Boxes, roles: ["admin", "employee"] },
     { to: "/buy-assign", label: "Buy & Assign", icon: ShoppingCart, roles: ["admin", "employee"] },
+    // Goods out on approval (lib/memos.ts) — for those whose access has Memo.
+    { to: "/memo", label: "Memo", icon: FileOutput, roles: ["admin","employee"] },
   ] },
   { title: "Money & Accounts", items: [
     { to: "/payments", label: "Payments", icon: CreditCard, roles: ["admin", "employee"] },
@@ -139,6 +142,7 @@ const MORE_NAV: NavItem[] = [
   // Buy & Assign was reachable on desktop only; the More drawer never listed it,
   // so on a phone there was no way to buy material or assign gold at all.
   { to: "/buy-assign", label: "Buy & Assign", icon: ShoppingCart, roles: ["admin","employee"] },
+  { to: "/memo", label: "Memo", icon: FileOutput, roles: ["admin","employee"] },
   { to: "/factories", label: "Factories", icon: Factory, roles: ["admin","employee"] },
   { to: "/designers", label: "Designers", icon: PenTool, roles: ["admin","employee"] },
   { to: "/ready-stock", label: "Ready Stock", icon: Gem, roles: ["admin","employee","client"] },
@@ -182,6 +186,7 @@ const PAGE_TITLES: Record<string, string> = {
   "/suppliers": "Suppliers",
   "/stock": "Stock",
   "/buy-assign": "Buy & Assign",
+  "/memo": "Memo",
   "/factories": "Factories",
   "/designers": "Designers",
   "/ready-stock": "Ready Stock",
@@ -217,6 +222,7 @@ const ICON_COLORS: Record<string, string> = {
   "/suppliers":  "bg-lime-500/15 text-lime-600",
   "/stock":      "bg-cyan-500/15 text-cyan-600",
   "/buy-assign": "bg-sky-500/15 text-sky-600",
+  "/memo":       "bg-violet-500/15 text-violet-600",
   "/factories":  "bg-orange-500/15 text-orange-600",
   "/designers":  "bg-violet-500/15 text-violet-600",
   "/ready-stock": "bg-pink-500/15 text-pink-600",
@@ -369,6 +375,8 @@ export function AppLayout() {
   // Documents: admins, and the people an admin has let in (Edit details → Documents
   // access) — the same rule as lib/documents.ts canUseDocuments, kept here so the
   // frame doesn't load the Documents code just to draw the menu.
+  // Memo: admins, and employees whose access has the Memo switch (Stock).
+  const canSeeMemo = user!.role === "admin" || (user!.role === "employee" && hasFeature(user, db.roles ?? [], "stock.memo"));
   const canSeeDocuments = user!.role === "admin" || (user!.role === "employee" && user!.documentsAccess === true);
   // An employee's sidebar is drawn from their role: a section they may not see
   // is not offered. Admins see everything; a client's portal is unaffected.
@@ -392,6 +400,7 @@ export function AppLayout() {
     && (n.to !== "/giftcard" || canSeeGiftCard)
     && (n.to !== "/ai" || AI_ENABLED)
     && (n.to !== "/documents" || canSeeDocuments)
+    && (n.to !== "/memo" || canSeeMemo)
     && roleAllows(n.to);
 
   const nav = NAV.filter(navFilter);

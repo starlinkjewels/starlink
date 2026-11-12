@@ -209,6 +209,13 @@ export function lockedPart(col: string, r: Rec | null | undefined, until: string
       return dated(r.createdAt, until) ? pick(r, ["carat", "ratePerCaratInr", "purchaseId", "companyId", "createdAt"]) : null;
     case "lockers":
       return dated(r.createdAt, until) ? pick(r, ["openingBalance", "currency", "createdAt"]) : null;
+    case "memos": {
+      // A memo (lib/memos.ts): what went out in a closed year, and what came back or
+      // was sold in one, stay as they were. Goods still out can come back in the new year.
+      const evs = arr(r.events).filter(e => dated(e.at, until));
+      if (dated(r.at, until)) return { ...pick(r, ["no", "dir", "party", "at", "currency", "companyId", "lines"]), events: evs };
+      return evs.length ? { events: evs } : null;
+    }
     case "adminRecords": {
       // Sales commission rates (lib/commission.ts): a % that starts in a closed
       // year paid that year's sales — it stays as it was. A new % starts later.
@@ -242,7 +249,7 @@ const CLOSE_FIELDS = ["booksClosedTo", "fyStartMonth", "fyCustomDates", "yearClo
 const NOUN: Record<string, string> = {
   lockerTransactions: "account entry", expenses: "expense", supplierReceipts: "money received from a supplier",
   supplierPayments: "advance to a supplier", factoryPayments: "advance to a factory", clientReceipts: "client receipt",
-  stockMovements: "stock entry", supplierSales: "sale to a supplier", purchases: "purchase", diamondSales: "diamond sale",
+  stockMovements: "stock entry", memos: "memo", supplierSales: "sale to a supplier", purchases: "purchase", diamondSales: "diamond sale",
   invoices: "invoice", orders: "order", materialIssuances: "factory issue", cadJobs: "design charge",
   diamondPackets: "certified stone", lockers: "account's opening balance", clients: "client's opening balance",
   suppliers: "supplier's opening balance", factories: "factory's opening balance", brokers: "broker's opening balance",

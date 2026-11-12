@@ -419,6 +419,8 @@ export function resolveStockMovementLink(m: StockMovement, ctx: StockLinkContext
     }
     return { label: `Sold to ${sale.buyerName || "buyer"}` };
   }
+  // Out on memo, and back (lib/memos.ts) — the note carries the slip's number.
+  if (m.refType === "memo") return { label: m.note || (m.type === "purchase_in" ? "Back from memo" : "Out on memo") };
   // Sold to one of our suppliers (lib/supplierSales.ts) — and back again when that sale is deleted.
   if (m.refType === "supplierSale") {
     const sale = ctx.supplierSales?.find(s => s.id === m.refId);

@@ -34,7 +34,7 @@ import { DIWALI } from "@/lib/fiscalYear";
 import { topMoves, type Move } from "./strategy";
 
 /** The books the cash cycle, materials and product mix read. */
-export const BOOKS: LazyCol[] = [...COST, "diamondSales", "supplierReceipts", "supplierPayments", "supplierSales", "factoryPayments"];
+export const BOOKS: LazyCol[] = [...COST, "diamondSales", "supplierReceipts", "supplierPayments", "supplierSales", "factoryPayments", "memos"];
 
 const DAY = 86_400_000;
 const r0 = (n: number) => Math.round(n);

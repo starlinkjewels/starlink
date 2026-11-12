@@ -21,7 +21,7 @@
 export const LAZY_COLS = [
   "materialIssuances", "purchases", "lockerTransactions", "stockMovements",
   "supplierReceipts", "supplierPayments", "factoryPayments",
-  "clientReceipts", "diamondPackets", "diamondSales", "supplierSales",
+  "clientReceipts", "diamondPackets", "diamondSales", "supplierSales", "memos",
   // The catalog and product photos — only their two pages use them.
   "catalogFolders", "catalogFavorites", "productPhotoFolders", "productPhotoItems", "shares",
 ] as const;
@@ -67,12 +67,14 @@ const PAGE: Record<string, readonly LazyCol[]> = {
   "/payments": ["clientReceipts", "lockerTransactions", "purchases", "materialIssuances", "supplierReceipts", "supplierPayments", "factoryPayments", "diamondSales", "supplierSales"],
   "/clients": [],
   // + materialIssuances: the client's own material card reads what went to factories.
-  "/clients/:id": ["clientReceipts", "lockerTransactions", "diamondSales", "diamondPackets", "materialIssuances"],
-  "/suppliers/:id": ["purchases", "materialIssuances", "diamondPackets", "stockMovements", "lockerTransactions", "supplierReceipts", "supplierPayments", "supplierSales"],
+  "/clients/:id": ["clientReceipts", "lockerTransactions", "diamondSales", "diamondPackets", "materialIssuances", "memos"],
+  "/suppliers/:id": ["purchases", "materialIssuances", "diamondPackets", "stockMovements", "lockerTransactions", "supplierReceipts", "supplierPayments", "supplierSales", "memos"],
   "/factories/:id": ["purchases", "materialIssuances", "diamondPackets", "stockMovements", "lockerTransactions", "factoryPayments"],
   // + materialIssuances: its Opening stock form (Buy & Assign's) records opening gold at a factory.
   "/stock": ["diamondPackets", "stockMovements", "materialIssuances"],
-  "/stock/:id": ["purchases", "materialIssuances", "diamondPackets", "stockMovements", "diamondSales", "supplierSales"],
+  "/stock/:id": ["purchases", "materialIssuances", "diamondPackets", "stockMovements", "diamondSales", "supplierSales", "memos"],
+  // Memo: the slips, the stock they move, and what a sold line's cost is worked out from.
+  "/memo": ["memos", "purchases", "materialIssuances", "diamondPackets", "stockMovements", "diamondSales", "supplierSales", "clientReceipts"],
   "/buy-assign": ["purchases", "materialIssuances", "diamondPackets", "stockMovements", "diamondSales", "supplierSales", "lockerTransactions", "supplierReceipts", "supplierPayments"],
   "/locker": ["clientReceipts", "lockerTransactions"],
   "/expenses": ["lockerTransactions"],

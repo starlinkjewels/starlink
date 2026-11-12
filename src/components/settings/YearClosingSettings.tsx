@@ -590,6 +590,7 @@ function BookBody({ book }: { book: YearBook }) {
         <p className="mt-2 text-xs text-muted-foreground">
           Certified stones: {book.packets.count} ({carats(book.packets.ct)}) · {inr(book.packets.valueInr)}{book.packets.unpriced ? ` · ${book.packets.unpriced} not priced` : ""}.
           {" "}Ready Stock: {book.readyStock.pieces} piece{book.readyStock.pieces === 1 ? "" : "s"} · cost {usd(book.readyStock.costUsd)}{book.readyStock.unpriced ? ` · ${book.readyStock.unpriced} with no cost` : ""}.
+          {book.memoOut && book.memoOut.lines > 0 && <>{" "}Out on memo (still ours, not in the figures above): {inr(book.memoOut.costInr)} at cost{book.memoOut.pieces ? ` + ${book.memoOut.pieces} piece${book.memoOut.pieces === 1 ? "" : "s"}` : ""}{book.memoOut.unpriced ? ` · ${book.memoOut.unpriced} not priced` : ""}.</>}
         </p>
       </section>
     </div>

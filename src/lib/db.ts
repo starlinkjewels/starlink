@@ -1736,7 +1736,8 @@ export interface DiamondPacket {
   ratePerCaratInr?: number; // cost basis (INR) for reference
   supplierId?: string;
   purchaseId?: string;
-  status: "in_stock" | "issued" | "used" | "sold";
+  /** "memo": out on approval (lib/memos.ts) — still ours, not available. */
+  status: "in_stock" | "issued" | "used" | "sold" | "memo";
   orderId?: string; // set once issued/used against an order
   createdBy: string;
   createdAt: string;
@@ -1852,6 +1853,62 @@ export interface SupplierReceipt {
 }
 
 /** What one line of a sale to a supplier is. */
+/* ── Memo (goods on approval — lib/memos.ts) ───────────────────────────── */
+/** What a memo line is: loose diamonds from a bag, a certified stone, gold, another
+ *  material (gems…), a Ready Stock piece — the same kinds a sale to a supplier has. */
+export interface MemoLine {
+  id: string;
+  kind: SupplierSaleKind;
+  material: string;
+  /** Pooled goods: the lot, purity or grade. */
+  bucket?: string;
+  /** Loose diamonds: how many stones, when counted. */
+  pieces?: number;
+  packetId?: string;
+  readyStockItemId?: string;
+  qty: number;
+  unit: string;
+  label: string;
+  /** The price agreed for it, in the memo's currency — per unit, and for the line. */
+  rate?: number;
+  amount: number;
+  /** What it cost us, ₹, when it went out (never a piece's — that is admin-only). */
+  costInr?: number;
+}
+/** Goods of a memo coming back, or sold to whoever holds them. */
+export interface MemoEvent {
+  id: string;
+  at: string;
+  kind: "return" | "sold";
+  lines: { lineId: string; qty: number; pieces?: number }[];
+  /** Sold: the sale it became (a sale to a supplier, a diamond sale) — or, for a
+   *  piece sold to a client, nothing: the order is placed from Ready Stock. */
+  sale?: { type: "supplierSale" | "diamondSale"; ids: string[] };
+  /** A return made so the goods can be sold — becomes "sold" once the sale is saved. */
+  forSale?: boolean;
+  note?: string;
+  createdBy: string;
+}
+export interface Memo {
+  id: string;
+  /** "MO-0001" — out; "MI-0001" — in. */
+  no: string;
+  dir: "out" | "in";
+  companyId?: string;
+  party: { kind: "client" | "supplier" | "broker"; id: string };
+  /** The day the goods went, and the day they are due back. */
+  at: string;
+  dueAt?: string;
+  currency: PurchaseCurrency;
+  lines: MemoLine[];
+  events: MemoEvent[];
+  notes?: string;
+  createdBy: string;
+  createdAt: string;
+  /** Set while it is being cancelled (lib/memos.ts) — so two screens never both do it. */
+  deletingAt?: string;
+}
+
 export type SupplierSaleKind = "diamond" | "certified" | "gold" | "material" | "piece";
 
 /** One line of a sale to a supplier — what left our stock, its price and what it cost us. */
@@ -2249,7 +2306,7 @@ export interface StockMovement {
    *  "supplierLoan": gold borrowed from a supplier (in), or given back (out) —
    *  refId is the SUPPLIER; the line is their gold account (lib/supplierGold.ts).
    *  It carries no cost of ours. */
-  refType?: "purchase" | "materialIssuance" | "order" | "diamondSale" | "supplierSale" | "manual" | "opening" | "transfer" | "bagMove" | "supplierLoan";
+  refType?: "purchase" | "materialIssuance" | "order" | "diamondSale" | "supplierSale" | "manual" | "opening" | "transfer" | "bagMove" | "supplierLoan" | "memo";
   refId?: string;
   /** "supplierLoan": the fine (24K) grams it makes, worked out when it was written. */
   fine?: number;
@@ -2309,6 +2366,8 @@ export interface DB {
   diamondPackets: DiamondPacket[];
   diamondSales: DiamondSale[];
   supplierSales: SupplierSale[];
+  /** Goods out (or in) on approval — lib/memos.ts. */
+  memos: Memo[];
   /** ADMIN ONLY — loaded for the admin alone and refused to everyone else by
    *  the security rules. See AdminRecord. */
   adminRecords: AdminRecord[];
@@ -2405,6 +2464,7 @@ function emptyDb(): DB {
     diamondPackets: [],
     diamondSales: [],
     supplierSales: [],
+    memos: [],
     adminRecords: [],
     roles: [],
     settings: defaultSettings(),
@@ -2912,6 +2972,7 @@ type ArrayCol =
   | "diamondPackets"
   | "diamondSales"
   | "supplierSales"
+  | "memos"
   | "adminRecords"
   | "roles";
 const ARRAY_COLS: ArrayCol[] = [
@@ -2949,6 +3010,7 @@ const ARRAY_COLS: ArrayCol[] = [
   "diamondPackets",
   "diamondSales",
   "supplierSales",
+  "memos",
   "adminRecords",
   "roles",
 ];
@@ -4493,6 +4555,7 @@ function subscribeAll(scope: Scope): Promise<void> {
         col === "diamondPackets" ||
         col === "diamondSales" ||
         col === "supplierSales" ||
+        col === "memos" ||
         col === "roles"
       )
         continue;

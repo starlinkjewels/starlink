@@ -65,7 +65,7 @@ const COL_MODULE: Record<string, ModuleKey> = {
   suppliers: "suppliers", purchases: "suppliers", supplierReceipts: "suppliers", supplierPayments: "suppliers", brokers: "suppliers",
   factories: "factories", materialIssuances: "factories", factoryPayments: "factories",
   designers: "designers", cadJobs: "designers",
-  stockMovements: "stock", diamondPackets: "stock", diamondSales: "stock", supplierSales: "suppliers", diamondBags: "stock",
+  stockMovements: "stock", diamondPackets: "stock", diamondSales: "stock", supplierSales: "suppliers", memos: "stock", diamondBags: "stock",
   readyStock: "readyStock", giftCards: "giftCards", clientReceipts: "payments",
   catalogFolders: "catalog", catalogItems: "catalog", shares: "catalog",
   productPhotoFolders: "productPhotos", productPhotoItems: "productPhotos",
@@ -78,7 +78,7 @@ const COL_NOUN: Record<string, string> = {
   suppliers: "supplier", purchases: "purchase", supplierReceipts: "money from supplier",
   supplierPayments: "supplier payment", brokers: "broker", factories: "factory", materialIssuances: "material issue",
   factoryPayments: "factory payment", designers: "designer", cadJobs: "design job", stockMovements: "stock movement", diamondPackets: "certified stone",
-  diamondSales: "diamond sale", supplierSales: "sale to a supplier", diamondBags: "diamond bag", readyStock: "ready-stock item", giftCards: "gift card",
+  diamondSales: "diamond sale", supplierSales: "sale to a supplier", memos: "memo", diamondBags: "diamond bag", readyStock: "ready-stock item", giftCards: "gift card",
   clientReceipts: "receipt", catalogFolders: "catalog folder", catalogItems: "catalog item",
   shares: "share link", productPhotoFolders: "photo folder", productPhotoItems: "product photo",
   tasks: "task", meta: "settings", adminRecords: "admin figure",
@@ -89,7 +89,7 @@ const COL_NOUN: Record<string, string> = {
 const PRIORITY = [
   "orders", "clients", "users", "invoices", "clientReceipts", "purchases", "expenses",
   "suppliers", "brokers", "factories", "designers", "cadJobs", "readyStock", "diamondPackets", "materialIssuances", "giftCards",
-  "supplierPayments", "factoryPayments", "supplierReceipts", "diamondSales", "supplierSales", "lockers",
+  "supplierPayments", "factoryPayments", "supplierReceipts", "diamondSales", "supplierSales", "memos", "lockers",
   "catalogFolders", "catalogItems", "productPhotoFolders", "productPhotoItems", "shares",
   "tasks", "meta", "adminRecords", "lockerTransactions", "diamondBags", "stockMovements",
 ];
@@ -139,6 +139,7 @@ export function docLabel(col: string, d: Record<string, unknown> | null | undefi
     case "diamondPackets": return s(d.stockNumber) || s(d.certificateNumber) || id;
     case "diamondSales": return `${num(d.carat)}ct ${s(d.shape)}`;
     case "supplierSales": return `₹${num(d.totalInr)} sale`;
+    case "memos": return `Memo ${String(d.no ?? "")}`;
     case "diamondBags": return s(d.no) ? `${s(d.no)} · ${s(d.key)}` : s(d.key) || id;
     case "readyStock": return s(d.sku) ? `${s(d.sku)} ${s(d.name)}` : s(d.name) || id;
     case "giftCards": return `$${num(d.amount)}`;
@@ -244,6 +245,8 @@ export function undoBlocker(changes: LoggedChange[], truncated: boolean): string
   // A sale out of stock (to a supplier, or a diamond sold straight from stock) took its
   // stock out in a write of its own, which this entry does not hold: putting the records
   // back would bring the sale or its money back without the stock — or the other way round.
+  // A memo moves stock in a separate write — undone on the Memo page (take the goods back, or cancel it).
+  if (changes.some(c => c.col === "memos")) return "A memo moves stock too — take the goods back, or cancel it, on the Memo page";
   if (changes.some(c => c.col === "supplierSales")) {
     return "A sale to a supplier moves stock and money together. Delete it, or record it again, on the supplier's page.";
   }
