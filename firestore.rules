@@ -119,27 +119,27 @@ service cloud.firestore {
     function pol_giftCards_create() { return ['clients.giftCards', 'orders.dispatch']; }
     function pol_giftCards_update() { return ['clients.giftCards', 'giftCards.cancel', 'invoices.returns', 'orders.dispatch', 'orders.cancel']; }
     function pol_giftCards_delete() { return []; }
-    function pol_lockerTransactions_create() { return ['payments.add', 'payments.edit', 'payments.broker', 'locker.add', 'locker.edit', 'expenses.add', 'buyAssign.sell', 'suppliers.sell', 'orders.dispatch']; }
+    function pol_lockerTransactions_create() { return ['payments.add', 'payments.edit', 'payments.broker', 'locker.add', 'locker.edit', 'expenses.add', 'buyAssign.sell', 'suppliers.sell', 'suppliers.purchase', 'orders.dispatch']; }
     function pol_lockerTransactions_update() { return ['payments.add', 'payments.edit', 'locker.edit', 'expenses.edit']; }
-    function pol_lockerTransactions_delete() { return ['payments.delete', 'payments.edit', 'expenses.delete', 'suppliers.sell', 'buyAssign.delete']; }
+    function pol_lockerTransactions_delete() { return ['payments.delete', 'payments.edit', 'expenses.delete', 'suppliers.sell', 'suppliers.purchase', 'buyAssign.delete']; }
     function pol_expenses_create() { return ['expenses.add', 'payments.add', 'orders.dispatch']; }
     function pol_expenses_update() { return ['expenses.edit', 'payments.edit']; }
     function pol_expenses_delete() { return ['expenses.delete', 'payments.delete']; }
     function pol_clientReceipts_create() { return ['payments.add', 'payments.edit', 'locker.edit']; }
     function pol_clientReceipts_update() { return ['payments.edit', 'payments.delete', 'invoices.delete']; }
     function pol_clientReceipts_delete() { return ['payments.delete', 'payments.edit']; }
-    function pol_supplierReceipts_create() { return ['payments.add', 'suppliers.sell', 'buyAssign.sell']; }
+    function pol_supplierReceipts_create() { return ['payments.add', 'suppliers.sell', 'buyAssign.sell', 'suppliers.purchase']; }
     function pol_supplierReceipts_update() { return ['payments.edit']; }
-    function pol_supplierReceipts_delete() { return ['payments.delete', 'suppliers.sell']; }
+    function pol_supplierReceipts_delete() { return ['payments.delete', 'suppliers.sell', 'suppliers.purchase']; }
     function pol_supplierPayments_create() { return ['payments.add', 'payments.edit']; }
     function pol_supplierPayments_update() { return ['payments.edit']; }
     function pol_supplierPayments_delete() { return ['payments.delete', 'payments.edit']; }
     function pol_factoryPayments_create() { return ['payments.add', 'payments.edit']; }
     function pol_factoryPayments_update() { return ['payments.edit']; }
     function pol_factoryPayments_delete() { return ['payments.delete', 'payments.edit']; }
-    function pol_supplierSales_create() { return ['suppliers.sell', 'buyAssign.sell', 'stock.memo']; }
-    function pol_supplierSales_update() { return ['suppliers.sell', 'buyAssign.sell']; }
-    function pol_supplierSales_delete() { return ['suppliers.sell', 'buyAssign.sell']; }
+    function pol_supplierSales_create() { return ['suppliers.sell', 'buyAssign.sell', 'stock.memo', 'suppliers.purchase']; }
+    function pol_supplierSales_update() { return ['suppliers.sell', 'buyAssign.sell', 'suppliers.purchase']; }
+    function pol_supplierSales_delete() { return ['suppliers.sell', 'buyAssign.sell', 'suppliers.purchase']; }
     function pol_memos_create() { return ['stock.memo']; }
     function pol_memos_update() { return ['stock.memo']; }
     function pol_memos_delete() { return ['stock.memo']; }

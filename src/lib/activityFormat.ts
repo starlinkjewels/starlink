@@ -138,7 +138,7 @@ export function docLabel(col: string, d: Record<string, unknown> | null | undefi
       : `${s(d.type)} ${num(d.quantity)} ${s(d.purityOrQuality)}`;
     case "diamondPackets": return s(d.stockNumber) || s(d.certificateNumber) || id;
     case "diamondSales": return `${num(d.carat)}ct ${s(d.shape)}`;
-    case "supplierSales": return `₹${num(d.totalInr)} sale`;
+    case "supplierSales": return d.returnOf ? `Debit note ${String((d.returnOf as { noteNo?: string }).noteNo ?? "")}` : `₹${num(d.totalInr)} sale`;
     case "memos": return `Memo ${String(d.no ?? "")}`;
     case "diamondBags": return s(d.no) ? `${s(d.no)} · ${s(d.key)}` : s(d.key) || id;
     case "readyStock": return s(d.sku) ? `${s(d.sku)} ${s(d.name)}` : s(d.name) || id;

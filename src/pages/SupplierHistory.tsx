@@ -1,4 +1,6 @@
 import { BuyMaterialForm } from "@/components/BuyMaterialForm";
+import { Undo2, Printer } from "lucide-react";
+import { PurchaseReturnSheet, printDebitNote } from "@/components/PurchaseReturnSheet";
 import { PartyMemos } from "@/components/MemoSheets";
 import { brokerSuppliers } from "@/lib/brokers";
 import { useCan, useHas, useMayExport } from "@/hooks/useCan";
@@ -116,6 +118,8 @@ function SupplierHistoryPageBody() {
   const advances = (db.supplierPayments ?? []).filter(x => x.supplierId === id);
   // Goods we sold them — come off what we owe (lib/supplierSales.ts).
   const sales = (db.supplierSales ?? []).filter(x => x.supplierId === id).sort((a, b) => +new Date(b.createdAt) - +new Date(a.createdAt));
+  // Of those, goods sent back on debit notes (lib/purchaseReturns.ts) — on the account the same way, said apart.
+  const returnedInr = Math.round(sales.filter(x => x.returnOf).reduce((t, x) => t + x.totalInr, 0) * 100) / 100;
   const account = supplierAccount(purchases, receipts, supplier, advances, sales);
 
   // ── Opening balance (migration) ──
@@ -208,6 +212,8 @@ function SupplierHistoryPageBody() {
   // ── Receive money FROM the supplier (refund / return credit) ──
   const [showReceiveForm, setShowReceiveForm] = useState(false);
   const [showSell, setShowSell] = useState(false);
+  // Goods back to them on a debit note (lib/purchaseReturns.ts) — "" = choose the lines; an id = that bill line.
+  const [returning, setReturning] = useState<string | null>(null);
   // Gold taken from them on loan (lib/supplierGold.ts) — its forms open from the ⋯.
   const [goldMode, setGoldMode] = useState<GoldMode>(null);
   // Worked out from the stock lines and the bills (both loaded for this page, pageData.ts).
@@ -306,6 +312,8 @@ function SupplierHistoryPageBody() {
       { label: "Edit", icon: Pencil, onSelect: () => openEditPurchase(p), disabled: !mayPurchase || !edit.ok,
         // Open, but only the rate: say so before the panel does.
         hint: !mayPurchase ? ADMIN_ONLY : !edit.ok ? edit.reason : !scope.quantity ? scope.reason : undefined },
+      { label: "Return goods", icon: Undo2, onSelect: () => setReturning(p.id), show: p.purpose === "stock" && !p.fromGoldLoan,
+        disabled: !mayPurchase, hint: !mayPurchase ? ADMIN_ONLY : "Back to them on a debit note — out of stock, off what we owe" },
       { label: voidingId === p.id ? "Voiding…" : "Void", icon: Trash2, danger: true,
         disabled: !mayPurchase || voidingId === p.id || !voidable.ok, onSelect: () => voidPurchase(p),
         hint: !mayPurchase ? ADMIN_ONLY : voidable.ok ? "Reverses due, stock and factory issue" : voidable.reason },
@@ -328,6 +336,18 @@ function SupplierHistoryPageBody() {
       const sale = sales.find(x => x.id === r.id);
       if (!sale) return [];
       const block = saleUndoBlocker(db, sale);
+      // A debit note: printed, or cancelled — the goods back in stock, the bill as it was.
+      if (sale.returnOf) {
+        return [
+          { label: "Print debit note", icon: Printer, onSelect: () => printDebitNote(db, sale) },
+          { label: "Cancel debit note", icon: Trash2, danger: true, disabled: !mayPurchase || !!block, hint: !mayPurchase ? ADMIN_ONLY : block ?? "The goods back in stock; the value back on what we owe",
+            onSelect: async () => {
+              if (!(await confirmBox([`Cancel debit note ${sale.returnOf!.noteNo}?`, ...saleUndoImpact(db, sale)], { danger: true, confirmText: "Cancel debit note" }))) return;
+              try { await undoSupplierSale(db, sale, user!); toast.success(`Debit note ${sale.returnOf!.noteNo} cancelled — back in stock`); }
+              catch (e) { toast.error(e instanceof Error ? e.message : "It couldn't be cancelled"); }
+            } },
+        ];
+      }
       return [
         { label: "Edit", icon: Lock, disabled: true, hint: "Delete it and record it again", onSelect: () => {} },
         { label: "Delete sale", icon: Trash2, danger: true, disabled: !maySell || !!block, hint: !maySell ? "Your access does not include selling to suppliers" : block ?? "Back into stock; its money removed",
@@ -464,7 +484,9 @@ function SupplierHistoryPageBody() {
     }
     // Goods we sold them: owed to us, so it comes off what we owe — a credit, as a payment is.
     for (const sale of sales) {
-      rows.push({ id: sale.id, date: sale.createdAt, particulars: `Sold to them — ${sale.lines.map(l => l.label).join(", ")}${sale.notes ? ` · ${sale.notes}` : ""}`,
+      rows.push({ id: sale.id, date: sale.createdAt, particulars: sale.returnOf
+          ? `Returned to them — debit note ${sale.returnOf.noteNo}: ${sale.lines.map(l => l.label).join(", ")}${sale.returnOf.reason ? ` · ${sale.returnOf.reason}` : ""}`
+          : `Sold to them — ${sale.lines.map(l => l.label).join(", ")}${sale.notes ? ` · ${sale.notes}` : ""}`,
         qty: sale.lines.length === 1 ? sale.lines[0].qty : undefined, unit: sale.lines.length === 1 ? sale.lines[0].unit : undefined,
         rate: sale.lines.length === 1 ? sale.lines[0].rateInr : undefined,
         debit: 0, credit: sale.totalInr, balance: 0, kind: "Sale" });
@@ -550,7 +572,8 @@ function SupplierHistoryPageBody() {
         // refunds received and any purchase that was overpaid.
         { label: "Closing Balance", value: fmtInrPlain(account.net) },
         { label: "Overpaid", value: fmtInrPlain(account.overpaid) },
-        ...(account.sold > 0 ? [{ label: "Sold to them", value: fmtInrPlain(account.sold) }] : []),
+        ...(account.sold - returnedInr > 0.5 ? [{ label: "Sold to them", value: fmtInrPlain(account.sold - returnedInr) }] : []),
+        ...(returnedInr > 0 ? [{ label: "Returned (debit notes)", value: fmtInrPlain(returnedInr) }] : []),
         // The gold account is apart from the money: its own download below.
         ...(goldShown ? [{ label: "Gold owed (fine)", value: fmtG(goldOwed) }] : []),
       ],
@@ -776,6 +799,7 @@ function SupplierHistoryPageBody() {
           // Set once, when moving from an old system — so out of sight until then.
           { label: "Opening balance", icon: BookOpen, hint: "Not set — what was owed before the app", onSelect: openOpening, show: mayEdit && !openingSet },
           { label: "Sell to them", icon: Tag, hint: "Diamonds, gold, a piece — off what we owe", onSelect: () => setShowSell(true), show: maySell },
+          { label: "Return goods", icon: Undo2, hint: "Back to them on a debit note, against the bill", onSelect: () => setReturning(""), show: mayPurchase },
           // Gold borrowed from them: into our stock, owed back in gold (or turned into a bill).
           { label: "Gold on loan", icon: Coins, hint: "Take their gold into our stock", onSelect: () => setGoldMode("take"), show: mayGold },
           { label: "Return gold", icon: ArrowUpCircle, onSelect: () => setGoldMode("return"), show: mayGold, disabled: !goldReady || !goldOwedSomewhere,
@@ -824,7 +848,8 @@ function SupplierHistoryPageBody() {
         { label: "Paid", value: fmtMoneyInr(account.totalPaid), icon: CreditCard, tone: "in", sub: "Bills and advances" },
         { label: "Purchased", value: fmtMoneyInr(account.totalPurchased), icon: ShoppingBag, sub: `${purchases.length} purchase${purchases.length === 1 ? "" : "s"}` },
         ...(account.received > 0 ? [{ label: "Refunds received", value: fmtMoneyInr(account.received), icon: ArrowDownCircle }] : []),
-        ...(account.sold > 0 ? [{ label: "Sold to them", value: fmtMoneyInr(account.sold), icon: Tag }] : []),
+        ...(account.sold - returnedInr > 0.5 ? [{ label: "Sold to them", value: fmtMoneyInr(account.sold - returnedInr), icon: Tag }] : []),
+        ...(returnedInr > 0 ? [{ label: "Returned", value: fmtMoneyInr(returnedInr), icon: Undo2, sub: `${sales.filter(x => x.returnOf).length} debit note${sales.filter(x => x.returnOf).length === 1 ? "" : "s"}` }] : []),
         // Gold taken from them on loan — only when they have a gold account (its lines are below).
         ...(goldShown && showOwed ? [{ label: "Gold owed", value: Math.abs(goldOwed) > 0.0005 ? `${fmtG(goldOwed)} fine` : "✓ Returned", icon: Coins,
           tone: goldOwed > 0.0005 ? "out" as const : "in" as const, sub: goldOwed > 0.0005 ? "24K gold to give back" : "Nothing owed in gold" }] : []),
@@ -930,6 +955,7 @@ function SupplierHistoryPageBody() {
       <MoneyEntryEditor entry={editingEntry} onClose={() => setEditingEntry(null)} mayDelete={can("payments", "delete")} />
       <SupplierEditDialog supplier={editingSupplier} onClose={() => setEditingSupplier(null)} />
       <SellToSupplierSheet open={showSell} onOpenChange={setShowSell} supplierId={id!} />
+      {returning != null && <PurchaseReturnSheet supplierId={id!} purchaseId={returning || undefined} onClose={() => setReturning(null)} />}
 
       {/* The three money actions slide in from the right, so the ledger and the
           statement behind stay where they were. Closing a panel keeps what was

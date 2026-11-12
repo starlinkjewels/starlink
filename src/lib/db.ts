@@ -1945,6 +1945,8 @@ export interface SupplierSaleLine {
   /** What it cost us, ₹, at the moment it was sold (stock average, the stone's or the piece's own cost).
    *  Unset when not known — the profit then says so rather than guessing. */
   costInr?: number;
+  /** A purchase return: the bill this line goes back against. */
+  purchaseId?: string;
 }
 
 /**
@@ -1973,6 +1975,10 @@ export interface SupplierSale {
   notes?: string;
   soldBy: string;
   createdAt: string;
+  /** A purchase return (lib/purchaseReturns.ts): goods sent back against their bills, on a
+   *  debit note — the same stock-out and the same credit on their account as a sale, but
+   *  never a sale: not in Profit & Loss's sales to suppliers, and said so everywhere. */
+  returnOf?: { noteNo: string; purchaseIds: string[]; reason?: string };
   /** Set while a delete is under way (lib/supplierSales.ts) — so two screens never both undo it. */
   deletingAt?: string;
 }
