@@ -1,6 +1,6 @@
 import { AddNewItem, useAddNew } from "@/components/create/QuickCreate";
 import { useStudio } from "@/lib/studio";
-import { useId, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { useAuth } from "@/lib/auth";
 import { BillBrokerFields } from "@/components/BillBrokerFields";
 import { ListSelect, LooseLotFields, CertGradeFields } from "@/components/LotFields";
@@ -93,8 +93,18 @@ const readyName = (pc: ReadyDraft, settings?: Parameters<typeof metalHasKarats>[
  */
 const LINE_GRID = "grid grid-cols-2 gap-2.5 @md:grid-cols-3 @xl:grid-cols-[minmax(0,1.25fr)_minmax(0,1fr)_minmax(0,0.8fr)_minmax(0,1fr)_minmax(0,1.1fr)_minmax(0,0.75fr)]";
 
+/** Goods kept from a memo in (lib/memos.ts): the bill's lines filled in from the slip.
+ *  `onSaved` is told the purchases made, and how much each line was saved for. */
+export interface MemoInBuy {
+  lines: (Partial<Line> & { pieceName?: string })[];
+  currency: PurchaseCurrency;
+  notes?: string;
+  brokerId?: string;
+  onSaved: (purchaseIds: string[], qtys: number[]) => void;
+}
+
 /** One line of a supplier's bill — a size, a rate and its own discount. */
-interface Line {
+export interface Line {
   kind: BuyKind;
   purity: string;
   shape: string;
@@ -187,8 +197,10 @@ export interface PlannedBuy {
   execute: (order: Order) => Promise<void>;
 }
 
-export function BuyMaterialForm({ open, onOpenChange, supplierId: fixedSupplier, order: givenOrder, plan }: {
+export function BuyMaterialForm({ open, onOpenChange, supplierId: fixedSupplier, order: givenOrder, plan, memoIn }: {
   open: boolean; onOpenChange: (open: boolean) => void;
+  /** Keeping goods from a memo in: the lines start filled in from the slip. */
+  memoIn?: MemoInBuy;
   /** Planning for an order not yet placed: `stub` stands in for it; Save hands back a PlannedBuy. */
   plan?: { stub: Order; onPlanned: (p: PlannedBuy) => void };
   /** Opened from a supplier's page: the bill is theirs, already chosen. */
@@ -229,6 +241,18 @@ export function BuyMaterialForm({ open, onOpenChange, supplierId: fixedSupplier,
   const firstKind: BuyKind = fixedOrder ? "loose" : "gold";
   const [lines, setLines] = useState<Line[]>([{ ...emptyLine(), kind: firstKind }]);
   const [saving, setSaving] = useState(false);
+  // From a memo in: the slip's goods, as the bill's lines — changed here like any bill before it is saved.
+  useEffect(() => {
+    if (!open || !memoIn) return;
+    setLines(memoIn.lines.map(({ pieceName, ...l }) => ({
+      ...emptyLine(), ...l,
+      ...(l.kind === "ready" ? { pc: { ...emptyReady(), ...(pieceName ? { name: pieceName } : {}) }, qty: l.qty || "1" } : {}),
+    })));
+    setCurrency(memoIn.currency);
+    setNotes(memoIn.notes ?? "");
+    if (memoIn.brokerId) setBrokerage({ ...emptyBillBrokerage(), brokerId: memoIn.brokerId });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, !!memoIn]);
 
   const suppliers = db.suppliers.filter(s => s.active !== false).sort((a, b) => a.name.localeCompare(b.name));
   const set = (i: number, patch: Partial<Line>) => setLines(ls => ls.map((l, n) => (n === i ? { ...l, ...patch } : l)));
@@ -537,6 +561,8 @@ export function BuyMaterialForm({ open, onOpenChange, supplierId: fixedSupplier,
           ? `The cost of the ready piece${costless !== 1 ? "s" : ""} is for an admin to set on Ready Stock.`
           : `No $ rate on file for this date — the cost of the ready piece${costless !== 1 ? "s" : ""} was not set. Add a rate in Settings → Exchange rates, then set the cost on the piece in Ready Stock.`);
       }
+      // Kept from a memo in: the slip is told which bills these are.
+      if (memoIn && !target) memoIn.onSaved(ids, lines.map(l => Number(l.qty) || 0));
       reset();
       onOpenChange(false);
     } catch (e) {

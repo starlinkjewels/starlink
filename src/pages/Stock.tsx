@@ -1,6 +1,7 @@
 import { PageHeader } from "@/components/PageHeader";
 import { OpeningStock } from "@/pages/BuyAssign";
 import { BuyMaterialForm } from "@/components/BuyMaterialForm";
+import { MemoInStock } from "@/components/MemoInSheets";
 import { useLoaded } from "@/hooks/useLoaded";
 import { stockAverageRate } from "@/lib/orderCost";
 import { lotBalances } from "@/lib/diamondLots";
@@ -235,6 +236,7 @@ export function StockPage() {
           </button>
         )}
       </div>
+      <MemoInStock companyId={view === "all" ? undefined : view} />
       {addingMaterial && <MaterialEditor onClose={() => setAddingMaterial(false)} />}
       {mayAddStock && <OpeningStock open={opening} onOpenChange={setOpening} />}
       {mayAddStock && <BuyMaterialForm open={buying && priced} onOpenChange={setBuying} />}
