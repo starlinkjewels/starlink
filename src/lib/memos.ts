@@ -52,7 +52,8 @@ export function lineDone(memo: Pick<Memo, "events">, lineId: string): { returned
   let returned = 0, sold = 0, pieces = 0;
   for (const e of memo.events ?? []) for (const l of e.lines) {
     if (l.lineId !== lineId) continue;
-    if (e.kind === "sold") sold += l.qty; else returned += l.qty;
+    // Memo in: "kept" (bought) stands where "sold" does for a memo out — gone from the slip for good.
+    if (e.kind === "sold" || e.kind === "kept") sold += l.qty; else returned += l.qty;
     pieces += l.pieces ?? 0;
   }
   return { returned: r3(returned), sold: r3(sold), pieces };
@@ -287,6 +288,8 @@ export async function returnMemoGoods(memoId: string, picks: MemoPick[], user: W
   const live = loadDb();
   const memo = (live.memos ?? []).find(m => m.id === memoId);
   if (!memo) throw new Error("That memo is not there any more");
+  // A memo IN never moves our stock (noteMemoIn) — this is for our own goods coming back.
+  if (memo.dir !== "out") throw new Error("That is a memo in — its goods were never in our stock");
   const problem = picksProblem(memo, picks);
   if (problem) throw new Error(problem);
   const at = opts.at ?? new Date().toISOString();
@@ -485,13 +488,104 @@ async function sellStoneToClient(memo: Memo, l: MemoLine, x: MemoSaleInput["pick
   return saleId;
 }
 
+/* ── Memo IN — a dealer's goods with us ─────────────────────────────────── */
+//
+// A dealer's (or a broker's) goods with us on approval ("MI-0001"). They are
+// NOT ours: nothing goes into our stock, its value or the Year book. The slip
+// is the whole record — shown on the Memo page and beside our stock as "on memo".
+//   • kept — we buy them: the Buy form opens filled in from the slip, and the
+//     purchase bill it saves (the same bill as any purchase — stock, bag, cost,
+//     the supplier's account) is noted on the slip;
+//   • returned — they go back: noted on the slip, nothing else changes.
+
+export interface MemoInInput {
+  companyId?: string;
+  party: MemoParty;
+  at: string;
+  dueAt?: string;
+  currency: PurchaseCurrency;
+  lines: Omit<MemoLine, "id" | "costInr">[];
+  notes?: string;
+}
+
+export function memoInProblem(db: DB, s: MemoInInput): string | null {
+  if (s.party.kind === "client") return "Goods a client gives us are recorded on their order (client material) — a memo in is from a dealer or a broker";
+  if (!s.party.id) return "Choose whose goods they are";
+  if (!s.lines.length) return "Add the goods";
+  if (s.dueAt && s.dueAt.slice(0, 10) < s.at.slice(0, 10)) return "The due day is before the day they came";
+  for (const l of s.lines) {
+    if (!(l.qty > 0)) return `Enter how much — ${l.label || "a line"}`;
+    if (l.kind === "piece" && !Number.isInteger(l.qty)) return `Whole pieces only — ${l.label}`;
+    if (l.kind === "certified" && !l.spec?.certNo?.trim()) return "Enter the certified stone's report number";
+  }
+  return closedWhy(s.at, db.settings);
+}
+
+/** Take a dealer's goods in on memo — the slip only; our stock is untouched. */
+export async function recordMemoIn(db: DB, s: MemoInInput, user: Who): Promise<Memo> {
+  assertFresh();
+  const problem = memoInProblem(db, s);
+  if (problem) throw new Error(problem);
+  const no = await reserveMemoNumber(db.memos ?? [], "in");
+  const companyId = s.companyId && s.companyId !== "main" ? s.companyId : undefined;
+  const memo: Memo = {
+    id: uid("memo_"), no, dir: "in", ...(companyId ? { companyId } : {}), party: s.party, at: s.at,
+    ...(s.dueAt ? { dueAt: s.dueAt } : {}), currency: s.currency,
+    lines: s.lines.map(l => ({ ...l, id: uid("ml_") })), events: [],
+    ...(s.notes?.trim() ? { notes: s.notes.trim() } : {}), createdBy: user.id, createdAt: new Date().toISOString(),
+  };
+  updateDb(d => { if (!d.memos) d.memos = []; d.memos.unshift(JSON.parse(JSON.stringify(memo))); });
+  return memo;
+}
+
+/** Goods of a memo in go back to their owner, or are kept (bought — `purchaseIds` are the bills). */
+export function noteMemoIn(memoId: string, picks: MemoPick[], user: Who, o: { kind: "return" | "kept"; at?: string; note?: string; purchaseIds?: string[] }): void {
+  assertFresh();
+  const live = loadDb();
+  const memo = (live.memos ?? []).find(m => m.id === memoId);
+  if (!memo || memo.dir !== "in") throw new Error("That memo is not there any more");
+  const problem = picksProblem(memo, picks.map(p => ({ ...p, qty: Math.min(p.qty, lineOpen(memo, memo.lines.find(l => l.id === p.lineId) ?? memo.lines[0])) })));
+  if (problem) throw new Error(problem === "Tick what came back" ? "Tick the goods" : problem);
+  const at = o.at ?? new Date().toISOString();
+  const closed = closedWhy(at, live.settings);
+  if (closed) throw new Error(closed);
+  updateDb(d => {
+    const m = (d.memos ?? []).find(x => x.id === memoId);
+    if (!m) return;
+    const lines = picks.map(p => {
+      const l = m.lines.find(x => x.id === p.lineId);
+      // Never more than is still here (the bill may have been saved for a little more).
+      const qty = l ? Math.min(p.qty, lineOpen(m, l)) : 0;
+      return { lineId: p.lineId, qty, ...(p.pieces ? { pieces: p.pieces } : {}) };
+    }).filter(x => x.qty > 1e-6);
+    if (!lines.length) return;
+    if (!m.events) m.events = [];
+    m.events.push({
+      id: uid("me_"), at, kind: o.kind, lines,
+      ...(o.purchaseIds?.length ? { purchase: { ids: o.purchaseIds } } : {}),
+      ...(o.note?.trim() ? { note: o.note.trim() } : {}), createdBy: user.id,
+    });
+  });
+}
+
+/** A dealer's goods still with us on memo — line by line, for the stock screens. */
+export function memoInOpenLines(db: Pick<DB, "memos">, companyId?: string): { memo: Memo; line: MemoLine; open: number }[] {
+  const out: { memo: Memo; line: MemoLine; open: number }[] = [];
+  for (const m of db.memos ?? []) {
+    if (m.dir !== "in" || (companyId && (m.companyId || "main") !== companyId)) continue;
+    for (const l of m.lines) { const open = lineOpen(m, l); if (open > 1e-6) out.push({ memo: m, line: l, open }); }
+  }
+  return out;
+}
+
 /* ── Cancel ─────────────────────────────────────────────────────────────── */
 
 /** Why a memo can't be cancelled — or null. Only one with nothing back or sold yet. */
 export function memoCancelBlocker(db: DB, memo: Memo): string | null {
-  if ((memo.events ?? []).length) return "Goods have come back or been sold on it — take the rest back instead";
+  if ((memo.events ?? []).length) return memo.dir === "in" ? "Goods on it were returned or kept — return the rest instead" : "Goods have come back or been sold on it — take the rest back instead";
   const closed = closedWhy(memo.at, db.settings);
   if (closed) return closed;
+  if (memo.dir === "in") return null;
   for (const l of memo.lines) {
     if (l.kind === "certified") {
       const p = (db.diamondPackets ?? []).find(x => x.id === l.packetId);
@@ -510,6 +604,8 @@ export async function cancelMemo(memoId: string, user: Who): Promise<void> {
   if (!memo) throw new Error("That memo is already gone");
   const block = memoCancelBlocker(live, memo);
   if (block) throw new Error(block);
+  // A memo in never touched our stock: only the slip goes.
+  if (memo.dir === "in") { updateDb(d => { d.memos = (d.memos ?? []).filter(x => x.id !== memoId); }); return; }
   busy.add(memoId);
   try {
     await claim(memo);

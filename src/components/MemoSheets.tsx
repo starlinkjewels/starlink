@@ -400,7 +400,7 @@ export function PartyMemos({ party }: { party: MemoParty }) {
   const has = useHas();
   const [adding, setAdding] = useState(false);
   const may = user?.role === "admin" || has("stock.memo");
-  const mine = (db.memos ?? []).filter(m => m.dir === "out" && m.party.kind === party.kind && m.party.id === party.id);
+  const mine = (db.memos ?? []).filter(m => m.party.kind === party.kind && m.party.id === party.id);
   const open = mine.filter(m => m.lines.some(l => lineOpen(m, l) > 1e-6));
   if (!may || user?.role === "client") return null;
   if (!mine.length) return null;
@@ -409,7 +409,7 @@ export function PartyMemos({ party }: { party: MemoParty }) {
       <div className="px-5 py-4 border-b border-border/60 flex items-center justify-between gap-3 flex-wrap">
         <div>
           <p className="font-display text-lg text-brand-dark">On memo</p>
-          <p className="text-xs text-muted-foreground">{open.length ? `${open.length} memo${open.length === 1 ? "" : "s"} with goods still out` : "Nothing out now"} · {mine.length} in all</p>
+          <p className="text-xs text-muted-foreground">{open.length ? `${open.length} open memo${open.length === 1 ? "" : "s"}` : "Nothing open now"} · {mine.length} in all</p>
         </div>
         <div className="flex gap-2">
           <Button variant="outline" size="sm" className="rounded-lg h-9" onClick={() => setAdding(true)}><FileOutput className="h-4 w-4" /> Send on memo</Button>
@@ -421,7 +421,7 @@ export function PartyMemos({ party }: { party: MemoParty }) {
           {open.map(m => (
             <div key={m.id} className="py-2 border-t border-border/50 first:border-t-0 flex items-baseline justify-between gap-3">
               <div className="min-w-0">
-                <p className="text-sm"><span className="font-mono text-xs font-semibold">{m.no}</span> <span className="text-muted-foreground">· out {fmtDate(m.at)}{m.dueAt ? ` · due ${fmtDate(m.dueAt)}` : ""}</span></p>
+                <p className="text-sm"><span className="font-mono text-xs font-semibold">{m.no}</span> <span className="text-muted-foreground">· {m.dir === "in" ? "their goods with us since" : "ours with them since"} {fmtDate(m.at)}{m.dueAt ? ` · due ${fmtDate(m.dueAt)}` : ""}</span></p>
                 <p className="text-[11px] text-muted-foreground break-words">{m.lines.filter(l => lineOpen(m, l) > 1e-6).map(l => `${l.label} — ${qu(lineOpen(m, l), l.unit)}`).join(" · ")}</p>
               </div>
               <p className="text-sm tabular-nums shrink-0">{fmtCcy(memoOpenValue(m), m.currency)}</p>

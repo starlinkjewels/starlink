@@ -1874,13 +1874,25 @@ export interface MemoLine {
   amount: number;
   /** What it cost us, ₹, when it went out (never a piece's — that is admin-only). */
   costInr?: number;
+  /** Memo IN: what the goods are, as a purchase bill asks — so keeping them fills the bill in. */
+  spec?: MemoInSpec;
+}
+/** A memo-in line's details: a loose lot, a certified stone, gold, another material, a piece. */
+export interface MemoInSpec {
+  shape?: string; type?: string; variety?: string; size?: string; mm?: string; color?: string; clarity?: string;
+  certNo?: string; lab?: string;
+  purity?: string;
+  materialId?: string; grade?: string;
+  pieceName?: string;
 }
 /** Goods of a memo coming back, or sold to whoever holds them. */
 export interface MemoEvent {
   id: string;
   at: string;
-  kind: "return" | "sold";
+  /** "kept": memo IN — we bought them (the purchase bills are in `purchase`). */
+  kind: "return" | "sold" | "kept";
   lines: { lineId: string; qty: number; pieces?: number }[];
+  purchase?: { ids: string[] };
   /** Sold: the sale it became (a sale to a supplier, a diamond sale) — or, for a
    *  piece sold to a client, nothing: the order is placed from Ready Stock. */
   sale?: { type: "supplierSale" | "diamondSale"; ids: string[] };
