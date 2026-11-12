@@ -149,7 +149,7 @@ export function docLabel(col: string, d: Record<string, unknown> | null | undefi
       return s(d.name) || s(d.title) || id;
     case "tasks": return s(d.title) || id;
     case "meta": return "settings";
-    case "adminRecords": return d.kind === "fx" ? "exchange rates" : d.kind === "stockCost" ? "a ready-stock cost" : d.kind === "yearBook" ? `the Year book ${String(d.key ?? "")}` : id;
+    case "adminRecords": return d.kind === "fx" ? "exchange rates" : d.kind === "stockCost" ? "a ready-stock cost" : d.kind === "yearBook" ? `the Year book ${String(d.key ?? "")}` : d.kind === "import" ? `the import of ${String((d.batch as { file?: string } | undefined)?.file ?? "a file")}` : id;
     default: return s(d.name) || s(d.title) || id;
   }
 }

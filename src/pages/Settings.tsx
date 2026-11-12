@@ -3,7 +3,8 @@ import { EtsySettings } from "@/components/settings/EtsySettings";
 import { LiveRatesSettings } from "@/components/settings/LiveRatesSettings";
 import { YearClosingSettings } from "@/components/settings/YearClosingSettings";
 import { HealthSettings } from "@/components/settings/HealthSettings";
-import { HeartPulse } from "lucide-react";
+import { ImportSettings } from "@/components/settings/ImportSettings";
+import { HeartPulse, FileUp } from "lucide-react";
 import { CatalogReadingSettings } from "@/components/settings/CatalogReadingSettings";
 import { ProductPricingSettings } from "@/components/settings/ProductPricingSettings";
 import { CurrencyRatesSettings } from "@/components/CurrencyRatesSettings";
@@ -842,6 +843,7 @@ export function SettingsPage() {
     { id: "logins", label: "Secure Logins", icon: ShieldCheck, show: isAdmin && pendingLogins.length > 0, group: "Security & data", hint: "Logins still to move to secure sign-in" },
     { id: "health", label: "Software health", icon: HeartPulse, show: isAdmin, group: "Security & data", hint: "Attacks and failures watched, every partner alerted" },
     { id: "data", label: "Data & Backup", icon: Database, show: true, group: "Security & data", hint: "Backup, restore and checks" },
+    { id: "import", label: "Import from Excel", icon: FileUp, show: isAdmin, group: "Security & data", hint: "Clients, suppliers, stones and Ready Stock from a workbook" },
   ] as (SettingsSection & { show: boolean })[]).filter((x) => x.show);
   const activeId = sections.some((x) => x.id === active) ? active : compact ? undefined : sections[0]?.id;
   const activeSection = sections.find(x => x.id === activeId);
@@ -1563,6 +1565,7 @@ export function SettingsPage() {
       {activeId === "liverates" && <LiveRatesSettings />}
       {activeId === "yearclose" && <YearClosingSettings />}
       {activeId === "health" && <HealthSettings />}
+      {activeId === "import" && isAdmin && <ImportSettings />}
       {activeId === "productpricing" && <ProductPricingSettings />}
       {activeId === "videos" && <VideoFixSettings />}
       {activeId === "previews" && <PhotoPreviewSettings />}

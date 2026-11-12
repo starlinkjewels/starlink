@@ -2421,7 +2421,9 @@ export type AdminRecord =
    *  salespeople and each person's own, by day. id "commission". */
   | { id: "commission"; kind: "commission"; plan: import("./commission").CommissionPlan }
   /** One order's commission changed by an admin — someone else, another %, or none. id "com_<orderId>". */
-  | { id: string; kind: "commissionOrder"; orderId: string; set: import("./commission").OrderCommissionSet };
+  | { id: string; kind: "commissionOrder"; orderId: string; set: import("./commission").OrderCommissionSet }
+  /** One import from Excel (lib/excelImport.ts): the file, what it brought in, its undo. id "imp_…". */
+  | { id: string; kind: "import"; batch: import("./excelImport").ImportBatch };
 
 const LEGACY_KEY = "starlink_db_v2"; // pre-Firebase localStorage blob (migrated on first run)
 
