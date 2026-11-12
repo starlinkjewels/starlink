@@ -1,4 +1,5 @@
 import { studioOn } from "@/lib/studio";
+import { PageViewsButton } from "@/components/SavedViews";
 import { factoryFigures } from "@/lib/partyTotals";
 import { bySettingsOrder, materialName, materialUnit } from "@/lib/materials";
 import { FactoryCreateDialog } from "@/components/create/FactoryCreateDialog";
@@ -47,6 +48,9 @@ export function FactoriesPage() {
     try { return (localStorage.getItem("factories-view") as "list" | "grid") || "list"; } catch { return "list"; }
   });
   const saveView = (v: "list" | "grid") => { setView(v); try { localStorage.setItem("factories-view", v); } catch { /* ignore */ } };
+  // A saved view keeps how the list was shown — list or grid (components/SavedViews.tsx).
+  const layoutPart = { get: () => ({ layout: view }), set: (p: Record<string, string>) => { if (p.layout === "list" || p.layout === "grid") saveView(p.layout); } };
+
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState<Factory | null>(null);
   // Paying one factory's labour from its row, oldest jobs first (components/party/PayFactorySheet).
@@ -225,6 +229,7 @@ export function FactoriesPage() {
         <div className="card-luxe p-3 sm:p-4">
           <DataTable
             id="factories"
+            viewExtra={layoutPart}
             // The table makes a plural by adding "s"; it counts exactly these rows.
             noun="factory"
             plural="factories"
@@ -264,6 +269,7 @@ export function FactoriesPage() {
             <Input value={q} onChange={e => setQ(e.target.value)} placeholder="Search factories..." aria-label="Search factories..." className="h-9 pl-9 rounded-xl bg-white" />
           </div>
           <span className="ml-auto" aria-hidden />
+          <PageViewsButton table="factories" search={{ value: q, onChange: setQ }} extra={layoutPart} />
         </div>
       )}
 
