@@ -44,7 +44,7 @@ const STOCK_ADMIN_ONLY = "Your access does not include changing stock";
 interface Row {
   id: string;
   date: string;
-  kind: "Purchase" | "Opening stock" | "Assigned to factory" | "Diamond sold" | "Sold to supplier";
+  kind: "Purchase" | "Opening stock" | "Assigned to factory" | "Diamond sold" | "Sold to supplier" | "Returned to supplier";
   party: string;
   material: string;
   /** Its details under the material: a lot's size · colour · clarity · pcs, a stone's report, a grade. */
@@ -326,7 +326,7 @@ export function StockActivityLedger({ onTotals }: { onTotals?: (t: LedgerTotals)
     sale.lines.forEach((l, i) => {
       const mat = l.kind === "certified" || l.kind === "diamond" ? "diamond" : l.kind === "gold" ? "gold" : l.kind === "piece" ? "piece" : l.material;
       all.push({
-        id: `${sale.id}#${i}`, date: sale.createdAt, kind: "Sold to supplier", party,
+        id: `${sale.id}#${i}`, date: sale.createdAt, kind: sale.returnOf ? "Returned to supplier" : "Sold to supplier", party,
         material: l.kind === "piece" ? "Jewellery piece" : l.kind === "certified" ? "Certified diamond" : l.kind === "diamond" ? "Loose diamond" : materialName(db.settings, l.material),
         detail: l.label, rate: l.rateInr || undefined, mats: [mat], co: companyOf(sale),
         qty: l.qty, unit: l.unit as MaterialUnit, amountInr: l.amountInr, remark: sale.notes,
@@ -485,7 +485,7 @@ export function StockActivityLedger({ onTotals }: { onTotals?: (t: LedgerTotals)
           hint: !mayDelete ? needsAccess("buyAssign", "delete") : !voidable.ok ? oneLine(voidable.reason) : "Undoes stone, sale and money" },
       ];
     }
-    if (r.kind === "Sold to supplier") {
+    if (r.kind === "Sold to supplier" || r.kind === "Returned to supplier") {
       const sale = (db.supplierSales ?? []).find(x => x.id === r.id.split("#")[0]);
       if (!sale) return [];
       return [viewAction("View supplier", `${r.party} — the sale is changed or deleted there`, `/suppliers/${sale.supplierId}`, "suppliers")];
@@ -512,7 +512,7 @@ export function StockActivityLedger({ onTotals }: { onTotals?: (t: LedgerTotals)
   };
 
   const TONE: Record<Row["kind"], "blue" | "neutral" | "amber" | "green"> = {
-    "Purchase": "blue", "Opening stock": "neutral", "Assigned to factory": "amber", "Diamond sold": "green", "Sold to supplier": "green",
+    "Purchase": "blue", "Opening stock": "neutral", "Assigned to factory": "amber", "Diamond sold": "green", "Sold to supplier": "green", "Returned to supplier": "amber",
   };
   const columns: DataColumn<Row>[] = [
     { key: "party", header: "Party", always: true, sortValue: r => r.party,
@@ -579,7 +579,7 @@ export function StockActivityLedger({ onTotals }: { onTotals?: (t: LedgerTotals)
             { label: "Party", value: party, onChange: setParty, allLabel: "All parties", multi: true,
               options: parties.map(x => ({ value: x, label: x })) },
             { label: "Entry", value: kind, onChange: setKind, multi: true,
-              options: ["Purchase", "Opening stock", "Assigned to factory", "Diamond sold", "Sold to supplier"].map(k => ({ value: k, label: k })) },
+              options: ["Purchase", "Opening stock", "Assigned to factory", "Diamond sold", "Sold to supplier", "Returned to supplier"].map(k => ({ value: k, label: k })) },
             { label: "Material", value: material, onChange: setMaterial, multi: true,
               options: [{ value: "gold", label: "Gold" }, { value: "diamond", label: "Diamond" },
                 ...materialDefs(db.settings).map(m => ({ value: m.id, label: m.name })),

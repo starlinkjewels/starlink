@@ -80,6 +80,8 @@ export interface SupplierSaleInput {
   notes?: string;
   /** The day it was sold (ISO). */
   at: string;
+  /** A purchase return (lib/purchaseReturns.ts) — goods back against their bills, not a sale. */
+  returnOf?: SupplierSale["returnOf"];
 }
 
 /** Why a sale can't be recorded — or null. */
@@ -139,7 +141,8 @@ export async function recordSupplierSale(db: DB, s: SupplierSaleInput, user: Pic
   const supplier = db.suppliers.find(x => x.id === s.supplierId);
   if (!supplier) throw new Error("That supplier is gone");
   const saleId = uid("ssale_");
-  const note = `Sold to ${supplier.name}`;
+  const isReturn = !!s.returnOf;
+  const note = isReturn ? `Returned to ${supplier.name} — debit note ${s.returnOf!.noteNo}` : `Sold to ${supplier.name}`;
   const companyId = s.companyId && s.companyId !== "main" ? s.companyId : undefined;
   // A piece's cost is admin-only (adminRecords) and a sale is read by all staff, so a
   // piece keeps no cost here — the admin-only profit report works it out (saleLineCost).
@@ -182,6 +185,7 @@ export async function recordSupplierSale(db: DB, s: SupplierSaleInput, user: Pic
     ...(s.brokerId ? { brokerId: s.brokerId, brokeragePct: s.brokeragePct || undefined, brokerageInr, brokeragePaidBy: s.brokeragePaidBy ?? "us" } : {}),
     ...(receiptId ? { receiptId } : {}),
     ...(s.notes?.trim() ? { notes: s.notes.trim() } : {}),
+    ...(s.returnOf ? { returnOf: s.returnOf } : {}),
     soldBy: user.id, createdAt: s.at,
   };
   const what = lines.map(l => l.label).join(", ");
@@ -199,7 +203,7 @@ export async function recordSupplierSale(db: DB, s: SupplierSaleInput, user: Pic
           const had = item.quantity;
           item.quantity = Math.max(0, item.quantity - l.qty);
           // On the piece's own history: sold to a supplier — the piece's history is staff-facing for a supplier sale.
-          logItem(item, { ...whoOf(user), at: s.at, kind: "sold", text: `Sold to a supplier · ${had} → ${item.quantity}` });
+          logItem(item, { ...whoOf(user), at: s.at, kind: "sold", text: `${isReturn ? `Returned to the supplier (debit note ${s.returnOf!.noteNo})` : "Sold to a supplier"} · ${had} → ${item.quantity}` });
         }
       }
     }
@@ -210,16 +214,16 @@ export async function recordSupplierSale(db: DB, s: SupplierSaleInput, user: Pic
         id: receiptId, supplierId: s.supplierId, amountInr: r2(rec.amountInr),
         lockerId: rec.byBroker ? "" : rec.lockerId!, recordedBy: user.id, createdAt: s.at, saleId,
         ...(rec.byBroker ? { viaBrokerId: s.brokerId } : {}),
-        note: `For goods sold to them: ${what}`.slice(0, 300),
+        note: `${isReturn ? `Refund for goods returned (debit note ${s.returnOf!.noteNo})` : "For goods sold to them"}: ${what}`.slice(0, 300),
       });
       if (!rec.byBroker) {
         if (!d.lockerTransactions) d.lockerTransactions = [];
         d.lockerTransactions.push({
           id: uid("ltx_"), lockerId: rec.lockerId!, type: "income", amountInr: r2(rec.amountInr),
-          category: `Received from ${supplier.name}`, refType: "supplierReceipt", refId: s.supplierId, paymentId: receiptId,
+          category: isReturn ? `Refund from ${supplier.name}` : `Received from ${supplier.name}`, refType: "supplierReceipt", refId: s.supplierId, paymentId: receiptId,
           // The supplier's money for goods — never offered for applying to a client's bill.
           notClientPayment: true,
-          note: `For goods sold to them: ${what}`.slice(0, 300), recordedBy: user.id, createdAt: s.at,
+          note: `${isReturn ? `Refund for goods returned (debit note ${s.returnOf!.noteNo})` : "For goods sold to them"}: ${what}`.slice(0, 300), recordedBy: user.id, createdAt: s.at,
         });
       }
     }
@@ -233,6 +237,7 @@ export function saleUndoImpact(db: DB, sale: SupplierSale): string[] {
   const rec = sale.receiptId ? (db.supplierReceipts ?? []).find(r => r.id === sale.receiptId) : undefined;
   if (rec) out.push(rec.viaBrokerId ? `• the ₹${rec.amountInr.toLocaleString("en-IN")} the broker collected for it is removed` : `• the ₹${rec.amountInr.toLocaleString("en-IN")} received for it comes out of the account`);
   out.push(`• ₹${sale.totalInr.toLocaleString("en-IN")} goes back onto what we owe the supplier`);
+  if (sale.returnOf) out.push(`• debit note ${sale.returnOf.noteNo} is cancelled — the bills read as before`);
   if (sale.brokerId && saleBrokerageWePay(sale) > 0) out.push(`• its brokerage comes off what we owe the broker`);
   return out;
 }
@@ -304,7 +309,7 @@ export async function undoSupplierSale(db: DB, sale: SupplierSale, user: Pick<Us
       if ((backAlready.get(k) ?? 0) >= nth) continue;
       await increaseStock({
         material: l.material as MaterialKey, companyId: sale.companyId, purityOrQuality: l.bucket ?? "", quantity: l.qty,
-        refType: "supplierSale", refId: sale.id, createdBy: user.id, note: "Sale to supplier deleted — back in stock",
+        refType: "supplierSale", refId: sale.id, createdBy: user.id, note: sale.returnOf ? `Debit note ${sale.returnOf.noteNo} cancelled — back in stock` : "Sale to supplier deleted — back in stock",
         ...(l.kind === "diamond" ? { lot: lotParts(l.bucket ?? ""), pieces: l.pieces } : {}),
       });
     }
@@ -329,7 +334,7 @@ function removeSaleRecords(sale: SupplierSale, user: Pick<User, "id" | "name" | 
         if (item) {
           const had = item.quantity;
           item.quantity = item.quantity + l.qty;
-          logItem(item, { ...whoOf(user), kind: "unsold", text: `Sale to a supplier deleted · ${had} → ${item.quantity}` });
+          logItem(item, { ...whoOf(user), kind: "unsold", text: `${sale.returnOf ? `Debit note ${sale.returnOf.noteNo} cancelled` : "Sale to a supplier deleted"} · ${had} → ${item.quantity}` });
         }
       }
     }
@@ -358,7 +363,8 @@ export interface SupplierSaleProfitRow {
 
 /** The sales to suppliers in a period, with their cost and profit — for Profit & Loss. */
 export function supplierSalesProfit(db: DB, inRange: (iso: string) => boolean) {
-  const rows: SupplierSaleProfitRow[] = (db.supplierSales ?? []).filter(s => inRange(s.createdAt)).map(sale => {
+  // A purchase return is not a sale: the goods go back at what they were bought for.
+  const rows: SupplierSaleProfitRow[] = (db.supplierSales ?? []).filter(s => !s.returnOf && inRange(s.createdAt)).map(sale => {
     const sellingInr = sale.totalInr;
     const costs = sale.lines.map(l => saleLineCost(db, sale, l));
     const costInr = costs.every(c => c != null) ? r2(costs.reduce((t: number, c) => t + (c ?? 0), 0)) : null;

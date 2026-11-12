@@ -372,7 +372,7 @@ interface StockLinkContext {
   factories: Factory[];
   suppliers: Supplier[];
   diamondSales?: DiamondSale[];
-  supplierSales?: { id: string; supplierId: string }[];
+  supplierSales?: { id: string; supplierId: string; returnOf?: { noteNo: string } }[];
   clients?: Client[];
 }
 
@@ -426,7 +426,9 @@ export function resolveStockMovementLink(m: StockMovement, ctx: StockLinkContext
     const sale = ctx.supplierSales?.find(s => s.id === m.refId);
     const supplierId = sale?.supplierId;
     const name = ctx.suppliers.find(s => s.id === supplierId)?.name;
-    if (m.type === "purchase_in") return { label: `Sale to ${name ?? "a supplier"} deleted — back in stock`, ...(supplierId ? { supplierId } : {}) };
+    const dn = (sale as { returnOf?: { noteNo: string } } | undefined)?.returnOf?.noteNo;
+    if (m.type === "purchase_in") return { label: dn ? `Debit note ${dn} cancelled — back in stock` : `Sale to ${name ?? "a supplier"} deleted — back in stock`, ...(supplierId ? { supplierId } : {}) };
+    if (dn) return { label: `Returned to ${name ?? "the supplier"} — debit note ${dn}`, ...(supplierId ? { supplierId } : {}) };
     return { label: name ? `Sold to ${name} (supplier)` : m.note || "Sold to a supplier", ...(supplierId ? { supplierId } : {}) };
   }
   // Gold borrowed from a supplier, or given back (lib/supplierGold.ts) — never a purchase or an opening.

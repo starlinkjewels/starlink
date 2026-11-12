@@ -65,9 +65,9 @@ export const WRITE_POLICY: Policy = {
 
   // ── Money ──
   lockerTransactions: {
-    create: ["payments.add", "payments.edit", "payments.broker", "locker.add", "locker.edit", "expenses.add", "buyAssign.sell", "suppliers.sell", "orders.dispatch"],
+    create: ["payments.add", "payments.edit", "payments.broker", "locker.add", "locker.edit", "expenses.add", "buyAssign.sell", "suppliers.sell", "suppliers.purchase", "orders.dispatch"],
     update: ["payments.add", "payments.edit", "locker.edit", "expenses.edit"],
-    delete: ["payments.delete", "payments.edit", "expenses.delete", "suppliers.sell", "buyAssign.delete"],
+    delete: ["payments.delete", "payments.edit", "expenses.delete", "suppliers.sell", "suppliers.purchase", "buyAssign.delete"],
   },
   expenses: {
     create: ["expenses.add", "payments.add", "orders.dispatch"],
@@ -79,13 +79,14 @@ export const WRITE_POLICY: Policy = {
     update: ["payments.edit", "payments.delete", "invoices.delete"],
     delete: ["payments.delete", "payments.edit"],
   },
-  supplierReceipts: { create: ["payments.add", "suppliers.sell", "buyAssign.sell"], update: ["payments.edit"], delete: ["payments.delete", "suppliers.sell"] },
+  supplierReceipts: { create: ["payments.add", "suppliers.sell", "buyAssign.sell", "suppliers.purchase"], update: ["payments.edit"], delete: ["payments.delete", "suppliers.sell", "suppliers.purchase"] },
   supplierPayments: { create: ["payments.add", "payments.edit"], update: ["payments.edit"], delete: ["payments.delete", "payments.edit"] },
   factoryPayments: { create: ["payments.add", "payments.edit"], update: ["payments.edit"], delete: ["payments.delete", "payments.edit"] },
 
   // ── Sales out of stock ──
   // A memo sold to its holder makes the sale (lib/memos.ts) — so Memo may create one.
-  supplierSales: { create: ["suppliers.sell", "buyAssign.sell", "stock.memo"], update: ["suppliers.sell", "buyAssign.sell"], delete: ["suppliers.sell", "buyAssign.sell"] },
+  // + suppliers.purchase: a purchase return (lib/purchaseReturns.ts) is recorded here too.
+  supplierSales: { create: ["suppliers.sell", "buyAssign.sell", "stock.memo", "suppliers.purchase"], update: ["suppliers.sell", "buyAssign.sell", "suppliers.purchase"], delete: ["suppliers.sell", "buyAssign.sell", "suppliers.purchase"] },
   memos: { create: ["stock.memo"], update: ["stock.memo"], delete: ["stock.memo"] },
   diamondSales: { create: ["buyAssign.sell", "stock.memo"], update: ["payments.add", "payments.delete", "buyAssign.delete"], delete: ["buyAssign.delete"] },
 

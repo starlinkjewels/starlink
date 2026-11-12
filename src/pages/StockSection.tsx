@@ -630,7 +630,7 @@ function CertifiedSection() {
       { label: "Bill no.", value: pu?.invoiceNumber },
       !!issue && { label: "Issued to", value: <>{refLink(`/factories/${issue.factoryId}`, db.factories.find(f => f.id === issue.factoryId)?.name ?? "Factory", can("factories"))} · {fmtDate(issue.issuedAt)}</> },
       !!sale && { label: "Sold to", value: buyer ? refLink(`/clients/${buyer.id}`, buyer.companyName, can("clients")) : sale.buyerName || "Buyer" },
-      !!supSale && { label: "Sold to", value: refLink(`/suppliers/${supSale.supplierId}`, `${supplierName(supSale.supplierId) ?? "A supplier"} (supplier)`, can("suppliers")) },
+      !!supSale && { label: supSale.returnOf ? "Returned to" : "Sold to", value: <>{refLink(`/suppliers/${supSale.supplierId}`, `${supplierName(supSale.supplierId) ?? "A supplier"} (supplier)`, can("suppliers"))}{supSale.returnOf ? ` · debit note ${supSale.returnOf.noteNo}` : ""}</> },
       !!sale && { label: "Sold on", value: fmtDate(sale.createdAt) },
       !!onMemo && { label: "Out on memo", value: <>{refLink("/memo", onMemo.no, true)} · {memoPartyName(db, onMemo.party)} · since {fmtDate(onMemo.at)}</> },
       multiCo && { label: "Company", value: companyById(db.settings, p.companyId).name },

@@ -129,7 +129,7 @@ function MonthFigures({ ledger }: { ledger: LedgerTotals | null }) {
   const others = issued.filter(i => i.material !== "gold" && i.material !== "diamond").length;
   const sold = (db.diamondSales ?? []).filter(s => inMonth(s.createdAt));
   // Sold to our suppliers this month (lib/supplierSales.ts) — and to how many.
-  const toSuppliers = (db.supplierSales ?? []).filter(s => inMonth(s.createdAt) && !s.deletingAt);
+  const toSuppliers = (db.supplierSales ?? []).filter(s => inMonth(s.createdAt) && !s.deletingAt && !s.returnOf);
   const supplierCount = new Set(toSuppliers.map(s => s.supplierId)).size;
 
   // The month's three figures, then the ledger's total below them — in the
