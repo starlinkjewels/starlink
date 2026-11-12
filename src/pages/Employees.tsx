@@ -1,4 +1,5 @@
 import { UserAvatar } from "@/components/UserAvatar";
+import { PageViewsButton } from "@/components/SavedViews";
 import { EmployeeCreateDialog, emailTakenMessage } from "@/components/create/EmployeeCreateDialog";
 import { EmployeeCompaniesControl } from "@/components/EmployeeCompanies";
 import { useMemo, useState, type MouseEvent } from "react";
@@ -86,6 +87,9 @@ export function EmployeesPage() {
     try { return (localStorage.getItem("employees-view") as "list" | "grid") || "list"; } catch { return "list"; }
   });
   const saveView = (v: "list" | "grid") => { setView(v); try { localStorage.setItem("employees-view", v); } catch { /* ignore */ } };
+  // A saved view keeps how the list was shown — list or grid (components/SavedViews.tsx).
+  const layoutPart = { get: () => ({ layout: view }), set: (p: Record<string, string>) => { if (p.layout === "list" || p.layout === "grid") saveView(p.layout); } };
+
 
   // Tasks panel state
   const [tasksPanelUser, setTasksPanelUser] = useState<string | null>(null);
@@ -318,6 +322,7 @@ export function EmployeesPage() {
         <div className="card-luxe p-3 sm:p-4">
           <DataTable
             id="employees"
+            viewExtra={layoutPart}
             noun="employee"
             search={{ value: q, onChange: setQ, placeholder: "Search employees by name or email…" }}
             filters={monthFilter()}
@@ -347,6 +352,8 @@ export function EmployeesPage() {
             <Input value={q} onChange={e => setQ(e.target.value)} placeholder="Search…" aria-label="Search employees by name or email" className="h-9 pl-9 rounded-xl bg-white" />
           </div>
           <FiltersButton filters={monthFilter()} onClear={() => setPeriod(thisMonth)} />
+          <span className="ml-auto" aria-hidden />
+          <PageViewsButton table="employees" filters={monthFilter()} search={{ value: q, onChange: setQ }} extra={layoutPart} />
         </div>
       )}
       {view === "grid" && period !== thisMonth && <FilterChips filters={monthFilter()} onClear={() => setPeriod(thisMonth)} />}

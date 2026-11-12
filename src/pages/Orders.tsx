@@ -1,4 +1,5 @@
 import { stageLabel } from "@/lib/stages";
+import { PageViewsButton } from "@/components/SavedViews";
 import { customColumns } from "@/components/CustomFields";
 import { fieldsFor, filledPairs, searchWords, valuesOf } from "@/lib/customFields";
 import { looseLabel, pieceLine, stoneOf } from "@/lib/orderText";
@@ -141,6 +142,11 @@ export function OrdersPage() {
     try { return (localStorage.getItem("orders-view") as "list" | "grid" | "board") || "grid"; } catch { return "grid"; }
   });
   const view = viewPref === "board" && !isStaff ? "grid" : viewPref;
+  // A saved view keeps how the orders were shown — list, grid or board (components/SavedViews.tsx).
+  const layoutPart = {
+    get: () => ({ layout: view }),
+    set: (p: Record<string, string>) => { if (p.layout === "list" || p.layout === "grid" || (p.layout === "board" && isStaff)) saveView(p.layout); },
+  };
   const saveView = (v: "list" | "grid" | "board") => {
     setView(v);
     try { localStorage.setItem("orders-view", v); } catch { /* ignore */ }
@@ -654,6 +660,8 @@ export function OrdersPage() {
             <FiltersButton filters={filters} onClear={clearFilters} count={countText} />
             <div className="ml-auto flex items-center gap-2">
               {chosen.length > 0 && <span className="text-xs text-muted-foreground tabular-nums whitespace-nowrap">{chosen.length} ticked</span>}
+              {/* Saved views — the same as the list's (components/SavedViews.tsx). */}
+              <PageViewsButton table="orders-list" filters={filters} search={{ value: q, onChange: setQ }} extra={layoutPart} />
               {mayExport && <ExportMenu exports={exports} scope={`Product sheet · ${chosen.length ? `${chosen.length} ticked` : `${orders.length} shown`}`} />}
             </div>
           </div>
@@ -778,6 +786,7 @@ export function OrdersPage() {
         <div className="card-luxe p-3 sm:p-4">
           <DataTable
             id="orders-list"
+            viewExtra={layoutPart}
             noun="order"
             rows={orders}
             search={{ value: q, onChange: setQ, placeholder: searchHint }}

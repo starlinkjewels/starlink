@@ -8,6 +8,8 @@ import { downloadCsv } from "@/lib/ledgerExport";
 import { MoreMenu, type MoreAction } from "@/components/MoreMenu";
 import { ExportMenu, FilterChips, FiltersButton, ViewMenu, activeFilterCount, useNarrow, type Density, type TableExport, type TableFilter } from "@/components/TableToolbar";
 import { FloatingScrollbar, useWideScroll } from "@/components/WideScroll";
+import { SavedViewsButton, applyFilters, captureFilters, prefsFromView, prefsPart, useDefaultView, useViewsOn, type PageExtra } from "@/components/SavedViews";
+import type { ViewState } from "@/lib/savedViews";
 import { useHeldHeader } from "@/components/TableBox";
 
 /**
@@ -102,8 +104,10 @@ export function DataTable<T>({
   id, stateKey, rows, columns, rowKey, defaultSort = null, searchText, exportName, emptyText = "Nothing to show.",
   pageSizes = [25, 50, 100], maxHeight, footer, toolbarExtra, onRowClick, rowActions, onRowActionsOpen, selected, onSelectedChange,
   rowClassName, controls = "full", noun = "row", plural, searchPlaceholder = "Search this table", totals, totalsLabel = "Total", expand, rowHref, pinnedRows, pinnedAt = "bottom", resetKey, canClickRow, details,
-  search, filters, onClearFilters, exports, exportScope, summary, loading, emptyAction,
+  search, filters, onClearFilters, exports, exportScope, summary, loading, emptyAction, viewExtra,
 }: {
+  /** Saved views (components/SavedViews.tsx): the page's own part of a view — how it shows the list. */
+  viewExtra?: PageExtra;
   /** Names this table's remembered choices — unique per table. */
   id: string;
   /** What its search, page and opened rows belong to, when not the table itself
@@ -428,6 +432,19 @@ export function DataTable<T>({
     ...(exportName ? [{ label: "Excel (.csv)", icon: FileSpreadsheet, hint: "Opens in Excel or Google Sheets", onSelect: exportCsv }] : []),
   ];
   const narrowed = !!qv || nFilters > 0;
+
+  // ── Saved views (lib/savedViews.ts): the table's whole setup under a name ──
+  // Only what was chosen is kept — a choice left as the table's own (a phone's cards) stays the screen's own.
+  // The same views on the page's own toolbar (a grid, a board): components/SavedViews.tsx PageViewsButton.
+  const captureView = (): ViewState => ({ ...captureFilters(filters, qv), ...prefsPart(prefs), ...(viewExtra ? { page: viewExtra.get() } : {}) });
+  const applyView = (v: ViewState) => {
+    save(prefsFromView(v, prefs));
+    applyFilters(filters, v, qv, setQv);
+    setPage(1);
+    if (viewExtra && v.page) viewExtra.set(v.page);
+  };
+  const viewsOn = useViewsOn() && full;
+  useDefaultView(id, viewsOn, applyView);
   const listed = [...(pinnedAt === "top" && cur === 1 ? pinnedRows ?? [] : []), ...visible, ...(pinnedAt === "bottom" && cur === pages && !(!search && q) ? pinnedRows ?? [] : [])];
 
   return (
@@ -458,6 +475,7 @@ export function DataTable<T>({
               <button type="button" onClick={() => wide.scrollBy(1)} disabled={!wide.over || wide.end} aria-label="Scroll the table right" className="h-9 w-8 grid place-items-center text-brand-dark hover:bg-secondary/70 border-l border-border disabled:opacity-35"><ChevronRight className="h-4 w-4" /></button>
             </span>
           )}
+          {viewsOn && <SavedViewsButton table={id} capture={captureView} apply={applyView} reset={() => applyView({ pageSize: prefs.pageSize, ...(viewExtra ? { page: viewExtra.get() } : {}) })} />}
           <ViewMenu density={dense} onDensity={d => save({ ...prefs, dense: d })} columns={columns}
             isShown={isShown} onToggle={toggleCol} onReset={() => save({ pageSize: prefs.pageSize })}
             layout={canCards ? { value: cardMode ? "cards" : "table", onChange: v => save({ ...prefs, layout: v }) } : undefined}

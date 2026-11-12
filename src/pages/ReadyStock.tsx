@@ -1,4 +1,5 @@
 import { DataTable, CellTag, CellAmount, CellDate, type DataColumn } from "@/components/DataTable";
+import { PageViewsButton } from "@/components/SavedViews";
 import { customColumns } from "@/components/CustomFields";
 import { fieldsFor, filledPairs, searchWords, valuesOf } from "@/lib/customFields";
 import { WebVideo } from "@/components/ProductVideo";
@@ -113,6 +114,9 @@ export function ReadyStockPage() {
     try { return (localStorage.getItem("readystock-view") as "list" | "grid") || "grid"; } catch { return "grid"; }
   });
   const saveView = (v: "list" | "grid") => { setView(v); try { localStorage.setItem("readystock-view", v); } catch { /* ignore */ } };
+  // A saved view keeps how the list was shown — list or grid (components/SavedViews.tsx).
+  const layoutPart = { get: () => ({ layout: view }), set: (p: Record<string, string>) => { if (p.layout === "list" || p.layout === "grid") saveView(p.layout); } };
+
   // The office being looked at — remembered, as each office mostly works its own shelf.
   const [office, setOfficeState] = useState<string>(() => {
     try { return localStorage.getItem("readystock-office") || "all"; } catch { return "all"; }
@@ -507,6 +511,7 @@ export function ReadyStockPage() {
             <FiltersButton filters={filters} onClear={clearFilters} count={countText} />
             <div className="ml-auto flex items-center gap-2">
               {chosen.length > 0 && <span className="text-xs text-muted-foreground tabular-nums whitespace-nowrap">{chosen.length} ticked</span>}
+              <PageViewsButton table="ready-stock" filters={filters} search={{ value: q, onChange: onSearch }} extra={layoutPart} />
               {mayExport && <ExportMenu exports={exports} scope={`${which}${chosen.length ? "" : (q || selOn(coSel) || avail !== "all" || narrowed ? ", as filtered" : "")}`} />}
             </div>
           </div>
@@ -597,6 +602,7 @@ export function ReadyStockPage() {
         <div className="card-luxe p-3 sm:p-4">
           <DataTable
             id="ready-stock"
+            viewExtra={layoutPart}
             noun="item"
             rows={items}
             search={{ value: q, onChange: onSearch, placeholder: searchHint }}

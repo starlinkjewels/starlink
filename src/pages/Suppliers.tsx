@@ -1,4 +1,5 @@
 import { studioOn } from "@/lib/studio";
+import { PageViewsButton } from "@/components/SavedViews";
 import { customColumns } from "@/components/CustomFields";
 import { fieldsFor, filledPairs, searchWords, valuesOf } from "@/lib/customFields";
 import { supplierFigures } from "@/lib/partyTotals";
@@ -64,6 +65,9 @@ export function SuppliersPage() {
     try { return (localStorage.getItem("suppliers-view") as "list" | "grid") || "list"; } catch { return "list"; }
   });
   const saveView = (v: "list" | "grid") => { setView(v); try { localStorage.setItem("suppliers-view", v); } catch { /* ignore */ } };
+  // A saved view keeps how the list was shown — list or grid (components/SavedViews.tsx).
+  const layoutPart = { get: () => ({ layout: view }), set: (p: Record<string, string>) => { if (p.layout === "list" || p.layout === "grid") saveView(p.layout); } };
+
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState<Supplier | null>(null);
   // Suppliers, or the brokers (dalals) who bring purchases — remembered on this device.
@@ -246,6 +250,7 @@ export function SuppliersPage() {
         <div className="card-luxe p-3 sm:p-4">
           <DataTable
             id="suppliers"
+            viewExtra={layoutPart}
             noun="supplier"
             search={{ value: q, onChange: setQ, placeholder: "Search suppliers..." }}
             resetKey={q}
@@ -282,6 +287,7 @@ export function SuppliersPage() {
             <Input value={q} onChange={e => setQ(e.target.value)} placeholder="Search suppliers..." aria-label="Search suppliers..." className="h-9 pl-9 rounded-xl bg-white" />
           </div>
           <span className="ml-auto" aria-hidden />
+          <PageViewsButton table="suppliers" search={{ value: q, onChange: setQ }} extra={layoutPart} />
         </div>
       )}
 

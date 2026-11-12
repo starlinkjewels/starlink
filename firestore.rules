@@ -609,6 +609,23 @@ service cloud.firestore {
       allow delete: if isAdmin() || (isStaff() && resource.data.userId == myAppId() && resource.data.source == 'manual');
     }
 
+    // Saved views (src/lib/savedViews.ts): a list's setup under a name. Staff keep
+    // their own (unshared) ones; only an admin shares one with the team, or changes
+    // a shared one. A view holds no business record — only filters and columns.
+    match /savedViews/{id} {
+      allow read: if isAdmin() || (isStaff() && (resource.data.ownerId == myAppId() || resource.data.shared == true));
+      allow create: if isAdmin() || (isStaff() && request.resource.data.ownerId == myAppId() && request.resource.data.shared == false
+        && request.resource.data.name is string && request.resource.data.name.size() <= 80);
+      allow update: if isAdmin() || (isStaff() && resource.data.ownerId == myAppId() && resource.data.shared == false
+        && request.resource.data.ownerId == myAppId() && request.resource.data.shared == false
+        && request.resource.data.name is string && request.resource.data.name.size() <= 80);
+      allow delete: if isAdmin() || (isStaff() && resource.data.ownerId == myAppId() && resource.data.shared == false);
+    }
+    // Each person's starred view per table (the one a page opens with) — their own only.
+    match /viewDefaults/{appId} {
+      allow read, write: if isAdmin() || (isStaff() && appId == myAppId());
+    }
+
     // Software health (functions/src/health/): what the watchers found, and their
     // last check — read by admins in Settings → Software health, written only by the
     // server. Its counters and known devices (healthCounters, healthDevices) stay

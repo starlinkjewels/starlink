@@ -1,4 +1,5 @@
 import { showPrintPage } from "@/lib/printView";
+import { PageViewsButton } from "@/components/SavedViews";
 import { customColumns } from "@/components/CustomFields";
 import { fieldsFor, filledPairs, searchWords, valuesOf } from "@/lib/customFields";
 import { FillHandlersSheet } from "@/components/FillHandlersSheet";
@@ -165,6 +166,9 @@ export function ClientsPage() {
     try { return (localStorage.getItem("clients-view") as "list" | "grid") || (studioOn() ? "list" : "grid"); } catch { return "grid"; }
   });
   const saveView = (v: "list" | "grid") => { setView(v); try { localStorage.setItem("clients-view", v); } catch { /* ignore */ } };
+  // A saved view keeps how the list was shown — list or grid (components/SavedViews.tsx).
+  const layoutPart = { get: () => ({ layout: view }), set: (p: Record<string, string>) => { if (p.layout === "list" || p.layout === "grid") saveView(p.layout); } };
+
 
   // Online/"last seen" is time-relative, not just data-relative — force a
   // re-render every 30s so it keeps ticking forward even with no db changes.
@@ -471,6 +475,7 @@ export function ClientsPage() {
         <div className="card-luxe p-3 sm:p-4">
           <DataTable
             id="clients"
+            viewExtra={layoutPart}
             noun="client"
             search={{ value: q, onChange: setQ, placeholder: "Search clients..." }}
             filters={filters}
@@ -514,6 +519,7 @@ export function ClientsPage() {
             </div>
             {filters.length > 0 && <FiltersButton filters={filters} onClear={clearFilters} count={countText} />}
             <span className="ml-auto" aria-hidden />
+            <PageViewsButton table="clients" filters={filters} search={{ value: q, onChange: setQ }} extra={layoutPart} />
           </div>
           <FilterChips filters={filters} onClear={clearFilters} />
         </div>
