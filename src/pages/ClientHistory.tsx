@@ -388,6 +388,10 @@ function ClientHistoryPageBody() {
    * Order-by-order is our internal view — a client does not recognise an order
    * number they were never given.
    */
+  // Credit the client holds (an overpayment, a refund kept on account): it can pay what is
+  // owed, so a statement up to today says what is left after it. Not on a statement ending
+  // in the past — the credit is today's.
+  const creditHeld = (to: Date | null) => (!to && (client.creditBalance || 0) > 0.009 ? Math.round((client.creditBalance || 0) * 100) / 100 : 0);
   const exportInvoiceStatementCsv = (from: Date | null, to: Date | null) => {
     const blocks = invoiceBlocks.filter(b => inDateRange(b.date, from, to));
     const rows: (string | number)[][] = [];
@@ -412,6 +416,14 @@ function ClientHistoryPageBody() {
           saleTotal(x), "", "", saleReceived(db.lockerTransactions, x), saleOwed(db.lockerTransactions, x)]);
       }
       rows.push(["Diamond sales owed", "", "", owedByCcy.join(" + ")]);
+    }
+    const credit = creditHeld(to);
+    if (credit > 0) {
+      const before = from ? invoiceBlocks.filter(x => +new Date(x.date) < +from).reduce((t, x) => t + x.balance, 0) : 0;
+      const owed = Math.max(0, openingDebitAmt(client) - openingCreditAmt(client) + before + blocks.reduce((t, x) => t + x.balance, 0));
+      rows.push([], ["Outstanding", "", "", "", "", "", "", "", "", Math.round(owed * 100) / 100],
+        ["Credit held", "", "", "", "", "", "", "", "", -credit],
+        ["Net due", "", "", "", "", "", "", "", "", Math.round(Math.max(0, owed - credit) * 100) / 100]);
     }
     downloadCsv(
       `Client-Invoice-Statement-${client.companyName.replace(/\s+/g, "_")}`,
@@ -496,6 +508,10 @@ function ClientHistoryPageBody() {
         ...(T.returned > 0 ? [{ label: "Returned (credit notes)", value: fmtMoney(T.returned) }] : []),
         { label: "Received", value: fmtMoney(T.received) },
         { label: "Outstanding", value: fmtMoney(Math.max(0, closing)) },
+        ...(creditHeld(to) > 0 ? [
+          { label: "Credit held", value: `-${fmtMoney(creditHeld(to))}` },
+          { label: "Net due", value: fmtMoney(Math.max(0, Math.max(0, closing) - creditHeld(to))) },
+        ] : []),
         ...(salesOwed.length ? [{ label: "Diamond sales owed", value: owedByCcy.join(" + ") }] : []),
         { label: "Invoices", value: String(blocks.length) },
       ],

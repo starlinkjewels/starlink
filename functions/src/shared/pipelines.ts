@@ -153,6 +153,8 @@ export interface OrderLike {
 export interface ClientLike {
   id: string; companyName: string; ownerName?: string; email?: string; country?: string;
   accountManagerId?: string; companyId?: string; status?: string; createdAt?: string;
+  /** $ the client holds on account (an overpayment) — it pays what they owe, so it is never chased. */
+  creditBalance?: number;
 }
 export interface FactoryLike { id: string; name: string; email?: string; contactPerson?: string; active?: boolean }
 export interface PersonLike { id: string; name: string; email?: string; role?: string; department?: string; status?: string; authUid?: string }

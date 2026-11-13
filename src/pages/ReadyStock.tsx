@@ -7,8 +7,8 @@ import { metalFamily, metalLabel } from "@/lib/metals";
 import { useCan, useMayExport } from "@/hooks/useCan";
 import { Fragment, useState, type MouseEvent } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { loadDb, updateDb, fmtDate, fmtMoney, stockCostOf, worksOnOrder, type Order, type ReadyStockItem } from "@/lib/db";
-import { readyStockDeleteBlocker } from "@/lib/readyStockGuards";
+import { ensureCollections, loadDb, updateDb, fmtDate, fmtMoney, stockCostOf, worksOnOrder, type Order, type ReadyStockItem } from "@/lib/db";
+import { readyStockDeleteBlocker, readyStockOutLabel } from "@/lib/readyStockGuards";
 import { needsAccess } from "@/lib/actionHints";
 import { filled, when, userName, refLink, linkList, noteText, type Detail } from "@/components/rowDetails";
 import { useDb } from "@/hooks/useDb";
@@ -232,6 +232,9 @@ export function ReadyStockPage() {
   // A lot an order, a return or a build points at is never deleted — it is
   // emptied instead (lib/readyStockGuards.ts). Checked again as it runs.
   const del = async (item: ReadyStockItem) => {
+    // A memo, a supplier's sale or bill may name it — read them all before deciding.
+    try { await ensureCollections(["memos", "supplierSales", "purchases"]); }
+    catch { toast.error("Couldn't check what this piece is on — try again"); return; }
     const why = readyStockDeleteBlocker(loadDb(), item);
     if (why) { toast.error(why); return; }
     const worth = item.quantity > 0 && item.price > 0 ? ` — worth ${fmtMoney(item.price * item.quantity)}` : "";
@@ -357,7 +360,7 @@ export function ReadyStockPage() {
   );
   const stockPill = (item: ReadyStockItem) => (
     <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${item.quantity > 0 ? "bg-success/10 text-success" : "bg-destructive/10 text-destructive"}`}>
-      {item.quantity > 0 ? "In stock" : "Sold out"}
+      {readyStockOutLabel(db, item)}
     </span>
   );
 
@@ -543,7 +546,7 @@ export function ReadyStockPage() {
               )}
               {item.quantity === 0 && (
                 <div className="absolute inset-0 bg-black/50 grid place-items-center">
-                  <span className="text-white font-semibold text-sm tracking-wide">SOLD OUT</span>
+                  <span className="text-white font-semibold text-sm tracking-wide">{readyStockOutLabel(db, item).toUpperCase()}</span>
                 </div>
               )}
               {item.video && (

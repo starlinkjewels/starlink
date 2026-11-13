@@ -12,7 +12,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import {
-  collectionLoaded, fmtDate, fmtMoney, keptValue, loadDb, stockCostOf, updateDb, worksOnOrder,
+  collectionLoaded, ensureCollections, fmtDate, fmtMoney, keptValue, loadDb, stockCostOf, updateDb, worksOnOrder,
   type Order, type ReadyStockEventKind, type ReadyStockItem,
 } from "@/lib/db";
 import { useDb } from "@/hooks/useDb";
@@ -35,7 +35,7 @@ import { companyIdOfClient, companyOf } from "@/lib/companies";
 import { officeLabel, officeOf, officeRank, otherLots } from "@/lib/offices";
 import { limitsOf } from "@/lib/permissions";
 import { pieceTimeline, stepQty, whoOf, type TimelineEntry } from "@/lib/readyStockHistory";
-import { readyStockDeleteBlocker } from "@/lib/readyStockGuards";
+import { readyStockDeleteBlocker, readyStockOutLabel } from "@/lib/readyStockGuards";
 import { builtFrom, orderPicturesPlan, piecePhotosBehind, takeOrderPictures } from "@/lib/readyStockPhotos";
 import { needsAccess } from "@/lib/actionHints";
 import { zoomable } from "@/components/ImageViewer";
@@ -68,9 +68,10 @@ function Fact({ label, children, className = "" }: { label: string; children: Re
   );
 }
 
-const stockPill = (q: number, big = false) => (
-  <span className={`inline-flex items-center font-semibold rounded-full whitespace-nowrap ${big ? "text-[11px] px-2.5 py-1" : "text-xs px-2 py-0.5"} ${q > 0 ? "bg-success/10 text-success" : "bg-destructive/10 text-destructive"}`}>
-    {q > 0 ? `In stock · ${q}` : "Sold out"}
+// `out`: what an empty lot is — "Sold out", or "On memo MO-…" (lib/readyStockGuards.ts).
+const stockPill = (q: number, big = false, out = "Sold out") => (
+  <span className={`inline-flex items-center font-semibold rounded-full whitespace-nowrap ${big ? "text-[11px] px-2.5 py-1" : "text-xs px-2 py-0.5"} ${q > 0 ? "bg-success/10 text-success" : out === "Sold out" ? "bg-destructive/10 text-destructive" : "bg-amber-500/10 text-amber-700"}`}>
+    {q > 0 ? `In stock · ${q}` : out}
   </span>
 );
 
@@ -183,6 +184,9 @@ function PieceBody({ item }: { item: ReadyStockItem }) {
   // A lot an order, a return or a build points at is never deleted — it is
   // emptied instead (lib/readyStockGuards.ts). Checked again as it runs.
   const del = async () => {
+    // A memo, a supplier's sale or bill may name it — read them all before deciding.
+    try { await ensureCollections(["memos", "supplierSales", "purchases"]); }
+    catch { toast.error("Couldn't check what this piece is on — try again"); return; }
     const why = readyStockDeleteBlocker(loadDb(), item);
     if (why) { toast.error(why); return; }
     const worth = item.quantity > 0 && item.price > 0 ? ` — worth ${fmtMoney(item.price * item.quantity)}` : "";
@@ -266,7 +270,7 @@ function PieceBody({ item }: { item: ReadyStockItem }) {
         </div>
       ) },
     { key: "office", header: "Office", sortValue: l => `${String(officeRank(db.settings, officeOf(l))).padStart(5, "0")} ${officeOf(l)}`, cell: l => <OfficeChip office={officeOf(l)} /> },
-    { key: "qty", header: "In stock", align: "center", kind: "number", sortValue: l => l.quantity, cell: l => stockPill(l.quantity) },
+    { key: "qty", header: "In stock", align: "center", kind: "number", sortValue: l => l.quantity, cell: l => stockPill(l.quantity, false, readyStockOutLabel(db, l)) },
     { key: "price", header: "Price", align: "right", kind: "number", sortValue: l => l.price, cell: l => <CellAmount>{fmtMoney(l.price)}</CellAmount> },
   ];
 
@@ -292,7 +296,7 @@ function PieceBody({ item }: { item: ReadyStockItem }) {
         menuLabel={`Actions for ${item.name}`}
       >
         <div className="flex flex-wrap items-center gap-1.5 mt-2">
-          {stockPill(item.quantity, true)}
+          {stockPill(item.quantity, true, readyStockOutLabel(db, item))}
           <OfficeChip office={office} />
           {canManage && <CompanyBadge id={companyOf(item)} />}
           {canManage && item.fromReturn && <span className="inline-flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded-full bg-amber-500/10 text-amber-800">Returned by a client</span>}
@@ -317,7 +321,7 @@ function PieceBody({ item }: { item: ReadyStockItem }) {
                 </a>
               </>
             )}
-            {item.quantity === 0 && <span className="absolute top-3 left-3 rounded-full bg-black/70 text-white text-[11px] font-semibold tracking-wide px-2.5 py-1">SOLD OUT</span>}
+            {item.quantity === 0 && <span className="absolute top-3 left-3 rounded-full bg-black/70 text-white text-[11px] font-semibold tracking-wide px-2.5 py-1">{readyStockOutLabel(db, item).toUpperCase()}</span>}
             {media.length > 1 && <span className="absolute top-3 right-3 rounded-full bg-black/50 text-white text-[11px] tabular-nums px-2 py-0.5">{at + 1} / {media.length}</span>}
           </div>
           {photosBehind && (
@@ -358,7 +362,7 @@ function PieceBody({ item }: { item: ReadyStockItem }) {
                   {canManage && item.quantity > 1 && item.price > 0 && <span className="font-normal text-muted-foreground"> · worth {fmtMoney(item.price * item.quantity)}</span>}
                 </p>
               </div>
-              {canEdit ? stepper : stockPill(item.quantity)}
+              {canEdit ? stepper : stockPill(item.quantity, false, readyStockOutLabel(db, item))}
             </div>
 
             {isAdmin && (
@@ -420,7 +424,7 @@ function PieceBody({ item }: { item: ReadyStockItem }) {
               <div className="mt-2 chip-row">
                 {lots.map(l => (
                   <Link key={l.id} to={`/ready-stock/${l.id}`} className="inline-flex items-center gap-2 rounded-xl border border-border/60 px-3 py-2 text-sm hover:bg-secondary/50">
-                    <OfficeChip office={officeOf(l)} />{stockPill(l.quantity)}
+                    <OfficeChip office={officeOf(l)} />{stockPill(l.quantity, false, readyStockOutLabel(db, l))}
                   </Link>
                 ))}
               </div>

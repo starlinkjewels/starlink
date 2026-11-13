@@ -304,7 +304,7 @@ export function InvoicesPage() {
   const printInv = (inv: Invoice) => {
     const { orders } = invLive(inv);
     const client = db.clients.find(c => c.id === inv.clientId);
-    if (orders.length <= 1 && orders[0]) printInvoice(orders[0], client, db.settings, inv.number, mainDiamondShape(db, orders[0].id));
+    if (orders.length <= 1 && orders[0]) printInvoice(orders[0], client, db.settings, inv.number, mainDiamondShape(db, orders[0].id), false, inv.createdAt);
     else if (orders.length) printBatchInvoice(orders, client, db.settings, inv.number, inv.createdAt.slice(0, 10), Object.fromEntries(orders.map(o => [o.id, mainDiamondShape(db, o.id) ?? ""])));
     else toast.error("This invoice has no orders to print.");
   };
@@ -562,7 +562,11 @@ export function InvoicesPage() {
                   ? <Link to={`/orders/${r.orders[0].id}`} onClick={e => e.stopPropagation()} className="text-primary hover:underline font-mono text-xs">{r.orders[0].orderNumber}</Link>
                   : <span className="text-xs text-muted-foreground">{r.orders.length} orders</span> },
               { key: "date", header: "Date", kind: "date", sortValue: r => r.inv.createdAt, cell: r => <span className="font-semibold text-brand-dark text-xs whitespace-nowrap">{fmtDate(r.inv.createdAt)}</span> },
-              { key: "amount", header: "Amount", align: "right", sortValue: r => r.amount, cell: r => <span className="font-semibold">{fmtMoney(r.amount)}</span> },
+              // The bill as raised is kept (inv.amount); a total changed since says so — reprint and resend it.
+              { key: "amount", header: "Amount", align: "right", sortValue: r => r.amount,
+                cell: r => <span className="font-semibold">{fmtMoney(r.amount)}{isStaff && r.orders.length > 0 && Math.abs(r.amount - r.inv.amount) > 0.01 && (
+                  <span className="block text-[10px] font-medium text-amber-700 whitespace-nowrap" title="The order's total changed after this invoice was raised — reprint it and send the client the new copy">Changed · was {fmtMoney(r.inv.amount)}</span>
+                )}</span> },
               { key: "received", header: "Received", align: "right", sortValue: r => r.adv, cell: r => (r.adv > 0 ? <span className="text-success font-medium text-xs">{fmtMoney(r.adv)}</span> : <span className="text-muted-foreground text-xs">—</span>) },
               { key: "balance", card: "figure" as const, header: "Balance", align: "right", sortValue: r => r.bal, cell: r => <span className={`text-xs ${r.bal > 0 ? "font-semibold text-destructive" : "text-muted-foreground"}`}>{r.bal > 0 ? fmtMoney(r.bal) : "Cleared"}</span> },
               // How long an unpaid bill has waited, from its date; nothing once paid.

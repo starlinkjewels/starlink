@@ -894,6 +894,8 @@ async function scan(live: Pipeline[], now: string, deadline = Date.now() + 300_0
     const since = p.onSince ?? p.updatedAt ?? "";
     const after = (iso: string | undefined, plusDays: number) => { if (!iso) return false; const d = new Date(iso); return !isNaN(+d) && new Date(+d + plusDays * DAY).toISOString() >= since; };
     const dueDay = (o: OrderLike) => (o.expectedDelivery ? `${o.expectedDelivery.slice(0, 10)}T23:59:59+05:30` : undefined);
+    /** $ a client holds on account — what it covers is not owed any more. */
+    const creditOf = (clientId: string) => Math.max(0, Number(w?.clients.get(clientId)?.creditBalance) || 0);
     if (w && t.kind.startsWith("order.")) {
       for (const o of w.orders) {
         if (isClosed(o) || isDelivered(o)) continue;
@@ -904,7 +906,8 @@ async function scan(live: Pipeline[], now: string, deadline = Date.now() + 300_0
           await go(p, subject, `stuck:${t.stage}:${stageKey(o)}`, c);
         if (t.kind === "order.dueSoon" && !isDispatched(o) && toDue !== undefined && toDue >= 0 && toDue <= days && after(dueDay(o), -days)) await go(p, subject, `due:${o.expectedDelivery}`, c);
         if (t.kind === "order.overdue" && !isDispatched(o) && toDue !== undefined && -toDue >= days && after(dueDay(o), days)) await go(p, subject, `overdue:${o.expectedDelivery}`, c);
-        if (t.kind === "order.unpaidAfterDispatch" && isDispatched(o) && balanceOf(o) > 0 && ((fieldValue("daysSinceDispatch", c) as number | undefined) ?? -1) >= days && after(o.dispatchedAt, days)) await go(p, subject, `unpaid:${o.dispatchedAt}`, c);
+        // Not chased when the credit they hold already covers it.
+        if (t.kind === "order.unpaidAfterDispatch" && isDispatched(o) && balanceOf(o) > 0 && balanceOf(o) > creditOf(o.clientId) + 0.005 && ((fieldValue("daysSinceDispatch", c) as number | undefined) ?? -1) >= days && after(o.dispatchedAt, days)) await go(p, subject, `unpaid:${o.dispatchedAt}`, c);
       }
     }
     if (w && t.kind === "client.idle") {
@@ -928,8 +931,10 @@ async function scan(live: Pipeline[], now: string, deadline = Date.now() + 300_0
       }
       for (const [id, amt] of owed) {
         const cl = w.clients.get(id);
-        if (!cl || amt <= (Number(t.amount) || 0) || !after(lastOwedDispatch.get(id), 0)) continue;
-        const clientBalance = Math.round(amt * 100) / 100;
+        // Less the credit they hold: what is really owed.
+        const net = amt - creditOf(id);
+        if (!cl || net <= (Number(t.amount) || 0) || !after(lastOwedDispatch.get(id), 0)) continue;
+        const clientBalance = Math.round(net * 100) / 100;
         await go(p, { kind: "client", id, label: cl.companyName }, `over:${month(now)}`, { now, client: cl, handler: handlerFor(undefined, cl, w.people), clientBalance, brandName: BRAND.name }, { clientBalance });
       }
     }

@@ -102,7 +102,7 @@ function readyPieceBlocker(db: DB, p: Purchase): string | undefined {
   // Already taken off Ready Stock by hand: the bill alone goes.
   if (!item) return undefined;
   const bought = p.piece?.qty ?? 0;
-  const blocker = readyStockDeleteBlocker(db, item);
+  const blocker = readyStockDeleteBlocker(db, item, { exceptPurchaseId: p.id });
   if (blocker) return `The piece from this purchase (${item.name}) is in use on Ready Stock — ${blocker.replace(/ — set quantity to 0 instead$/, "")}. It can't be removed.`;
   if ((db.supplierSales ?? []).some(s => s.lines?.some(l => l.readyStockItemId === item.id))) return `A piece from this purchase (${item.name}) was sold to a supplier. It can't be removed.`;
   if ((db.readyStock ?? []).some(i => i.splitFrom === item.id)) return `Some of the pieces from this purchase (${item.name}) were moved to another office. Move them back on Ready Stock first.`;

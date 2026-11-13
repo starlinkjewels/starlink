@@ -79,8 +79,9 @@ const PAGE: Record<string, readonly LazyCol[]> = {
   "/locker": ["clientReceipts", "lockerTransactions"],
   "/expenses": ["lockerTransactions"],
   "/income": ["lockerTransactions"],
-  "/ready-stock": [],
-  "/ready-stock/:id": [],
+  // memos: a piece out on memo says so ("On memo MO-…", not Sold out) and can't be deleted.
+  "/ready-stock": ["memos"],
+  "/ready-stock/:id": ["memos"],
   "/gift-cards": [],
   "/giftcard": [],
   "/catalog": [...PHOTOS, "catalogFavorites"],

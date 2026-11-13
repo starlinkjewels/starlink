@@ -6,7 +6,7 @@
 // A piece's material goes to its factory. A loose-diamond order's stones are
 // sold out of stock onto the order (no factory).
 import { coField, companyById } from "./companies";
-import { loadDb, uid, updateDb, isDiamondOnlyOrder, type DB, type MaterialIssuance, type Order } from "./db";
+import { loadDb, uid, updateDb, isDiamondOnlyOrder, type DB, type DiamondPacket, type MaterialIssuance, type Order } from "./db";
 import { decreaseStockSelfHealing, transferStock } from "./stock";
 import { lotBalances, lotLabel, lotParts, type LotBalance } from "./diamondLots";
 import { bagNoOf } from "./diamondBags";
@@ -15,6 +15,16 @@ import { isOtherMaterial, materialName, materialUnit, type MaterialKey } from ".
 import { stockAverageRate } from "./orderCost";
 
 /** One thing taken from stock for an order. */
+/**
+ * A certified stone bought for an order (or kept for one) stays in stock with that
+ * order's id until it is issued to the factory: it is KEPT for that order. Pickers
+ * that sell it, send it on memo or give it to another order leave it out; the
+ * order's own issue lists it. An admin can release it (Certified → ⋯ → Release).
+ */
+export function keptForOrder(p: Pick<DiamondPacket, "status" | "orderId">): string | undefined {
+  return p.status === "in_stock" && p.orderId ? p.orderId : undefined;
+}
+
 export interface StockPick {
   id: string;
   material: MaterialKey;

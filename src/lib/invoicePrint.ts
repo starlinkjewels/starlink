@@ -554,6 +554,8 @@ export function printInvoice(
   invoiceNumber: string,
   mainShape?: string,
   draft?: boolean,
+  /** The invoice's own date — a bill is dated the day it was raised, not the day the order was placed. */
+  invoiceDate?: string,
 ) {
   if (!exportAllowed()) return;
   logEvent("print", draft
@@ -576,7 +578,7 @@ export function printInvoice(
   const brand = brandForDocument(loadDb(), { clientId: client?.id ?? order.clientId, invoiceNumber: draft ? undefined : invoiceNumber });
   const html = buildInvoiceDoc({
     client, settings: brand, invoiceNumber, draft,
-    dateLabel: localDate(order.createdAt),
+    dateLabel: localDate(!draft && invoiceDate ? invoiceDate : order.createdAt),
     itemRows,
     totalsRows: totalsRowsHtml(total, adv, bal, shipping, gift, more),
   });
