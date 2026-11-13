@@ -1,4 +1,5 @@
 // Memo (goods on approval) — the side panels: send goods out, and take them back
+import { keptForOrder } from "@/lib/orderStock";
 // or sell them to whoever holds them. The books: lib/memos.ts.
 import { useEffect, useMemo, useState } from "react";
 import { BadgeCheck, Coins, FileOutput, Gem, Layers, Package, Plus, Trash2, Undo2, BadgeDollarSign, type LucideIcon } from "lucide-react";
@@ -75,7 +76,8 @@ export function MemoOutSheet({ open, onOpenChange, party: fixed }: { open: boole
   parties.sort((a, b) => a.name.localeCompare(b.name));
   const goldBal = deriveStockBalances(db.stockMovements ?? [], "gold", companyId);
   const lots = lotBalances(db.stockMovements ?? [], companyId);
-  const packets = (db.diamondPackets ?? []).filter(p => p.status === "in_stock" && (p.companyId || "main") === companyId).sort((a, b) => (a.stockNumber || "").localeCompare(b.stockNumber || ""));
+  // Not a stone kept for an order (lib/orderStock.ts keptForOrder) — that one is the order's.
+  const packets = (db.diamondPackets ?? []).filter(p => p.status === "in_stock" && !keptForOrder(p) && (p.companyId || "main") === companyId).sort((a, b) => (a.stockNumber || "").localeCompare(b.stockNumber || ""));
   const pieces = (db.readyStock ?? []).filter(i => i.quantity > 0 && (i.companyId || "main") === companyId).sort((a, b) => a.name.localeCompare(b.name));
   const sym = SYM[currency] ?? "";
 

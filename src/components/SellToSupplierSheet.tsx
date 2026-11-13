@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { keptForOrder } from "@/lib/orderStock";
 import { BadgeCheck, Coins, Gem, Layers, Package, Plus, Tag, Trash2, type LucideIcon } from "lucide-react";
 import { toast } from "sonner";
 import { useAuth } from "@/lib/auth";
@@ -92,7 +93,8 @@ export function SellToSupplierSheet({ open, onOpenChange, supplierId: fixedSuppl
   const co = companyId === "main" ? undefined : companyId;
   const goldBal = deriveStockBalances(db.stockMovements ?? [], "gold", companyId);
   const lots = lotBalances(db.stockMovements ?? [], companyId);
-  const packets = (db.diamondPackets ?? []).filter(p => p.status === "in_stock" && (p.companyId || "main") === companyId)
+  // Not a stone kept for an order (lib/orderStock.ts keptForOrder) — that one is the order's.
+  const packets = (db.diamondPackets ?? []).filter(p => p.status === "in_stock" && !keptForOrder(p) && (p.companyId || "main") === companyId)
     .sort((a, b) => (a.stockNumber || "").localeCompare(b.stockNumber || ""));
   const pieces = (db.readyStock ?? []).filter(i => i.quantity > 0 && (i.companyId || "main") === companyId).sort((a, b) => a.name.localeCompare(b.name));
 

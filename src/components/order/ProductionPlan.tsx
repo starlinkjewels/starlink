@@ -1,4 +1,5 @@
 import { fmtG } from "@/lib/weights";
+import { keptForOrder } from "@/lib/orderStock";
 import { useState } from "react";
 import { Boxes, Check, Gem, Plus, ShoppingCart, Sparkles, Trash2, AlertTriangle, Pencil, Factory as FactoryIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -110,7 +111,8 @@ export function ProductionPlan({ order, factoryId, onFactory, picks, onPicks, pl
       + (planned?.lines.filter(l => l.materialId && ids.has(l.materialId)).reduce((t, l) => t + l.qty, 0) ?? 0));
     return { mats, buckets, inStock: r3(buckets.reduce((t, b) => t + b.q, 0)), plannedG };
   };
-  const certified = (db.diamondPackets ?? []).filter(p => p.status === "in_stock" && (!multi || companyOf(p) === co));
+  // Not a stone kept for another order (lib/orderStock.ts keptForOrder).
+  const certified = (db.diamondPackets ?? []).filter(p => p.status === "in_stock" && !keptForOrder(p) && (!multi || companyOf(p) === co));
   const suggestions = order.kind === "loose" && wantsDiamonds ? suggestLots(db, { ...order.stoneSpec, type: order.diamondType || undefined }, co).slice(0, 6) : [];
   // A gem sale: that gem's stock, grade by grade.
   const gemStock = stoneMats.flatMap(m => Object.entries(deriveStockBalances(db.stockMovements ?? [], m.id, co))

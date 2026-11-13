@@ -37,6 +37,7 @@ import { confirmBox } from "@/lib/confirm";
 import { PageHeader, TabBar } from "@/components/PageHeader";
 import { usePageTab } from "@/hooks/usePageTab";
 import { lotShape } from "@/lib/diamondLots";
+import { keptForOrder } from "@/lib/orderStock";
 import { bagMoveLabel, bagNoOf } from "@/lib/diamondBags";
 import { StockLotsTable } from "@/components/StockLotsTable";
 import { ListSelect, CertGradeFields } from "@/components/LotFields";
@@ -610,6 +611,12 @@ function CertifiedSection() {
     packetCols.supplier,
     packetCols.rate,
     packetCols.bought,
+    // Bought for an order: kept for it — no other order, sale or memo can take it (lib/orderStock.ts).
+    { key: "kept", header: "Kept for", sortValue: p => orderNoOf(keptForOrder(p)), csv: p => orderNoOf(keptForOrder(p)) ?? "",
+      cell: p => {
+        const oid = keptForOrder(p);
+        return oid ? <Link to={`/orders/${oid}`} onClick={e => e.stopPropagation()}><CellTag tone="amber">{orderNoOf(oid) ?? "An order"}</CellTag></Link> : dash;
+      } },
     ...customColumns(pkDefs, pkVals),
   ];
   // History: when it was bought, what it cost and where it went.
@@ -852,6 +859,21 @@ function CertifiedSection() {
 
   // ── The ⋯ on a stone, in stock or in the history ──
   const ADMIN_ONLY = "Your access does not include changing stock";
+  // A stone bought for an order is kept for it. Releasing it only takes the mark off:
+  // it stays in stock, and the order's purchase stays on the order's record.
+  const releasePacket = async (p: DiamondPacket) => {
+    const no = orderNoOf(p.orderId) ?? "its order";
+    if (!(await confirmBox(`Release ${p.shape} ${p.carat}ct (report ${p.certificateNumber}) from ${no}?\n\nIt stays in stock and can then go to any order, be sold or go out on memo.`))) return;
+    let done = false;
+    updateDb(d => {
+      const x = (d.diamondPackets ?? []).find(y => y.id === p.id);
+      // Only if it is still in stock and still kept for the same order.
+      if (x && x.status === "in_stock" && x.orderId === p.orderId) { delete x.orderId; done = true; }
+    });
+    if (done) toast.success(`Released from ${no}`);
+    else toast.error("Not released — this stone has changed meanwhile");
+  };
+
   const packetActions = (p: DiamondPacket): MoreAction[] => {
     const del = packetDeletion(p);
     const sale = p.status === "sold" ? (db.diamondSales ?? []).find(s => s.packetId === p.id) : undefined;
@@ -870,6 +892,9 @@ function CertifiedSection() {
       { label: "View purchase", icon: ExternalLink, show: !!p.supplierId, disabled: !can("suppliers"),
         hint: can("suppliers") ? `On ${supplierName(p.supplierId) ?? "the supplier"}'s page` : needsAccess("suppliers", "view"),
         onSelect: () => navigate(`/suppliers/${p.supplierId}`) },
+      { label: "Release from order", icon: Lock, show: !!keptForOrder(p), disabled: !can("stock", "edit"),
+        hint: can("stock", "edit") ? `Kept for ${orderNoOf(p.orderId) ?? "an order"} — free it for any order, sale or memo` : ADMIN_ONLY,
+        onSelect: () => releasePacket(p) },
       { label: "Edit", icon: Pencil, disabled: !can("stock", "edit") || !inStock,
         hint: !can("stock", "edit") ? ADMIN_ONLY : !inStock ? STATUS_REASON[p.status as Exclude<DiamondPacket["status"], "in_stock">] : "Certificate, grading and cost",
         onSelect: () => { setEditPacket({ ...p }); setPkCf(valuesOf(db, "packets", p.id)); setEditRate(p.ratePerCaratInr ? String(p.ratePerCaratInr) : ""); } },

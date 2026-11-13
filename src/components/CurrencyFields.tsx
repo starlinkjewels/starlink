@@ -111,6 +111,13 @@ export function RateInput({ from, to, value, onChange, id, className = "", amoun
       {out !== undefined && (
         <p className="text-[11px] text-muted-foreground mt-1">{fmtCcy(amount!, f)} becomes <span className="font-semibold text-brand-dark">{fmtCcy(out, t)}</span></p>
       )}
+      {/* A slipped digit (8.4 for 84) or the rate the wrong way round: far from Settings is said, never refused. */}
+      {(() => {
+        const v = Number(value), s = Number(suggested);
+        if (!(v > 0) || !(s > 0) || Math.abs(v - s) / s <= 0.03) return null;
+        const pct = Math.round(Math.abs(v - s) / s * 100);
+        return <p className="text-[11px] font-medium text-amber-700 mt-1">{pct}% {v > s ? "above" : "below"} the Settings rate (1 {one} = {sym}{show(s)}) — check it.</p>;
+      })()}
     </div>
   );
 }

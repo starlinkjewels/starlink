@@ -1,4 +1,5 @@
 import { AddNewItem, useAddNew } from "@/components/create/QuickCreate";
+import { keptForOrder } from "@/lib/orderStock";
 import { StatStrip } from "@/components/TableToolbar";
 import { useCan, useHas } from "@/hooks/useCan";
 import { useState, type ReactNode } from "react";
@@ -357,7 +358,8 @@ function SellDiamond({ open, onOpenChange }: PanelProps) {
   const clients = db.clients.filter(c => worksOnClientId(db, user, c.id)).sort((a, b) => a.companyName.localeCompare(b.companyName));
   // Every account in the sale's currency that isn't switched off — older ones carry no "active" flag at all.
   const lockers = db.lockers.filter(l => l.active !== false && (l.currency || "INR") === currency);
-  const inStockPackets = (db.diamondPackets ?? []).filter(p => p.status === "in_stock" && companyOf(p) === companyId).sort((a, b) => (a.stockNumber || "").localeCompare(b.stockNumber || ""));
+  // Not a stone kept for an order (lib/orderStock.ts keptForOrder) — that one is the order's.
+  const inStockPackets = (db.diamondPackets ?? []).filter(p => p.status === "in_stock" && !keptForOrder(p) && companyOf(p) === companyId).sort((a, b) => (a.stockNumber || "").localeCompare(b.stockNumber || ""));
   const selectedPacket = inStockPackets.find(p => p.id === packetId);
   const looseInStock = deriveStockBalances(db.stockMovements, "diamond", companyId)[shape] ?? 0;
 

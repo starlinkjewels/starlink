@@ -13,12 +13,13 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { sheetFrame, type Frame } from "@/components/SheetFrame";
 import {
-  balanceDue, fmtMoney, invoiceOrderIds, loadDb, stampFor, todayLocal, updateDb, worksOnClientId, type Order,
+  balanceDue, fmtDate, fmtMoney, invoiceOrderIds, loadDb, stampFor, todayLocal, updateDb, worksOnClientId, type Order,
 } from "@/lib/db";
 import { ccy, fmtCcy, roundCcy, type CurrencyCode } from "@/lib/currency";
 import { createReceipt } from "@/lib/receipts";
 import { notifyClientPayment } from "@/lib/partyPayments";
 import { openMin } from "@/lib/openMin";
+import { confirmBox } from "@/lib/confirm";
 import type { ReactNode } from "react";
 
 const r2 = (n: number) => Math.round(n * 100) / 100;
@@ -151,6 +152,21 @@ export function ReceiveFromClient({
   const needsRate = !!locker && lockerCurrency !== "USD";
   const rate = Number(exchangeRate);
 
+  /** Payments from this client of about this amount within 7 days of `at` — receipts, and
+   *  money put straight on an order (not from a receipt, not credit moved onto a bill). */
+  const sameMoneyNearby = (cid: string, amt: number, at: string): string[] => {
+    const live = loadDb();
+    const near = (x: number) => Math.abs(x - amt) <= amt * 0.01;
+    const week = (iso?: string) => !!iso && Math.abs(+new Date(iso) - +new Date(at)) <= 7 * 86_400_000;
+    return [
+      ...(live.clientReceipts ?? []).filter(r => r.clientId === cid && near(r.amountUsd) && week(r.date))
+        .map(r => `Receipt ${r.receiptNo} · ${fmtMoney(r.amountUsd)} · ${fmtDate(r.date)}`),
+      ...live.orders.filter(o => o.clientId === cid && !o.deletedAt).flatMap(o => (o.advances ?? [])
+        .filter(a => !a.receiptId && !a.fromCredit && near(a.amount) && week(a.createdAt))
+        .map(a => `On ${o.orderNumber} · ${fmtMoney(a.amount)} · ${fmtDate(a.createdAt)}`)),
+    ];
+  };
+
   const submit = async () => {
     const c = db.clients.find(x => x.id === clientId);
     if (!c) { toast.error("Choose a client"); return; }
@@ -166,6 +182,10 @@ export function ReceiveFromClient({
       lockerId, lockerCurrency, ...(needsRate ? { exchangeRate: rate } : {}), depositAmount,
       ...(!order && invoiceId ? { invoiceId } : {}),
     };
+    // The same money entered twice is the commonest slip: the same client, the same amount
+    // (within 1%), within a week of this date — asked, never refused (two equal payments happen).
+    const seen = sameMoneyNearby(clientId, amt, v.at);
+    if (seen.length && !(await confirmBox(`${c.companyName} already has ${seen.length === 1 ? "a payment" : "payments"} like this:\n${seen.slice(0, 4).join("\n")}\n\nRecord ${fmtMoney(amt)} again? Cancel if it is the same payment.`))) return;
     setSaving(true);
     try {
       if (onSave) {

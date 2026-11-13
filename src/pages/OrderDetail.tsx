@@ -1,4 +1,5 @@
 import { CustomFieldsView } from "@/components/CustomFields";
+import { keptForOrder } from "@/lib/orderStock";
 import { ReceiveFromClient, type ReceiveValues } from "@/components/payments/ReceiveFromClient";
 import { receiptShareActions } from "@/lib/receiptShare";
 import { ourFinishedNet } from "@/lib/pure/accounts";
@@ -797,7 +798,9 @@ function OrderDetailPageBody() {
   };
 
   // The stones this order's company holds.
-  const inStockPackets = (db.diamondPackets ?? []).filter(p => p.status === "in_stock" && companyOf(p) === workCo);
+  // …never one kept for another order (lib/orderStock.ts keptForOrder); one kept for this order is listed first.
+  const inStockPackets = (db.diamondPackets ?? []).filter(p => p.status === "in_stock" && companyOf(p) === workCo && (!keptForOrder(p) || keptForOrder(p) === order?.id))
+    .sort((a, b) => (keptForOrder(b) ? 1 : 0) - (keptForOrder(a) ? 1 : 0));
 
   // ── Final Approval popup: one window for all the actual details ──
   const [faIdx, setFaIdx] = useState<number | null>(null);
@@ -1331,7 +1334,9 @@ function OrderDetailPageBody() {
     }
     const needsGold = orderMaterialRequirements(order).needsGold;
     const finish = finishRecord();
-    setFaGoldNet(finish?.finishedNetWeight != null ? String(finish.finishedNetWeight) : (needsGold ? (order.estimatedNetWeight?.toString() ?? order.estimatedGrossWeight?.toString() ?? order.metalWeight?.toString() ?? "") : ""));
+    // What was weighed, never the estimate: an untouched estimate was saved as the actual.
+    // The estimate is shown in the box as a hint (faEstimate) and checked on save.
+    setFaGoldNet(finish?.finishedNetWeight != null ? String(finish.finishedNetWeight) : "");
     // Prefill the purity the FACTORY works to for this karat (14KT = 595, not the
     // textbook 583). That is what actually gets entered; the textbook figure is
     // the fallback for a karat not in that table.
@@ -1481,6 +1486,12 @@ function OrderDetailPageBody() {
     setFaIdx(idx);
   };
 
+  /** The gold weight the order was estimated at — a hint in Final Approval, and what the actual is checked against. */
+  const faEstimate = (): number | undefined => {
+    if (!orderMaterialRequirements(order).needsGold) return undefined;
+    const e = order.estimatedNetWeight ?? order.estimatedGrossWeight ?? order.metalWeight;
+    return e && e > 0 ? e : undefined;
+  };
   const saveFinalApproval = async () => {
     if (faIdx === null) return;
     if (order.melted) { toast.error("This piece was melted — its actual details are kept as they were."); return; }
@@ -1531,6 +1542,27 @@ function OrderDetailPageBody() {
       toast.error(`The client's gold (${faClientGoldG} g) is more than the piece's gold (${hasNet ? netW : 0} g) — check the grams.`);
       return;
     }
+    // Against the estimate: no gold at all on a gold piece, or far from what was expected, is asked.
+    const est = faEstimate();
+    // The first approval only — a re-edit keeps what was weighed then.
+    if (est && !finishRecord() && order.timeline[faIdx]?.status !== "done") {
+      if (!hasNet && !(faOtherW > 0) && !(moreW > 0)
+        && !(await confirmBox(`No gold weight is entered for this ${order.metal} piece (estimated ${est} g).\n\nSave it with no gold? Cancel to enter the net weight, or the gross on the scale.`))) return;
+      if (hasNet && Math.abs(netW - est) / est > 0.15
+        && !(await confirmBox(`The net weight ${netW} g is ${Math.round(Math.abs(netW - est) / est * 100)}% ${netW > est ? "more" : "less"} than the ${est} g estimated.\n\nSave ${netW} g?`))) return;
+    }
+    // Stones: what went to the factory less what came back, against the stones on its bill.
+    const billPcs = Math.round(Number(faDiaPcs) || 0);
+    if (billPcs > 0 && dias.length) {
+      const known = dias.every(i => i.diamondKind === "certified" || i.piecesIssued != null);
+      const ours = dias.reduce((s, i) => {
+        if (i.diamondKind === "certified") return s + ((faDia[i.id] ?? "used") === "used" ? (i.diamondPacketIds?.length ?? 0) : 0);
+        const back = (faDiaReturnedPcs[i.id] ?? "").trim() === "" ? (i.finishReturnedPcs ?? 0) : Math.max(0, Math.round(Number(faDiaReturnedPcs[i.id]) || 0));
+        return s + Math.max(0, (i.piecesIssued ?? 0) - back);
+      }, 0);
+      if (known && ours !== billPcs
+        && !(await confirmBox(`The factory's bill says ${billPcs} stones; ${ours} went to it less what came back.\n\nSave anyway? (Cancel to check the stones returned or the count.)`))) return;
+    }
     const clientGoldG = hasNet ? Math.min(netW, faClientGoldG) : 0;
     /** What the piece took from OUR gold at the factory: its gold less the client's own. */
     const ourNetW = hasNet ? Math.max(0, Math.round((netW - clientGoldG) * 1000) / 1000) : 0;
@@ -1555,6 +1587,10 @@ function OrderDetailPageBody() {
     const orderVal = parseFloat(faOrderValue);
     const ship = parseFloat(faShipping);
     const alreadyDone = order.timeline[faIdx]?.status === "done";
+    if (!(await okToRebill({
+      ...(!isNaN(orderVal) && orderVal > 0 ? { amount: orderVal } : {}),
+      ...(faShipping.trim() !== "" && !isNaN(ship) && ship >= 0 ? { shippingCharge: ship } : {}),
+    }))) return;
     const now = new Date().toISOString();
     setFaSaving(true);
     try {
@@ -1739,8 +1775,15 @@ function OrderDetailPageBody() {
   // Undo a stage marked complete by mistake — this stage becomes the current
   // (in-progress) one and every later stage is reset to not-done; the order
   // status is recomputed from what's left done.
+  // Final Approval, Dispatch and Delivered carry records of their own: what of them stays
+  // is said before, and the dates that say the parcel went / arrived go with the step.
   const revertStep = async (idx: number) => {
-    if (!(await confirmBox("Undo this stage? This stage and any later ones will be marked not done, and the order status will update."))) return;
+    const undone = order.timeline.slice(idx).filter(t => t.status === "done").map(t => t.step);
+    const stays: string[] = [];
+    if (undone.includes("Final Approval")) stays.push("Final Approval: the actual weights, the labour owed to the factory and the material used stay recorded. Doing Final Approval again shows them to correct — it changes them, never adds them twice.");
+    if (undone.includes("Dispatch")) stays.push(`Dispatch: the courier and tracking number stay filled in for when it goes.${shippingRecorded().length ? " The freight already recorded stays in Expenses — don't enter it again." : ""}`);
+    if (undone.includes("Delivered") && order.cashbackIssued) stays.push("Delivered: the cashback gift card already given to the client stays.");
+    if (!(await confirmBox(`Undo this stage? This stage and any later ones will be marked not done, and the order status will update.${stays.length ? `\n\n${stays.join("\n\n")}` : ""}`))) return;
     updateDb(d => {
       const o = d.orders.find(x => x.id === order.id)!;
       for (let i = idx; i < o.timeline.length; i++) {
@@ -1748,9 +1791,14 @@ function OrderDetailPageBody() {
       }
       o.timeline[idx].status = "in_progress";
       o.status = statusFromTimeline(o.timeline, o.forReadyStock, isShelfSale(o));
+      // Not gone / not arrived any more — the order must not still say when it did.
+      if (undone.includes("Dispatch")) delete o.dispatchedAt;
+      if (undone.includes("Delivered")) delete o.deliveredAt;
     });
     toast.success("Stage reverted");
   };
+  /** Freight and insurance already booked against this order (lib/dispatch.ts recordShippingCost). */
+  const shippingRecorded = () => (loadDb().expenses ?? []).filter(e => e.category === "Shipping" && e.orderIds?.includes(order.id));
 
   const orderEmailInfo = () => ({
     orderNumber: order.orderNumber,
@@ -2171,7 +2219,17 @@ function OrderDetailPageBody() {
     };
   };
 
-  const saveActualDetails = () => {
+  /** On an invoiced order, a new value or shipping is asked first — the client holds the old bill. */
+  const okToRebill = async (change: { amount?: number; shippingCharge?: number }): Promise<boolean> => {
+    const inv = findInvoiceForOrder(db.invoices, order.id);
+    if (!inv) return true;
+    const was = orderTotal(order);
+    const next = orderTotal({ ...order, ...change });
+    if (Math.abs(next - was) <= 0.005) return true;
+    return confirmBox(`This order is already on invoice ${inv.number}. Change its total from ${fmtMoney(was)} to ${fmtMoney(next)}?\n\nThe order's total and balance change; the invoice is marked as changed — reprint it and send the client the new copy.`);
+  };
+
+  const saveActualDetails = async () => {
     // Every field is optional — update only what was actually filled in, and
     // never overwrite an existing value with a blank.
     const gw = parseFloat(actGrossW);
@@ -2196,6 +2254,7 @@ function OrderDetailPageBody() {
     const self = isSelfMetal(order);
     const goldBeside = self ? Math.max(0, pieceWeights(order, db.materialIssuances).net - (order.otherMetalWeight ?? 0)) : 0;
     if (self && has(nw) && nw <= goldBeside) { toast.error(`The net is all the piece's metal — it can't be less than the ${fmtG(goldBeside)} g of gold in it.`); return; }
+    if (!(await okToRebill({ ...(has(val) ? { amount: val } : {}), ...(shipEntered ? { shippingCharge: ship } : {}) }))) return;
     updateDb(d => {
       const o = d.orders.find(x => x.id === order.id)!;
       if (has(gw)) o.actualGrossWeight   = gw;
@@ -2235,20 +2294,29 @@ function OrderDetailPageBody() {
       toast.error("Enter both courier name and tracking number");
       return;
     }
+    let told = false;
     updateDb(d => {
       const o = d.orders.find(x => x.id === order.id)!;
+      // The client hears only when what they track by changed — never again for the same parcel.
+      const tracking = (o.courierName ?? "") !== courierName.trim() || (o.trackingNumber ?? "") !== trackingNumber.trim()
+        || (o.trackingLink ?? "") !== trackingLink.trim();
       o.courierName = courierName.trim();
       o.trackingNumber = trackingNumber.trim();
       o.trackingLink = trackingLink.trim() || undefined;
-      o.dispatchedAt = stampFor(dispatchDay);
       // If the parcel has already gone, correcting the date here corrects the
       // stage it was recorded against — the two must never disagree.
       const di = o.timeline.findIndex(t => t.step === "Dispatch");
-      if (di >= 0 && o.timeline[di].status === "done") o.timeline[di] = { ...o.timeline[di], date: o.dispatchedAt };
+      const gone = di >= 0 && o.timeline[di].status === "done";
+      // Not gone yet: no date it went (Dispatch → Mark complete sets it).
+      if (gone || o.dispatchedAt) o.dispatchedAt = stampFor(dispatchDay);
+      if (gone) o.timeline[di] = { ...o.timeline[di], date: o.dispatchedAt };
       const clientUser = d.users.find(u => u.clientId === o.clientId);
-      if (clientUser) d.notifications.unshift({ id: uid("n_"), userId: clientUser.id, title: "Order Dispatched", body: `${o.orderNumber} dispatched via ${courierName.trim()} · Tracking: ${trackingNumber.trim()}`, type: "info", read: false, createdAt: new Date().toISOString() });
+      if (clientUser && gone && tracking) {
+        d.notifications.unshift({ id: uid("n_"), userId: clientUser.id, title: "Tracking updated", body: `${o.orderNumber}: ${courierName.trim()} · Tracking: ${trackingNumber.trim()}`, type: "info", read: false, createdAt: new Date().toISOString() });
+        told = true;
+      }
     });
-    toast.success("Dispatch info saved — client notified");
+    toast.success(told ? "Dispatch info saved — client told the new tracking" : "Dispatch info saved");
     setShowDispatch(false);
   };
 
@@ -2267,6 +2335,10 @@ function OrderDetailPageBody() {
     if (dispatchModalIdx === null) return;
     if (!courierName.trim()) { toast.error("Enter the courier name"); return; }
     if (!trackingNumber.trim()) { toast.error("Enter the tracking number"); return; }
+    // Dispatched before and undone: its freight is already booked — never twice without asking.
+    const booked = shippingRecorded().filter(e => e.amount > 0);
+    if (booked.length && !dispShipCost.none && (dispShipCost.freight > 0 || dispShipCost.insurance > 0)
+      && !(await confirmBox(`Shipping for ${order.orderNumber} is already recorded:\n${booked.map(e => `${e.title} · ${fmtCcy(e.amount, e.currency ?? "INR")} · ${fmtDate(e.createdAt)}`).join("\n")}\n\nRecord this cost as well? Cancel and clear the cost if it is the same parcel.`))) return;
     setDispatchSaving(true);
     try {
       // Save the dispatch details onto the order first…
@@ -2322,8 +2394,15 @@ function OrderDetailPageBody() {
     // changed fee would no longer match its credit note.
     const certChanged = Math.abs(cert - (order.certificateFee || 0)) > 0.0001;
     if (certChanged && order.returns?.length) { toast.error("Pieces of this order were returned — the certificate fee can't be changed now"); return; }
-    if (certChanged && findInvoiceForOrder(db.invoices, order.id)
-      && !(await confirmBox("This order is already invoiced. Change the certificate fee?\n\nThe order's total and balance change; reprint the invoice so it shows the new fee."))) return;
+    // Already billed: any change to what the client pays is asked first — the invoice they hold says the old figure.
+    const charges = chargesOf(priceCharges);
+    const inv = findInvoiceForOrder(db.invoices, order.id);
+    if (inv) {
+      const was = orderTotal(order);
+      const next = orderTotal({ ...order, amount: val, shippingCharge: ship, certificateFee: keepOldCert ? order.certificateFee : cert, otherCharges: charges.length ? charges : undefined });
+      if ((certChanged || Math.abs(next - was) > 0.005)
+        && !(await confirmBox(`This order is already on invoice ${inv.number}. Change its total from ${fmtMoney(was)} to ${fmtMoney(next)}?\n\nThe order's total and balance change; the invoice is marked as changed — reprint it and send the client the new copy.`))) return;
+    }
     updateDb(d => {
       const o = d.orders.find(x => x.id === order.id)!;
       o.amount = val;
@@ -2338,7 +2417,6 @@ function OrderDetailPageBody() {
           delete o.certificateFeeInr; delete o.certificateRate;
         }
       }
-      const charges = chargesOf(priceCharges);
       if (charges.length) o.otherCharges = charges; else delete o.otherCharges;
       // The client is not told: a price set or changed here sends no notice.
     });
@@ -2377,7 +2455,7 @@ function OrderDetailPageBody() {
       if (existing.amount !== amount || existing.paid !== paid) {
         updateDb(d => { const i = d.invoices.find(x => x.id === existing.id); if (i) { i.amount = amount; i.paid = paid; } });
       }
-      printInvoice(order, client, db.settings, existing.number, mainDiamondShape(db, order.id));
+      printInvoice(order, client, db.settings, existing.number, mainDiamondShape(db, order.id), false, existing.createdAt);
       return;
     }
     // Not billed yet. Printing must NEVER mint an invoice number — a real invoice
@@ -3500,7 +3578,7 @@ It goes back to being our own build, and ${item ? item.name : "its piece"} goes 
                     </div>
                   </div>
                   <div className="flex gap-2">
-                    <AsyncButton size="sm" onClick={saveDispatch} className="btn-hero rounded-xl">Save &amp; Notify Client</AsyncButton>
+                    <AsyncButton size="sm" onClick={saveDispatch} className="btn-hero rounded-xl" title="The client is told only when the courier or tracking changes on a parcel already sent">Save</AsyncButton>
                     <Button size="sm" variant="outline" onClick={() => setShowDispatch(false)} className="rounded-xl">Cancel</Button>
                   </div>
                 </div>
@@ -4988,6 +5066,7 @@ The piece then takes ours — add them from stock or buy them, as for any order.
                           <Input type="number" min={0} step="0.001" value={faGoldNet} onChange={e => setFaGoldNet(e.target.value)} className="rounded-lg h-9 mt-1"
                             placeholder={isNonGoldMetal(order.metal) ? "g of gold" : "or enter the gross above"} aria-label={isNonGoldMetal(order.metal) ? "Gold in the piece (g)" : undefined} />
                         )}
+                        {faAutoNet == null && faEstimate() != null && !faGoldNet && <p className="text-[10px] text-muted-foreground mt-1">Estimated {faEstimate()} g — enter what it weighs.</p>}
                         {faAutoNet != null && <p className="text-[10px] text-muted-foreground mt-1">{fmtG(faGrossN)} g − diamonds {usedDiaCt} ct ({fmtG(usedDiaCt * CARAT_TO_GRAM)} g){faXG.stone ? ` − other stones ${fmtG(faXG.stone)} g` : ""}{faOtherG ? ` − ${faOtherMetal.trim()} ${fmtG(faOtherG)} g` : ""}{faMoreRows().map(m => m.w ? ` − ${m.metal} ${fmtG(m.w)} g` : "").join("")}{faXG.metal ? ` − other metal ${fmtG(faXG.metal)} g` : ""}</p>}
                       </div>
                       )}

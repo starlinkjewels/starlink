@@ -16,7 +16,7 @@ import {
   worksOnOrder,
   fmtMoney, writeStockCost, type ReadyStockItem,
 } from "@/lib/db";
-import { increaseStock, logOrderDirectPurchase } from "@/lib/stock";
+import { decreaseStockSelfHealing, increaseStock, logOrderDirectPurchase } from "@/lib/stock";
 import { fmtMoneyInr, applyDiscountPct, discountLabel } from "@/lib/manufacturing";
 import { fmtCcy, ccySymbol } from "@/lib/currency";
 import { AsyncButton } from "@/components/AsyncButton";
@@ -201,6 +201,9 @@ export interface PlannedBuy {
   execute: (order: Order) => Promise<void>;
 }
 
+/** A report number as it is compared: no spaces or dashes, any case. */
+const certKey = (n: string) => n.replace(/[\s-]/g, "").toLowerCase();
+
 export function BuyMaterialForm({ open, onOpenChange, supplierId: fixedSupplier, order: givenOrder, plan, memoIn }: {
   open: boolean; onOpenChange: (open: boolean) => void;
   /** Keeping goods from a memo in: the lines start filled in from the slip. */
@@ -323,8 +326,8 @@ export function BuyMaterialForm({ open, onOpenChange, supplierId: fixedSupplier,
     // so the factory comes first (a diamond-only order has none: its stones are bought for the client).
     const sendTo = fixedOrder ? (fixedOrder.assignedFactoryId || "") : "";
     if (!planning && fixedOrder && !sendTo && !isDiamondOnlyOrder(fixedOrder)) { toast.error("Assign a factory first (step ① on the order) — the material goes straight to it."); return; }
-    // The same bill entered twice is the same bill paid twice.
-    if (fixedOrder && billNo.trim()) {
+    // The same bill entered twice is the same bill paid twice — whatever it is bought for.
+    if (!planning && billNo.trim()) {
       const key = billNo.trim().toLowerCase();
       if ((db.purchases ?? []).some(p => p.supplierId === supplierId && (p.invoiceNumber ?? "").trim().toLowerCase() === key)
         && !(await confirmBox(`Bill ${billNo.trim()} from ${db.suppliers.find(x => x.id === supplierId)?.name ?? "this supplier"} is already recorded.\n\nSave these lines against it as well? Cancel if it is the same purchase being entered again.`))) return;
@@ -340,6 +343,10 @@ export function BuyMaterialForm({ open, onOpenChange, supplierId: fixedSupplier,
       if (l.kind === "other" && !materialDef(db.settings, l.materialId)) { toast.error(`Item ${i + 1}: choose the material`); return; }
       if (!q || q <= 0) { toast.error(`Item ${i + 1}: enter the ${l.kind === "gold" ? "weight" : l.kind === "other" ? "quantity" : l.kind === "ready" ? "pieces" : "carat"}`); return; }
       if (l.kind === "certified" && !l.certNo.trim()) { toast.error(`Item ${i + 1}: enter the report number`); return; }
+      // The same report twice on one bill is a typing slip — never two stones.
+      if (l.kind === "certified" && lines.some((x, j) => j < i && x.kind === "certified" && certKey(x.certNo) === certKey(l.certNo))) {
+        toast.error(`Item ${i + 1}: report ${l.certNo.trim()} is already on this bill`); return;
+      }
       if (l.kind === "certified") { const why = customProblem(db.settings, "packets", l.cf, user); if (why) { toast.error(`Item ${i + 1}: ${why}`); return; } }
       if (l.kind === "ready") {
         const pc = l.pc ?? emptyReady();
@@ -352,6 +359,16 @@ export function BuyMaterialForm({ open, onOpenChange, supplierId: fixedSupplier,
         if (!pc.office) { toast.error(`Item ${i + 1}: choose the office the piece is kept at`); return; }
       }
       if (lineInr(l) <= 0) { toast.error(`Item ${i + 1}: comes to ₹0 — check the rate`); return; }
+    }
+    // A report already on file: the same stone bought again, or a copied report. Asked, not refused —
+    // a stone sold and bought back has the same report.
+    if (!planning) {
+      const onFile = lines.filter(l => l.kind === "certified").flatMap(l => {
+        const k = certKey(l.certNo);
+        return (db.diamondPackets ?? []).filter(p => certKey(p.certificateNumber ?? "") === k)
+          .map(p => `${l.certNo.trim()} — ${p.stockNumber || "a stone"} (${p.status === "in_stock" ? "in stock" : p.status.replace(/_/g, " ")})`);
+      });
+      if (onFile.length && !(await confirmBox(`Already on record:\n${onFile.join("\n")}\n\nSave this bill anyway? Cancel if it is the same stone being entered again.`))) return;
     }
     // Recording the bill: now, or — planned with a new order — when the order is placed.
     const record = async (target: Order | undefined, asFixed: boolean, co: string, sendTo: string) => {
@@ -369,6 +386,9 @@ export function BuyMaterialForm({ open, onOpenChange, supplierId: fixedSupplier,
     const usdRate = currency === "USD" ? Number(xrate) : inrOn(db, "USD", now);
     let costless = 0;
     setSaving(true);
+    // Stock put in by this save, until its bill is saved (see the catch below).
+    const putIn: { args: Parameters<typeof increaseStock>[0]; label: string }[] = [];
+    let billSaved = false;
     try {
       // Photos first: a failed upload must leave nothing half-saved.
       const readyImages: string[][] = [];
@@ -395,17 +415,21 @@ export function BuyMaterialForm({ open, onOpenChange, supplierId: fixedSupplier,
         }
       }
       // Bought for an order, nothing goes into stock — the order's factory takes it from the bill.
+      // Each line put into stock is noted: if the bill is then not saved, they come out again
+      // (below), so a failed save never leaves stock behind or counts it twice on a retry.
       for (const [i, l] of (target ? [] : lines).entries()) {
         // A certified stone is its own packet; a ready piece goes onto Ready Stock (below) — neither pools.
         if (l.kind === "certified" || l.kind === "ready") continue;
         // Loose stones go into their lot (its bag): shape · sieve · mm · colour · clarity (lib/diamondLots.ts).
         const lot = l.kind === "loose" || isGemLine(l, db.settings) ? lotOfLine(l) : undefined;
-        await increaseStock({
+        const inArgs = {
           material: lineMaterial(l), companyId: co,
           purityOrQuality: l.kind === "gold" ? l.purity : l.kind === "other" ? otherBucket(l, db.settings) : lotKey(lot!),
-          quantity: Number(l.qty), refType: "purchase", refId: ids[i], createdBy: user!.id,
+          quantity: Number(l.qty), refType: "purchase" as const, refId: ids[i], createdBy: user!.id,
           lot, pieces: l.kind === "loose" && Number(l.pcs) > 0 ? Math.round(Number(l.pcs)) : undefined,
-        });
+        };
+        await increaseStock(inArgs);
+        putIn.push({ args: inArgs, label: `${inArgs.quantity} ${inArgs.purityOrQuality}` });
       }
       const packetIds: (string | undefined)[] = lines.map(() => undefined);
       updateDb(d => {
@@ -558,6 +582,7 @@ export function BuyMaterialForm({ open, onOpenChange, supplierId: fixedSupplier,
           }
         }
       });
+      billSaved = true;
       toast.success(asFixed && sendTo
         ? `${lines.length > 1 ? `${lines.length} items` : "Item"} bought (${fmtMoneyInr(billTotalInr)}) & sent to ${db.factories.find(f => f.id === sendTo)?.name || "the factory"}`
         : `${lines.length > 1 ? `${lines.length} items` : "Item"} bought → ${target ? `order ${target.orderNumber}` : `${co !== "main" ? `${companyById(db.settings, co).name}'s ` : ""}${readyLines === lines.length ? "Ready Stock" : readyLines ? "stock & Ready Stock" : "stock"}`} · ${fmtMoneyInr(billTotalInr)} to ${supplier?.name || "supplier"}`);
@@ -572,7 +597,20 @@ export function BuyMaterialForm({ open, onOpenChange, supplierId: fixedSupplier,
       reset();
       onOpenChange(false);
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Failed to buy");
+      // The bill was not saved: what this save put into stock comes out again, as Memo does,
+      // so nothing is left behind and a second try doesn't count it twice.
+      const notBack: string[] = [];
+      if (!billSaved) {
+        for (const { args, label } of putIn) {
+          await decreaseStockSelfHealing({
+            material: args.material, companyId: args.companyId, purityOrQuality: args.purityOrQuality, quantity: args.quantity,
+            type: "issuance_out", refType: "purchase", refId: args.refId, createdBy: user!.id,
+            note: "Bill not recorded — taken back", lot: args.lot, pieces: args.pieces,
+          }, loadDb().stockMovements).catch(() => { notBack.push(label); });
+        }
+      }
+      const why = e instanceof Error ? e.message : "Failed to buy";
+      toast.error(notBack.length ? `${why} — and ${notBack.join(", ")} could not be taken back out of stock: check Stock` : why, { duration: notBack.length ? 15000 : undefined });
     } finally { setSaving(false); }
     };
 
