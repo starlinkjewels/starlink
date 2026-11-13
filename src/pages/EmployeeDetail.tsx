@@ -22,7 +22,8 @@ import { filled, when, userName, refLink, refNo, type Detail } from "@/component
 import { DataTable, CellMain, CellAmount, CellDate, type DataColumn } from "@/components/DataTable";
 import { useDb } from "@/hooks/useDb";
 import { StatusBadge } from "@/components/StatusBadge";
-import { PageHeader } from "@/components/PageHeader";
+import { PageHeader, TabBar } from "@/components/PageHeader";
+import { usePageTab } from "@/hooks/usePageTab";
 import { SectionTitle } from "@/components/SectionTitle";
 import { StatStrip } from "@/components/TableToolbar";
 import { TasksPanel } from "@/components/TasksPanel";
@@ -42,7 +43,8 @@ import { ADVANCE_LABEL, advanceRows, advanceOwed, advanceChangeProblem, moveToAd
 import { closedWhy } from "@/lib/yearLock";
 import { confirmBox } from "@/lib/confirm";
 import { updateDbAs } from "@/lib/db";
-import { HandCoins, Undo2, Eraser, ArrowRightLeft } from "lucide-react";
+import { HandCoins, Undo2, Eraser, ArrowRightLeft, Percent, Package } from "lucide-react";
+import { useAuth } from "@/lib/auth";
 import { CommissionPanel } from "@/components/CommissionPanel";
 
 export function EmployeeDetailPage() {
@@ -71,6 +73,10 @@ export function EmployeeDetailPage() {
 
   // Salary is payable to any staff member — employees AND the admin/owner.
   const employee = db.users.find(u => u.id === id && (u.role === "employee" || u.role === "admin"));
+  // One list at a time (hooks/usePageTab.ts) — before the early return below, so it runs on every draw.
+  // Commission is the admin's (CommissionPanel shows it to admins only).
+  const viewerIsAdmin = useAuth().user?.role === "admin";
+  const [tabWant, setTab] = usePageTab("employee", ["salary", "advance", "commission", "clients", "orders"] as const, "salary");
   if (!employee) {
     return (
       <div className="text-center py-20 text-muted-foreground">
@@ -383,6 +389,9 @@ export function EmployeeDetailPage() {
   // with the rest — the opening line is pinned, and a pinned line has no ⋯ of
   // its own.
   const hasSalary = salaryLedger.length > 0 || opening > 0;
+  // The tab shown, and the salary tab's count; Orders only once there are some.
+  const salaryCount = salaryLedger.length;
+  const tab = tabWant === "orders" && !orders.length ? "salary" : tabWant === "commission" && !viewerIsAdmin ? "salary" : tabWant;
   const anyOwed = [...owedNow.values()].some(v => v > 0.005);
   const advanceMenu: MoreAction[] = [
     { label: "Give advance (upad)", icon: HandCoins, hint: "Money they owe back", onSelect: () => setAdvSheet({ mode: "give" }), show: mayPay },
@@ -471,8 +480,17 @@ export function EmployeeDetailPage() {
         { label: "Tasks done", value: String(doneTasks), icon: CheckCircle2, tone: "in", sub: tasks.length ? `${taskBar}% of ${tasks.length}` : undefined },
       ]} />
 
+      {/* One list at a time (hooks/usePageTab.ts) — a long one never hides another under it. */}
+      <TabBar label="Employee" value={tab} onChange={setTab} tabs={[
+        { key: "salary" as const, label: "Salary & payments", icon: Wallet, count: salaryCount },
+        { key: "advance" as const, label: "Advance (upad)", icon: HandCoins, count: advRows.length },
+        ...(viewerIsAdmin ? [{ key: "commission" as const, label: "Commission", icon: Percent }] : []),
+        { key: "clients" as const, label: "Clients", icon: Users, count: clients.length },
+        ...(orders.length ? [{ key: "orders" as const, label: "Orders", icon: Package, count: orders.length }] : []),
+      ]} />
+
       {/* Salary & Payments: the ledgers carry their own totals and title. */}
-      {!hasSalary ? (
+      {tab === "salary" && (!hasSalary ? (
         <div className="card-luxe overflow-hidden">
           <SectionTitle title="Salary & Payments" className="px-5 py-4 border-b border-border/60"
             info={<>Pay salary here, or from <span className="font-medium">Payments → Pay → Pay an employee</span>. Each payment is an expense tagged to this member.</>} />
@@ -520,10 +538,10 @@ export function EmployeeDetailPage() {
           );
         })}
         </div>
-      )}
+      ))}
 
       {/* Advance (upad) — what they owe back, line by line, one account per currency. */}
-      {advRows.length === 0 ? (
+      {tab === "advance" && (advRows.length === 0 ? (
         <div className="card-luxe overflow-hidden">
           <SectionTitle title="Advance (upad)" className="px-5 py-4 border-b border-border/60"
             info={<>Money given ahead of their pay. Not an expense — they owe it back: repaid in cash, cut from their salary when you pay it, or written off.</>} />
@@ -566,13 +584,13 @@ export function EmployeeDetailPage() {
             );
           })}
         </div>
-      )}
+      ))}
 
       {/* Sales commission — their %, earned order by order, paid, owed (admins only). */}
-      <CommissionPanel employee={employee} />
+      {tab === "commission" && <CommissionPanel employee={employee} always />}
 
       {/* Assigned Clients — how many, and their orders, are the strip's above. */}
-      <div className="card-luxe overflow-hidden">
+      {tab === "clients" && <div className="card-luxe overflow-hidden">
         <SectionTitle title="Assigned Clients" sub={orders.length ? `${fmtMoney(totalValue)} in orders` : undefined} className="px-5 py-4 border-b border-border/60" />
         {clients.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-14 text-muted-foreground">
@@ -598,10 +616,10 @@ export function EmployeeDetailPage() {
             />
           </div>
         )}
-      </div>
+      </div>}
 
       {/* Recent orders across all assigned clients */}
-      {orders.length > 0 && (
+      {tab === "orders" && orders.length > 0 && (
         <div className="card-luxe overflow-hidden">
           {/* What the list holds; the counts are the strip's above. */}
           <SectionTitle title="Order Activity" sub={`Newest ${Math.min(12, orders.length)} of ${orders.length}`} className="px-5 py-4 border-b border-border/60" />

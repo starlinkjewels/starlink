@@ -6,7 +6,8 @@ import { PartyMemos } from "@/components/MemoSheets";
 import { brokerSuppliers } from "@/lib/brokers";
 import { useCan, useHas, useMayExport } from "@/hooks/useCan";
 import type { MoreAction } from "@/components/MoreMenu";
-import { PageHeader } from "@/components/PageHeader";
+import { PageHeader, TabBar } from "@/components/PageHeader";
+import { usePageTab } from "@/hooks/usePageTab";
 import { SectionTitle } from "@/components/SectionTitle";
 import { AddNewItem, useAddNew } from "@/components/create/QuickCreate";
 import { bagNoOfPurchase } from "@/lib/diamondBags";
@@ -103,6 +104,8 @@ function SupplierHistoryPageBody() {
   const [editingEntry, setEditingEntry] = useState<MoneyEntry | null>(null);
 
   const supplier = db.suppliers.find(s => s.id === id);
+  // One list at a time (hooks/usePageTab.ts) — before the early return below, so it runs on every draw.
+  const [tabWant, setTab] = usePageTab("supplier", ["purchases", "statement", "gold"] as const, "purchases");
   if (!supplier) {
     return (
       <div className="text-center py-20 text-muted-foreground">
@@ -224,6 +227,8 @@ function SupplierHistoryPageBody() {
   const goldOwedSomewhere = companiesOf(db.settings).some(c => owedIn(db, supplier, c.id) > 0.0005);
   const NO_GOLD_OWED = !goldReady ? "Still loading" : "No gold is owed to them";
   const goldShown = goldReady && hasGoldAccount(db, supplier);
+  // The tab shown: the gold account only once there is one.
+  const tab = tabWant === "gold" && !goldShown ? "purchases" : tabWant;
   const [rcvAmount, setRcvAmount] = useState("");
   const [rcvLockerId, setRcvLockerId] = useState("");
   const [rcvNote, setRcvNote] = useState("");
@@ -893,29 +898,14 @@ function SupplierHistoryPageBody() {
           )}
         </div>
       )}
-      {/* Account Statement — the same ledger people read on Stock and Locker:
-          filters, then every entry with a running balance. Its figures (what
-          was bought, paid and refunded, and where that leaves the account)
-          are the strip under the header, so they are not said twice. */}
-      <StatementLedger
-        title="Account Statement"
-        caption={`${statement.length} entr${statement.length !== 1 ? "ies" : "y"} · INR`}
-        rows={statement}
-        fmt={fmtMoneyInr}
-        debitLabel="Bill"
-        creditLabel="Paid"
-        details={statementDetails}
-        rowActions={statementActions}
-        // The running balance is what we owe them: only with fig.payables — and the
-        // statement download, which is built round it, likewise.
-        hideBalance={!has("fig.payables")}
-        onExport={has("fig.payables") ? () => setShowExport(true) : undefined}
-      />
 
-      {/* Their gold account — gold taken on loan, given back or billed, in grams. Shown once there is any. */}
-      <SupplierGoldPanel supplier={supplier} isAdmin={mayGold} mode={goldMode} onMode={setGoldMode} />
-
-
+      {/* One list at a time (hooks/usePageTab.ts) — a long one never hides another under it. */}
+      <TabBar label="Supplier" value={tab} onChange={setTab} tabs={[
+        { key: "purchases" as const, label: "Purchases", icon: ShoppingBag, count: purchases.length },
+        { key: "statement" as const, label: "Account statement", icon: BookOpen, count: statement.length },
+        ...(goldShown ? [{ key: "gold" as const, label: "Gold account", icon: Coins }] : []),
+      ]} />
+      {tab === "purchases" && (<>
       {/* Purchase history */}
       <div className="card-luxe overflow-hidden">
         {/* How many is the table's own count. */}
@@ -947,6 +937,31 @@ function SupplierHistoryPageBody() {
           />
         </div>
       </div>
+      </>)}
+      {tab === "statement" && (<>
+      {/* Account Statement — the same ledger people read on Stock and Locker:
+          filters, then every entry with a running balance. Its figures (what
+          was bought, paid and refunded, and where that leaves the account)
+          are the strip under the header, so they are not said twice. */}
+      <StatementLedger
+        title="Account Statement"
+        caption={`${statement.length} entr${statement.length !== 1 ? "ies" : "y"} · INR`}
+        rows={statement}
+        fmt={fmtMoneyInr}
+        debitLabel="Bill"
+        creditLabel="Paid"
+        details={statementDetails}
+        rowActions={statementActions}
+        // The running balance is what we owe them: only with fig.payables — and the
+        // statement download, which is built round it, likewise.
+        hideBalance={!has("fig.payables")}
+        onExport={has("fig.payables") ? () => setShowExport(true) : undefined}
+      />
+      </>)}
+      {/* Their gold account — gold taken on loan, given back or billed, in grams. Shown once there is any. */}
+      <SupplierGoldPanel supplier={supplier} isAdmin={mayGold} mode={goldMode} onMode={setGoldMode} hideCard={tab !== "gold"} />
+
+
       <EditPurchaseDialog
         purchase={editingPurchase}
         onClose={() => setEditingPurchase(null)}

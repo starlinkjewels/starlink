@@ -8,7 +8,8 @@ import { useDb, useDbVersion } from "@/hooks/useDb";
 import { currentUserOrders, costDataReady } from "@/lib/db";
 import { reachOf } from "@/lib/permissions";
 import { presetPeriod, previousPeriod, periodLabel, type Period } from "@/lib/analytics";
-import { PageHeader, TabBar } from "@/components/PageHeader";
+import { PageHeader, TabBar, SubTabs } from "@/components/PageHeader";
+import { usePageTab } from "@/hooks/usePageTab";
 import { FilterChips, FiltersButton, type TableFilter } from "@/components/TableToolbar";
 import { ReportSections } from "./ReportSections";
 import { PeriodPicker } from "./ui";
@@ -83,6 +84,20 @@ export function ReportsHub() {
     { key: "orders", label: "Orders", icon: ListOrdered, show: true },
   ].filter(t => t.show) as never;
   const activeTab = tabs.some(t => t.key === tab) ? tab : "overview";
+  // Inside Sales and Purchases: the summary, then each long report on its own —
+  // one list at a time (hooks/usePageTab.ts), never one table hidden under another.
+  const staffAll = isAdmin || user?.role === "employee";
+  const salesSubs = [
+    { key: "summary" as const, label: "Summary" },
+    ...(staffAll ? [{ key: "billing" as const, label: "Sales / billing" }] : []),
+    ...(isAdmin && !emp ? [{ key: "profit" as const, label: "Profit & loss" }] : []),
+  ];
+  const [salesSub, setSalesSub] = usePageTab("reports-sales", salesSubs.map(t => t.key), "summary", "salesTab");
+  const buySubs = [
+    { key: "summary" as const, label: "Summary" },
+    ...(staffAll ? [{ key: "materials" as const, label: "Material purchases" }, { key: "payments" as const, label: "Payments made" }] : []),
+  ];
+  const [buySub, setBuySub] = usePageTab("reports-purchases", buySubs.map(t => t.key), "summary", "purchasesTab");
 
   // eslint-disable-next-line react-hooks/exhaustive-deps
   const allOrders = useMemo(() => currentUserOrders(db, user!), [db, user, version]);
@@ -173,13 +188,14 @@ export function ReportsHub() {
       {activeTab === "overview" && <OverviewTab ctx={ctx} goTo={setTab} />}
       {activeTab === "sales" && (
         <>
-          <SalesTab ctx={ctx} />
+          {salesSubs.length > 1 && <SubTabs label="Sales" tabs={salesSubs} value={salesSub} onChange={setSalesSub} />}
+          {salesSub === "summary" && <SalesTab ctx={ctx} />}
           {emp && isAdmin && (
             <p className="text-[11px] text-muted-foreground px-1">
               The company Profit &amp; Loss is for the whole business, so it isn&rsquo;t shown for one person.
             </p>
           )}
-          <ReportSections embedded show={emp ? ["sales"] : ["sales", "profit"]} period={period} clientId={clientId === "all" ? undefined : clientId} scope={combinedScope} scopeKey={`${emp?.id ?? ""}|${companyId}`} companyId={companyId === "all" ? undefined : companyId} />
+          {salesSub !== "summary" && <ReportSections embedded show={[salesSub === "profit" ? "profit" : "sales"]} period={period} clientId={clientId === "all" ? undefined : clientId} scope={combinedScope} scopeKey={`${emp?.id ?? ""}|${companyId}`} companyId={companyId === "all" ? undefined : companyId} />}
         </>
       )}
       {activeTab === "clients" && <ClientsTab ctx={ctx} />}
@@ -192,8 +208,9 @@ export function ReportsHub() {
       )}
       {activeTab === "purchases" && (
         <>
-          <PurchasesTab ctx={ctx} />
-          <ReportSections embedded show={["purchases", "payments"]} period={period} clientId={clientId === "all" ? undefined : clientId} scope={combinedScope} scopeKey={`${emp?.id ?? ""}|${companyId}`} companyId={companyId === "all" ? undefined : companyId} />
+          {buySubs.length > 1 && <SubTabs label="Purchases & payments" tabs={buySubs} value={buySub} onChange={setBuySub} />}
+          {buySub === "summary" && <PurchasesTab ctx={ctx} />}
+          {buySub !== "summary" && <ReportSections embedded show={[buySub === "payments" ? "payments" : "purchases"]} period={period} clientId={clientId === "all" ? undefined : clientId} scope={combinedScope} scopeKey={`${emp?.id ?? ""}|${companyId}`} companyId={companyId === "all" ? undefined : companyId} />}
         </>
       )}
       {activeTab === "orders" && (

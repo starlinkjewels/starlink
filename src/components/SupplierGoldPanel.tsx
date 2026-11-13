@@ -40,7 +40,9 @@ const dash = <span className="text-muted-foreground/50">—</span>;
  * stock, gold given back, gold owed turned into a rupee bill — in grams, with
  * what is owed in fine (24K) grams. The page's ⋯ opens the forms (`mode`).
  */
-export function SupplierGoldPanel({ supplier, isAdmin, mode, onMode }: {
+export function SupplierGoldPanel({ supplier, isAdmin, mode, onMode, hideCard }: {
+  /** The page shows another of its lists (its tabs): the forms still open, the card stays out of sight. */
+  hideCard?: boolean;
   supplier: Supplier;
   isAdmin: boolean;
   mode: GoldMode;
@@ -239,7 +241,7 @@ export function SupplierGoldPanel({ supplier, isAdmin, mode, onMode }: {
 
   return (
     <>
-      {show && (
+      {show && !hideCard && (
         <div className="card-luxe overflow-hidden">
           <SectionTitle title="Gold account" className="px-5 py-4 border-b border-border/60" icon={Coins}
             sub="In grams · apart from the money account"

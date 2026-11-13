@@ -30,11 +30,12 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Pencil, Trash2, ExternalLink, Lock, FileText, FileSpreadsheet, BadgeCheck, Gem, Wallet } from "lucide-react";
+import { Pencil, Trash2, ExternalLink, Lock, FileText, FileSpreadsheet, BadgeCheck, Gem, Wallet, Layers, History } from "lucide-react";
 import { isOtherMaterial, materialDef, materialUnit, purchaseQty, KIND_LABEL, type MaterialKey } from "@/lib/materials";
 import { toast } from "sonner";
 import { confirmBox } from "@/lib/confirm";
-import { PageHeader } from "@/components/PageHeader";
+import { PageHeader, TabBar } from "@/components/PageHeader";
+import { usePageTab } from "@/hooks/usePageTab";
 import { lotShape } from "@/lib/diamondLots";
 import { bagMoveLabel, bagNoOf } from "@/lib/diamondBags";
 import { StockLotsTable } from "@/components/StockLotsTable";
@@ -71,6 +72,15 @@ function MaterialSection({ material }: { material: MaterialKey }) {
   // What the history below shows: one bag (purity), every bag of one size, or everything.
   const [selected, setSelected] = useState<{ keys: string[]; label: string } | null>(null);
   const selectedBucket = selected?.label ?? null;
+  // What is in stock, or the movement history — one list at a time (hooks/usePageTab.ts).
+  // Opening a line shows its history, on that tab.
+  // A link for a bag or a lot (Search: ?q=…&open=bag) opens on the stock, where it is.
+  const [arrival] = useSearchParams();
+  const [tab, setTab] = usePageTab("stock", ["lots", "history"] as const, "lots", "tab", arrival.has("q") || arrival.has("open"));
+  const pickLine = (keys: string[] | null, label?: string) => {
+    setSelected(keys ? { keys, label: label ?? keys.join(", ") } : null);
+    if (keys) setTab("history");
+  };
   // The movement dates stay as they were left (this browser, this person), one pair per material.
   const [filterFrom, setFilterFrom] = useStickyFilter(`stock.${material}.history.from`, "");
   const [filterTo, setFilterTo] = useStickyFilter(`stock.${material}.history.to`, "");
@@ -382,13 +392,18 @@ function MaterialSection({ material }: { material: MaterialKey }) {
         </div>
       )}
 
-      {/* What is in stock, line by line — loose diamonds by lot, with filters;
-          a line opens its history below. */}
-      <StockLotsTable material={material} companyId={co} selected={selected?.keys ?? null}
-        onSelect={(keys, label) => setSelected(keys ? { keys, label: label ?? keys.join(", ") } : null)} />
+      <TabBar label="Stock" value={tab} onChange={setTab} tabs={[
+        { key: "lots", label: "In stock", icon: Layers },
+        { key: "history", label: "Movement history", icon: History, count: filteredRows.length },
+      ]} />
 
-      <div className="card-luxe overflow-hidden">
-        <SectionTitle className="px-5 pt-4" title="Movement History" sub={selectedBucket ?? undefined} />
+      {/* What is in stock, line by line — loose diamonds by lot, with filters;
+          a line opens its history (the other tab). */}
+      {tab === "lots" && <StockLotsTable material={material} companyId={co} selected={selected?.keys ?? null} onSelect={pickLine} />}
+
+      {tab === "history" && <div className="card-luxe overflow-hidden">
+        <SectionTitle className="px-5 pt-4" title="Movement History" sub={selectedBucket ? `Only ${selectedBucket}` : undefined}
+          actions={selectedBucket ? <button type="button" onClick={() => setSelected(null)} className="text-xs text-primary hover:underline">Show all history</button> : undefined} />
         {/* Where bought / where went, rate & amount. The date range (in Filters)
             narrows the rows and the downloads; the balances were worked out
             over every movement. */}
@@ -418,7 +433,7 @@ function MaterialSection({ material }: { material: MaterialKey }) {
             emptyText={rows.length === 0 ? "No movements yet." : "None in these dates."}
           />
         </div>
-      </div>
+      </div>}
       <OpeningStockEditSheet movement={editingOpening} onClose={() => setEditingOpening(null)} />
     </div>
   );
@@ -439,6 +454,8 @@ function CertifiedSection() {
   // Rate is edited as free text so a half-typed number does not snap to 0.
   const [editRate, setEditRate] = useState("");
   const [savingPacket, setSavingPacket] = useState(false);
+  // The stones in stock, or every one bought — one list at a time (hooks/usePageTab.ts).
+  const [tab, setTab] = usePageTab("stock", ["lots", "history"] as const, "lots");
   // Filters on the stones in stock — by what a buyer asks for.
   // They stay as they were left (this browser, this person) until cleared, and
   // each can hold several choices (lib/filterSel.ts).
@@ -902,7 +919,12 @@ function CertifiedSection() {
         </div>
       )}
 
-      <div className="card-luxe p-3 sm:p-4 space-y-3">
+      <TabBar label="Certified diamonds" value={tab} onChange={setTab} tabs={[
+        { key: "lots", label: "In stock", icon: BadgeCheck, count: allInStockPackets.length },
+        { key: "history", label: "Purchase & movement history", icon: History, count: allPackets.length },
+      ]} />
+
+      {tab === "lots" && <div className="card-luxe p-3 sm:p-4 space-y-3">
         {(() => {
           // The stones the filters leave — and what they come to.
           const r2 = (n: number) => Math.round(n * 100) / 100;
@@ -933,10 +955,10 @@ function CertifiedSection() {
           rowActions={packetActions}
           emptyText="No certified diamonds in stock."
         />
-      </div>
+      </div>}
 
       {/* Full history — every certified diamond bought: supplier, rate & where it went */}
-      <div className="card-luxe overflow-hidden">
+      {tab === "history" && <div className="card-luxe overflow-hidden">
         <SectionTitle className="px-5 pt-4" title="Purchase & Movement History" />
 
         {/* The date bought (in Filters) narrows the rows and the downloads. */}
@@ -966,7 +988,7 @@ function CertifiedSection() {
             emptyText={allPackets.length === 0 ? "None bought yet." : "None in these dates."}
           />
         </div>
-      </div>
+      </div>}
 
       {/* Edit certified packet (admin) — fix a mistyped certificate/grade */}
       {editPacket && (
