@@ -32,6 +32,10 @@ export interface ViewState {
   dense?: Density;
   pageSize?: number;
   layout?: "cards" | "table";
+  /** Columns resized (px), their order (the first left out), and rows grouped by a column. */
+  widths?: Record<string, number>;
+  order?: string[];
+  group?: string | null;
   /** The page's own part — how it shows the list ({ layout: "grid" }). */
   page?: Record<string, string>;
 }
@@ -128,5 +132,6 @@ export function viewKey(s: ViewState): string {
     q: (s.search ?? "").trim().toLowerCase(), f: filters, s: s.sort ? `${s.sort.key}:${s.sort.dir}` : "",
     h: [...(s.hidden ?? [])].sort(), l: s.layout ?? "", d: s.dense ?? "", p: s.pageSize ?? 0,
     g: Object.entries(s.page ?? {}).sort(([x], [y]) => x.localeCompare(y)),
+    o: s.order ?? [], r: s.group ?? "",
   });
 }

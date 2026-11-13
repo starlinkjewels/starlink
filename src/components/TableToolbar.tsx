@@ -1,6 +1,6 @@
 import { useEffect, useState, type ReactNode } from "react";
 import type { LucideIcon } from "lucide-react";
-import { ArrowDown, ArrowDownLeft, ArrowUp, ArrowUpRight, CalendarDays, Check, Info, ChevronDown, Columns3, Download, Layers, LayoutList, ListFilter, RotateCcw, Rows3, Scale, Table2, X } from "lucide-react";
+import { ArrowDown, ArrowDownLeft, ArrowUp, ArrowUpRight, CalendarDays, Check, Info, ChevronDown, ChevronUp, Columns3, Download, Group, Layers, LayoutList, ListFilter, RotateCcw, Rows3, Scale, Table2, X } from "lucide-react";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Drawer, DrawerContent, DrawerDescription, DrawerTitle } from "@/components/ui/drawer";
 import {
@@ -400,13 +400,18 @@ export function StatStrip({ items, note }: { items: StatItem[]; note?: ReactNode
 /* ── View and Export ───────────────────────────────────────────────────── */
 
 /** Row spacing and which columns show — one menu, not two buttons. */
-export function ViewMenu({ density, onDensity, columns, isShown, onToggle, onReset, layout, sortBy }: {
+export function ViewMenu({ density, onDensity, columns, isShown, onToggle, onReset, layout, sortBy, onMove, groupBy }: {
   density: Density;
   onDensity: (d: Density) => void;
+  /** In the table's order now. */
   columns: { key: string; header: string; always?: boolean }[];
   isShown: (key: string) => boolean;
   onToggle: (key: string) => void;
   onReset: () => void;
+  /** Move a column one place earlier (-1) or later (1) — the first column stays first. */
+  onMove?: (key: string, dir: -1 | 1) => void;
+  /** Rows under a heading per value of one column. */
+  groupBy?: { options: { key: string; header: string }[]; value: string | null; onChange: (key: string | null) => void };
   /** On a phone: rows as cards, or the full table. */
   layout?: { value: "cards" | "table"; onChange: (v: "cards" | "table") => void };
   /** Cards have no column headers to click — they sort from here. */
@@ -456,11 +461,32 @@ export function ViewMenu({ density, onDensity, columns, isShown, onToggle, onRes
             <DropdownMenuSeparator />
           </>
         )}
-        <DropdownMenuLabel className="text-[10px] uppercase tracking-wider text-muted-foreground flex items-center gap-1.5"><Columns3 className="h-3 w-3" />Columns</DropdownMenuLabel>
+        {groupBy && groupBy.options.length > 0 && (
+          <>
+            <DropdownMenuLabel className="text-[10px] uppercase tracking-wider text-muted-foreground flex items-center gap-1.5"><Group className="h-3 w-3" />Group rows by</DropdownMenuLabel>
+            <DropdownMenuRadioGroup value={groupBy.value ?? ""} onValueChange={v => groupBy.onChange(v || null)}>
+              <DropdownMenuRadioItem value="" className="text-sm rounded-lg">No groups</DropdownMenuRadioItem>
+              {groupBy.options.map(o => <DropdownMenuRadioItem key={o.key} value={o.key} className="text-sm rounded-lg">{o.header}</DropdownMenuRadioItem>)}
+            </DropdownMenuRadioGroup>
+            <DropdownMenuSeparator />
+          </>
+        )}
+        <DropdownMenuLabel className="text-[10px] uppercase tracking-wider text-muted-foreground flex items-center gap-1.5"><Columns3 className="h-3 w-3" />Columns{onMove ? <span className="normal-case tracking-normal font-normal">· drag a header to move it</span> : null}</DropdownMenuLabel>
         <div className="max-h-64 overflow-y-auto">
-          {columns.filter(c => c.header).map(c => (
-            <DropdownMenuCheckboxItem key={c.key} checked={c.always || isShown(c.key)} disabled={c.always}
-              onCheckedChange={() => onToggle(c.key)} onSelect={e => e.preventDefault()} className="text-sm rounded-lg">{c.header}</DropdownMenuCheckboxItem>
+          {columns.map((c, i) => ({ c, i })).filter(({ c }) => c.header).map(({ c, i }) => (
+            <div key={c.key} className="flex items-center">
+              <DropdownMenuCheckboxItem checked={c.always || isShown(c.key)} disabled={c.always}
+                onCheckedChange={() => onToggle(c.key)} onSelect={e => e.preventDefault()} className="text-sm rounded-lg flex-1 min-w-0">{c.header}</DropdownMenuCheckboxItem>
+              {/* Move it — the first column (what a row is) stays first. */}
+              {onMove && i > 0 && (
+                <span className="flex shrink-0">
+                  <button type="button" disabled={i <= 1} onClick={() => onMove(c.key, -1)} aria-label={`Move ${c.header} earlier`} title="Move earlier"
+                    className="h-7 w-6 grid place-items-center rounded text-muted-foreground hover:bg-secondary hover:text-foreground disabled:opacity-30"><ChevronUp className="h-3.5 w-3.5" /></button>
+                  <button type="button" disabled={i >= columns.length - 1} onClick={() => onMove(c.key, 1)} aria-label={`Move ${c.header} later`} title="Move later"
+                    className="h-7 w-6 grid place-items-center rounded text-muted-foreground hover:bg-secondary hover:text-foreground disabled:opacity-30"><ChevronDown className="h-3.5 w-3.5" /></button>
+                </span>
+              )}
+            </div>
           ))}
         </div>
         <DropdownMenuSeparator />

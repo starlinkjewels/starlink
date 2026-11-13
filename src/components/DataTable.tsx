@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useMemo, useRef, useState, type MouseEvent, type ReactNode } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState, type MouseEvent, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
 import { ArrowDown, ArrowUp, ArrowUpDown, Check, ChevronDown, FileSpreadsheet, Inbox, Search, SearchX, ChevronLeft, ChevronRight, Minus, Plus, X } from "lucide-react";
 import { useStudio } from "@/lib/studio";
 import { useMayExport } from "@/hooks/useCan";
@@ -56,7 +56,29 @@ export interface DataColumn<T> {
 type Sort = { key: string; dir: "asc" | "desc" } | null;
 /** `seen`: the columns there were when `hidden` was saved — a column added since (a custom
  *  field, lib/customFields.ts) that starts hidden stays hidden until it is shown. */
-type Prefs = { sort?: Sort; hidden?: string[]; seen?: string[]; dense?: Density; pageSize?: number; layout?: "cards" | "table"; forced?: string[] };
+type Prefs = { sort?: Sort; hidden?: string[]; seen?: string[]; dense?: Density; pageSize?: number; layout?: "cards" | "table"; forced?: string[];
+  /** Columns made wider or narrower (px), by key — dragged at a header's edge. */
+  widths?: Record<string, number>;
+  /** The columns' order (keys, the first column left out — it stays first). A column not named keeps its place. */
+  order?: string[];
+  /** Rows under a heading per value of this column. */
+  group?: string | null };
+
+/** The table's columns in the order chosen: the first stays first; one added since the
+ *  order was chosen sits after the column it follows in the table's own order. */
+function orderColumns<C extends { key: string }>(cols: C[], order?: string[]): C[] {
+  if (!order?.length || cols.length < 3) return cols;
+  const [first, ...rest] = cols;
+  const pos = new Map(order.map((k, i) => [k, i]));
+  const out = rest.filter(c => pos.has(c.key)).sort((a, b) => pos.get(a.key)! - pos.get(b.key)!);
+  rest.forEach((c, i) => {
+    if (pos.has(c.key)) return;
+    const prev = rest.slice(0, i).reverse().find(p => out.includes(p));
+    out.splice(prev ? out.indexOf(prev) + 1 : 0, 0, c);
+  });
+  return [first, ...out];
+}
+const MIN_W = 48, MAX_W = 900;
 
 /** A card's facts in the order the columns ask: "first" ones first, "hide" ones left off. */
 const cardOrder = <C extends { card?: DataColumn<never>["card"] }>(list: C[]): C[] =>
@@ -262,7 +284,9 @@ export function DataTable<T>({
   }, [rows, columns]);
   const forced = new Set(prefs.forced ?? []);
   const isShown = (k: string) => !hidden.has(k) && (!emptyCols.has(k) || forced.has(k));
-  const shown = columns.filter(c => c.always || isShown(c.key));
+  // In the order chosen (View → Columns, or a header dragged) — the table, the cards, the download and the details alike.
+  const ordered = orderColumns(columns, prefs.order);
+  const shown = ordered.filter(c => c.always || isShown(c.key));
 
   const filtered = useMemo(() => {
     const t = full && !search ? q.trim().toLowerCase() : "";
@@ -285,9 +309,56 @@ export function DataTable<T>({
     return list;
   }, [rows, q, full, !!search, sort?.key, sort?.dir, columns, searchText]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const pages = Math.max(1, Math.ceil(filtered.length / pageSize));
+  // ── Groups (View → Group rows by): a heading per value of one column — a date
+  // column by month — in the order the rows come (so the sort orders them too).
+  // A group closes and opens from its heading, for this visit of the page.
+  const groupCol = prefs.group ? columns.find(c => c.key === prefs.group && (c.sortValue || c.csv)) : undefined;
+  const groupOptions = columns.filter(c => c.header && (c.sortValue || c.csv) && c.kind !== "number" && c.align !== "right").map(c => ({ key: c.key, header: c.header }));
+  const [closedList, setClosedList] = useEntryState<string[]>(`dt:${st}:closed`, []);
+  const closed = useMemo(() => new Set(closedList), [closedList]);
+  const groupOf = (r: T): string => {
+    if (!groupCol) return "";
+    if (groupCol.kind === "date") {
+      const v = groupCol.sortValue ? groupCol.sortValue(r) : undefined;
+      const d = typeof v === "number" ? new Date(v) : typeof v === "string" && v ? new Date(v.length === 10 ? `${v}T12:00:00` : v) : null;
+      return d && !isNaN(+d) ? d.toLocaleDateString("en-IN", { month: "long", year: "numeric" }) : "No date";
+    }
+    const v = groupCol.csv ? groupCol.csv(r) : groupCol.sortValue!(r);
+    const s = v === null || v === undefined ? "" : String(v).trim();
+    return s || "—";
+  };
+  const groups = useMemo(() => {
+    if (!groupCol) return [] as { label: string; rows: T[] }[];
+    const by = new Map<string, T[]>();
+    for (const r of filtered) { const g = groupOf(r); const list = by.get(g); if (list) list.push(r); else by.set(g, [r]); }
+    return [...by].map(([label, list]) => ({ label, rows: list }));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [filtered, groupCol?.key]);
+  const toggleGroup = (label: string) => setClosedList(prev => (prev.includes(label) ? prev.filter(x => x !== label) : [...prev, label]));
+  // Paged by the rows of the open groups; a closed group is just its heading.
+  const pagedRows = groupCol ? groups.flatMap(g => (closed.has(g.label) ? [] : g.rows)) : filtered;
+  const pages = Math.max(1, Math.ceil(pagedRows.length / pageSize));
   const cur = Math.min(page, pages);
-  const visible = filtered.slice((cur - 1) * pageSize, cur * pageSize);
+  const visible = pagedRows.slice((cur - 1) * pageSize, cur * pageSize);
+  type Entry = { kind: "row"; r: T } | { kind: "head"; label: string; rows: T[]; continued: boolean };
+  const pageEntries: Entry[] = (() => {
+    if (!groupCol) return visible.map(r => ({ kind: "row" as const, r }));
+    const start = (cur - 1) * pageSize, end = cur * pageSize;
+    const out: Entry[] = [];
+    let at = 0;
+    for (const g of groups) {
+      const n = closed.has(g.label) ? 0 : g.rows.length;
+      const from = at, to = at + n;
+      if (n === 0) {
+        if ((from >= start && from < end) || (cur === pages && from >= start)) out.push({ kind: "head", label: g.label, rows: g.rows, continued: false });
+      } else if (to > start && from < end) {
+        out.push({ kind: "head", label: g.label, rows: g.rows, continued: from < start });
+        for (const r of g.rows.slice(Math.max(0, start - from), Math.min(n, end - from))) out.push({ kind: "row", r });
+      }
+      at = to;
+    }
+    return out;
+  })();
 
   // First click: the column's natural way (amounts and dates high → low).
   // Second: the other way. Third: back to the table's own order.
@@ -325,6 +396,55 @@ export function DataTable<T>({
     if (h.has(k)) h.delete(k); else h.add(k);
     save({ ...prefs, hidden: [...h], seen: seenNow });
   };
+
+  // ── Columns moved (View → Columns ↑↓, or a header dragged) and resized (a header's edge) ──
+  const prefsRef = useRef(prefs);
+  prefsRef.current = prefs;
+  const orderKeys = ordered.map(c => c.key);
+  const saveOrder = (keys: string[]) => save({ ...prefsRef.current, order: keys.slice(1) });
+  const moveCol = (key: string, dir: -1 | 1) => {
+    const keys = [...orderKeys];
+    const i = keys.indexOf(key), j = i + dir;
+    if (i < 1 || j < 1 || j >= keys.length) return;
+    [keys[i], keys[j]] = [keys[j], keys[i]];
+    saveOrder(keys);
+  };
+  const dropCol = (key: string, onto: string, after: boolean) => {
+    if (key === onto) return;
+    const keys = orderKeys.filter(k => k !== key);
+    const at = keys.indexOf(onto) + (after ? 1 : 0);
+    keys.splice(Math.max(1, at), 0, key);
+    saveOrder(keys);
+  };
+  const dragKey = useRef<string | null>(null);
+  const [dropAt, setDropAt] = useState<{ key: string; after: boolean } | null>(null);
+  const [dragW, setDragW] = useState<{ key: string; w: number } | null>(null);
+  const resizing = useRef(false);
+  const resizedAt = useRef(0);
+  const widthOf = (k: string): number | undefined => (dragW?.key === k ? dragW.w : prefs.widths?.[k]);
+  const startResize = (e: ReactPointerEvent, key: string) => {
+    e.preventDefault(); e.stopPropagation();
+    const th = (e.currentTarget as HTMLElement).closest("th");
+    if (!th) return;
+    resizing.current = true;
+    const startW = th.getBoundingClientRect().width, x0 = e.clientX;
+    let w = Math.round(startW);
+    const move = (ev: PointerEvent) => { w = Math.max(MIN_W, Math.min(MAX_W, Math.round(startW + ev.clientX - x0))); setDragW({ key, w }); };
+    const up = () => {
+      window.removeEventListener("pointermove", move); window.removeEventListener("pointerup", up);
+      resizing.current = false; resizedAt.current = Date.now(); setDragW(null);
+      if (Math.abs(w - startW) >= 2) save({ ...prefsRef.current, widths: { ...(prefsRef.current.widths ?? {}), [key]: w } });
+    };
+    window.addEventListener("pointermove", move); window.addEventListener("pointerup", up);
+  };
+  /** Back to its own width (double-click the edge). */
+  const autoWidth = (key: string) => {
+    const { [key]: _gone, ...rest } = prefsRef.current.widths ?? {};
+    void _gone;
+    save({ ...prefsRef.current, widths: Object.keys(rest).length ? rest : undefined });
+  };
+  const sizeStyle = (k: string) => { const w = widthOf(k); return w ? { width: w, minWidth: w, maxWidth: w } : undefined; };
+  const canDrag = (k: string) => !cardMode && k !== firstKey && shown.length > 2;
   const exportCsv = () => {
     if (!exportName) return;
     const cols = shown.filter(c => c.csv || c.sortValue);
@@ -362,7 +482,7 @@ export function DataTable<T>({
     const extra = typeof details === "function" ? details(r) : [];
     const told = new Set(extra.map(f => f.label));
     const fields = [
-      ...columns.filter(c => c.header && !told.has(c.header) && !blank(c, r)).map(c => ({ label: c.header, value: c.cell(r) })),
+      ...ordered.filter(c => c.header && !told.has(c.header) && !blank(c, r)).map(c => ({ label: c.header, value: c.cell(r) })),
       ...extra,
     ];
     return (
@@ -445,7 +565,45 @@ export function DataTable<T>({
   };
   const viewsOn = useViewsOn() && full;
   useDefaultView(id, viewsOn, applyView);
-  const listed = [...(pinnedAt === "top" && cur === 1 ? pinnedRows ?? [] : []), ...visible, ...(pinnedAt === "bottom" && cur === pages && !(!search && q) ? pinnedRows ?? [] : [])];
+  const pinTop = pinnedAt === "top" && cur === 1 ? pinnedRows ?? [] : [];
+  const pinBottom = pinnedAt === "bottom" && cur === pages && !(!search && q) ? pinnedRows ?? [] : [];
+  const listed: Entry[] = [...pinTop.map(r => ({ kind: "row" as const, r })), ...pageEntries, ...pinBottom.map(r => ({ kind: "row" as const, r }))];
+
+  // ── A group's heading: its value, how many, and — where the table has totals — its subtotals ──
+  const nounOf = (n: number) => `${n} ${n === 1 ? noun : plural ?? (noun.endsWith("s") ? noun : `${noun}s`)}`;
+  const subCols = totals ? shown.filter(c => totals[c.key]) : [];
+  const groupButton = (g: { label: string; rows: T[]; continued: boolean }) => {
+    const shut = closed.has(g.label);
+    return (
+      <button type="button" onClick={() => toggleGroup(g.label)} aria-expanded={!shut} aria-label={`${shut ? "Open" : "Close"} the group ${g.label}`}
+        className="inline-flex items-center gap-1.5 text-left text-sm font-semibold text-brand-dark hover:text-primary">
+        <ChevronDown className={`h-4 w-4 shrink-0 transition-transform ${shut ? "-rotate-90" : ""}`} />
+        <span className="whitespace-nowrap">{g.label}</span>
+        <span className="text-xs font-normal text-muted-foreground whitespace-nowrap">· {nounOf(g.rows.length)}{g.continued ? " · continued" : ""}</span>
+      </button>
+    );
+  };
+  const groupSubs = (g: { rows: T[] }) => subCols.length > 0 && (
+    <span className="flex flex-wrap gap-x-3 gap-y-0.5">
+      {subCols.map(c => <span key={c.key} className="text-xs text-muted-foreground whitespace-nowrap">{c.header} <b className="font-semibold text-foreground tabular-nums">{totals![c.key]!(g.rows)}</b></span>)}
+    </span>
+  );
+  const headSlim = (g: { label: string; rows: T[]; continued: boolean }) => (
+    <div key={`g:${g.label}`} className="dt-group flex flex-wrap items-center justify-between gap-x-3 gap-y-1 bg-secondary/50 px-3.5 py-2">{groupButton(g)}{groupSubs(g)}</div>
+  );
+  const headCard = (g: { label: string; rows: T[]; continued: boolean }) => (
+    <div key={`g:${g.label}`} className="dt-group col-span-full flex flex-wrap items-center justify-between gap-x-3 gap-y-1 px-1 pt-2">{groupButton(g)}{groupSubs(g)}</div>
+  );
+  const headRow = (g: { label: string; rows: T[]; continued: boolean }) => (
+    <tr key={`g:${g.label}`} className="dt-group bg-secondary/50 border-y border-border/60">
+      {ticking && <td className={`w-10 ${stick} left-0`} />}
+      {shown.map((c, i) => (i === 0
+        ? <td key={c.key} className={`px-3 py-2 ${stick} ${stickLeft}`} style={sizeStyle(c.key)}>{groupButton(g)}</td>
+        : <td key={c.key} className={`px-3 py-2 ${alignCls(c.align)} font-semibold text-brand-dark tabular-nums whitespace-nowrap`} style={sizeStyle(c.key)}>{totals?.[c.key] ? totals[c.key]!(g.rows) : null}</td>))}
+      {opener && <td className={`${stick} ${openerPin}`} />}
+      {rowActions && <td className={`${stick} right-0 ${opener ? "" : "dt-stick-r"}`} />}
+    </tr>
+  );
 
   return (
     <div ref={rootRef} className="space-y-2.5">
@@ -476,7 +634,8 @@ export function DataTable<T>({
             </span>
           )}
           {viewsOn && <SavedViewsButton table={id} capture={captureView} apply={applyView} reset={() => applyView({ pageSize: prefs.pageSize, ...(viewExtra ? { page: viewExtra.get() } : {}) })} />}
-          <ViewMenu density={dense} onDensity={d => save({ ...prefs, dense: d })} columns={columns}
+          <ViewMenu density={dense} onDensity={d => save({ ...prefs, dense: d })} columns={ordered} onMove={moveCol}
+            groupBy={{ options: groupOptions, value: groupCol?.key ?? null, onChange: k => { save({ ...prefs, group: k }); setClosedList([]); setPage(1); } }}
             isShown={isShown} onToggle={toggleCol} onReset={() => save({ pageSize: prefs.pageSize })}
             layout={canCards ? { value: cardMode ? "cards" : "table", onChange: v => save({ ...prefs, layout: v }) } : undefined}
             sortBy={cardMode ? {
@@ -488,6 +647,16 @@ export function DataTable<T>({
       </div>
       )}
       {full && filters && nFilters > 0 && <FilterChips filters={filters} onClear={clearFilters} />}
+      {groupCol && (
+        <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+          <span className="inline-flex items-center gap-1.5 rounded-full border border-border bg-white pl-2.5 pr-1 h-7">
+            Grouped by <b className="font-semibold text-brand-dark">{groupCol.header}</b> · {groups.length} group{groups.length === 1 ? "" : "s"}
+            <button type="button" onClick={() => { save({ ...prefs, group: null }); setClosedList([]); }} aria-label="Stop grouping" className="h-5 w-5 grid place-items-center rounded-full hover:bg-secondary"><X className="h-3 w-3" /></button>
+          </span>
+          {groups.length > 1 && closed.size > 0 && <button type="button" className="text-primary hover:underline" onClick={() => setClosedList([])}>Open all</button>}
+          {groups.length > 1 && groups.some(g => !closed.has(g.label)) && <button type="button" className="text-primary hover:underline" onClick={() => setClosedList(groups.map(g => g.label))}>Close all</button>}
+        </div>
+      )}
       {summary}
 
       {cardMode ? (
@@ -500,7 +669,7 @@ export function DataTable<T>({
           )}
           {studio && listed.length > 0 && (
             <div className="dt-list rounded-xl border border-border/70 bg-card overflow-hidden divide-y divide-border/60">
-              {listed.map(r => {
+              {listed.map(e => (e.kind === "head" ? headSlim(e) : ((r: T) => {
                 const k = rowKey(r);
                 const pin = !!pinnedRows?.includes(r);
                 const on = !pin && ticking && selected!.has(k);
@@ -553,11 +722,11 @@ export function DataTable<T>({
                     {isOpen && <div className="border-t border-border/60 bg-secondary/20 px-3.5 py-3">{expand ? expand.render(r) : autoDetails(r)}</div>}
                   </div>
                 );
-              })}
+              })(e.r)))}
             </div>
           )}
           {/* Cards side by side where there is room (a computer); one under the other on a phone. */}
-          {!studio && listed.length > 0 && <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3 items-start">{listed.map(r => {
+          {!studio && listed.length > 0 && <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3 items-start">{listed.map(e => (e.kind === "head" ? headCard(e) : ((r: T) => {
             const k = rowKey(r);
             const pin = !!pinnedRows?.includes(r);
             const on = !pin && ticking && selected!.has(k);
@@ -605,7 +774,7 @@ export function DataTable<T>({
                 {isOpen && <div className="border-t border-border/60 bg-secondary/20 px-3.5 py-3">{expand ? expand.render(r) : autoDetails(r)}</div>}
               </div>
             );
-          })}</div>}
+          })(e.r)))}</div>}
           {!visible.length && (
             loading
               ? [0, 1, 2].map(i => (
@@ -650,15 +819,31 @@ export function DataTable<T>({
               {shown.map(c => {
                 const on = sort?.key === c.key;
                 return (
-                  <th key={c.key} title={hint(c)}
-                    className={`ui-th px-3 py-3 text-[11px] font-bold uppercase tracking-wider whitespace-nowrap ${alignCls(c.align)} ${on ? "dt-sorted text-primary shadow-[inset_0_-2px_0_var(--color-primary)]" : "text-brand-dark/70"} ${c.sortValue ? "group/th cursor-pointer select-none hover:text-primary transition-colors" : ""} ${c.key === firstKey ? `${stick} ${stickLeft} md:z-[3]` : "md:z-[2]"} dt-stick-head`}
-                    onClick={() => clickSort(c)} aria-sort={on ? (sort!.dir === "asc" ? "ascending" : "descending") : undefined}>
+                  <th key={c.key} title={hint(c)} style={sizeStyle(c.key)}
+                    className={`ui-th relative px-3 py-3 text-[11px] font-bold uppercase tracking-wider whitespace-nowrap ${alignCls(c.align)} ${on ? "dt-sorted text-primary shadow-[inset_0_-2px_0_var(--color-primary)]" : "text-brand-dark/70"} ${c.sortValue ? "group/th cursor-pointer select-none hover:text-primary transition-colors" : ""} ${c.key === firstKey ? `${stick} ${stickLeft} md:z-[3]` : "md:z-[2]"} ${widthOf(c.key) ? "overflow-hidden text-ellipsis" : ""} ${dropAt?.key === c.key ? (dropAt.after ? "!shadow-[inset_-3px_0_0_var(--color-primary)]" : "!shadow-[inset_3px_0_0_var(--color-primary)]") : ""} dt-stick-head`}
+                    draggable={canDrag(c.key)}
+                    onDragStart={e => { if (resizing.current || !canDrag(c.key)) { e.preventDefault(); return; } dragKey.current = c.key; e.dataTransfer.effectAllowed = "move"; e.dataTransfer.setData("text/plain", c.key); }}
+                    onDragOver={e => {
+                      if (!dragKey.current || dragKey.current === c.key || c.key === firstKey) return;
+                      e.preventDefault();
+                      const box = e.currentTarget.getBoundingClientRect();
+                      const after = e.clientX > box.left + box.width / 2;
+                      if (dropAt?.key !== c.key || dropAt.after !== after) setDropAt({ key: c.key, after });
+                    }}
+                    onDragLeave={() => { if (dropAt?.key === c.key) setDropAt(null); }}
+                    onDrop={e => { e.preventDefault(); const k = dragKey.current; if (k && dropAt) dropCol(k, dropAt.key, dropAt.after); dragKey.current = null; setDropAt(null); }}
+                    onDragEnd={() => { dragKey.current = null; setDropAt(null); }}
+                    onClick={() => { if (Date.now() - resizedAt.current < 300) return; clickSort(c); }} aria-sort={on ? (sort!.dir === "asc" ? "ascending" : "descending") : undefined}>
                     <span className={`inline-flex items-center gap-1 ${c.align === "right" ? "flex-row-reverse" : ""}`}>
                       {c.header}
                       {c.sortValue && (on
                         ? (sort!.dir === "asc" ? <ArrowUp className="h-3 w-3 text-primary" /> : <ArrowDown className="h-3 w-3 text-primary" />)
                         : <ArrowUpDown className="h-3 w-3 opacity-0 group-hover/th:opacity-50 transition-opacity" />)}
                     </span>
+                    {/* Its right edge: drag to resize, double-click for its own width. */}
+                    <span role="separator" aria-orientation="vertical" aria-label={`Resize ${c.header || "column"}`} title="Drag to resize · double-click for its own width"
+                      onPointerDown={e => startResize(e, c.key)} onClick={e => e.stopPropagation()} onDoubleClick={e => { e.stopPropagation(); autoWidth(c.key); }}
+                      className="absolute right-0 top-0 bottom-0 w-2 cursor-col-resize select-none touch-none opacity-0 hover:opacity-100 group-hover/th:opacity-60 after:absolute after:right-0.5 after:top-2 after:bottom-2 after:w-0.5 after:rounded after:bg-primary/60" />
                   </th>
                 );
               })}
@@ -667,7 +852,7 @@ export function DataTable<T>({
             </tr>
           </thead>
           <tbody>
-            {listed.map(r => {
+            {listed.map(e => (e.kind === "head" ? headRow(e) : ((r: T) => {
               const k = rowKey(r);
               const pin = !!pinnedRows?.includes(r);
               const on = !pin && ticking && selected!.has(k);
@@ -679,7 +864,7 @@ export function DataTable<T>({
                   className={`dt-row group transition-colors ${pin ? "dt-pin bg-secondary/25 italic" : on ? "dt-on bg-primary/[0.05]" : "hover:bg-secondary/30"} ${!pin && (opensPage || opens) ? "cursor-pointer" : ""} ${isOpen ? "dt-open bg-secondary/30" : ""} ${rowClassName?.(r) ?? ""}`}>
                   {ticking && <td className={`w-10 px-3 ${PAD[dense]} ${padCls} ${stick} left-0`}>{!pin && <Tick state={on ? "on" : "off"} onClick={() => toggleRow(k)} label={on ? "Untick this row" : "Tick this row"} />}</td>}
                   {shown.map(c => (
-                    <td key={c.key} className={`px-3 ${PAD[dense]} ${padCls} ${alignCls(c.align)} ${c.key === firstKey ? `${stick} ${stickLeft}` : ""} ${c.className ?? ""}`}>{c.cell(r)}</td>
+                    <td key={c.key} style={sizeStyle(c.key)} className={`px-3 ${PAD[dense]} ${padCls} ${alignCls(c.align)} ${c.key === firstKey ? `${stick} ${stickLeft}` : ""} ${widthOf(c.key) ? "overflow-hidden" : ""} ${c.className ?? ""}`}>{c.cell(r)}</td>
                   ))}
                   {opener && (
                     <td className={`w-10 px-2 ${PAD[dense]} ${padCls} text-center ${stick} ${openerPin}`}>
@@ -708,7 +893,7 @@ export function DataTable<T>({
                 )}
                 </Fragment>
               );
-            })}
+            })(e.r)))}
             {!visible.length && loading && [0, 1, 2, 3, 4].map(i => (
               <tr key={`sk${i}`} aria-hidden>
                 {ticking && <td className="w-10 px-3 py-3"><div className="h-4 w-4 rounded bg-secondary animate-pulse" /></td>}
