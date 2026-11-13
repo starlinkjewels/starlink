@@ -10,6 +10,7 @@ import { fmtCcyMix, sumByCcy, ccy } from "@/lib/currency";
 import { monthLabel } from "@/lib/analytics";
 import { KIND_LABEL, designerAccount, designerEmail, designerMonths, designerPayments, isOpenJob, jobsOfDesigner } from "@/lib/designers";
 import { PageHeader, TabBar } from "@/components/PageHeader";
+import { usePageTab } from "@/hooks/usePageTab";
 import { StatStrip } from "@/components/TableToolbar";
 import { DataTable, CellMain, CellAmount, CellDate, type DataColumn } from "@/components/DataTable";
 import { DesignerCreateDialog } from "@/components/create/DesignerCreateDialog";
@@ -29,7 +30,8 @@ export function DesignerHistoryPage() {
   const { user } = useAuth();
   const can = useCan();
   const isAdmin = user?.role === "admin";
-  const [tab, setTab] = useState<Tab>("designs");
+  // Kept in the address, remembered in this visit (hooks/usePageTab.ts) — Back returns to it.
+  const [tabWant, setTab] = usePageTab<Tab>("designer", ["designs", "months", "payments"], "designs");
   const [editing, setEditing] = useState(false);
   const [paying, setPaying] = useState(false);
   const designer = (db.designers ?? []).find(x => x.id === id);
@@ -100,6 +102,7 @@ export function DesignerHistoryPage() {
   ];
 
   const contact = [designerEmail(db, designer), designer.phone].filter(Boolean).join(" · ");
+  const tab: Tab = tabWant === "payments" && !freelance ? "designs" : tabWant;
   return (
     <div className="space-y-5">
       <PageHeader

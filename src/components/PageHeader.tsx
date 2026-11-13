@@ -231,3 +231,39 @@ export function TabBar<K extends string>({ tabs, value, onChange, label, classNa
     </div>
   );
 }
+
+/**
+ * Tabs inside a tab — a smaller row of pills under a TabBar, so the two levels
+ * never look alike. One list at a time, as TabBar; scrolls sideways on a phone.
+ */
+export function SubTabs<K extends string>({ tabs, value, onChange, label, className = "" }: {
+  tabs: readonly { key: K; label: string; count?: number }[];
+  value: K;
+  onChange: (k: K) => void;
+  label: string;
+  className?: string;
+}) {
+  const keys = (e: React.KeyboardEvent) => {
+    if (e.key !== "ArrowRight" && e.key !== "ArrowLeft") return;
+    e.preventDefault();
+    const i = tabs.findIndex(t => t.key === value);
+    onChange(tabs[(i + (e.key === "ArrowRight" ? 1 : -1) + tabs.length) % tabs.length].key);
+    requestAnimationFrame(() => (e.currentTarget as HTMLElement | null)?.querySelector<HTMLElement>("[aria-selected=true]")?.focus());
+  };
+  return (
+    <div className={`overflow-x-auto no-scrollbar ${className}`}>
+      <div role="tablist" aria-label={label} onKeyDown={keys} className="inline-flex gap-0.5 p-1 rounded-xl bg-secondary border border-border/60">
+        {tabs.map(t => {
+          const on = t.key === value;
+          return (
+            <button key={t.key} type="button" role="tab" aria-selected={on} tabIndex={on ? 0 : -1} onClick={() => onChange(t.key)}
+              className={`shrink-0 inline-flex items-center gap-1.5 h-8 px-3.5 rounded-lg text-xs whitespace-nowrap transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 ${on ? "bg-white text-brand-dark font-semibold shadow-soft" : "text-muted-foreground font-medium hover:text-foreground"}`}>
+              {t.label}
+              {t.count !== undefined && <span className={`tabular-nums ${on ? "text-primary" : "text-muted-foreground/80"}`}>{t.count}</span>}
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}

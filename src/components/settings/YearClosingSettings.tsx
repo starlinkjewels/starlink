@@ -8,7 +8,8 @@
 // changed or deleted: the new year opens with every balance exactly as the old
 // one closed, because balances are worked out from the records themselves.
 import { useEffect, useMemo, useState } from "react";
-import { AlertTriangle, BookLock, BookOpen, CalendarCheck, CheckCircle2, Info, Loader2, Lock, LockOpen, XCircle } from "lucide-react";
+import { AlertTriangle, BookLock, BookOpen, CalendarCheck, CheckCircle2, Info, Loader2, Lock, LockOpen, XCircle, Users, Truck, Factory, Handshake, HandCoins, Landmark, Layers } from "lucide-react";
+import { TabBar } from "@/components/PageHeader";
 import { toast } from "sonner";
 import { Link } from "react-router-dom";
 import { SectionTitle } from "@/components/SectionTitle";
@@ -512,6 +513,18 @@ function BookBody({ book }: { book: YearBook }) {
   const cash = new Map<string, number>();
   for (const l of book.lockers) cash.set(l.currency, (cash.get(l.currency) || 0) + l.balance);
   const stockValue = book.stock.reduce((s, x) => s + (x.valueInr || 0), 0) + book.packets.valueInr;
+  // The book's lists, one at a time — a long one never hides the others under it.
+  const bookTabs = [
+    { key: "clients", label: "Clients", icon: Users, count: book.clients.length },
+    { key: "suppliers", label: "Suppliers", icon: Truck, count: book.suppliers.length },
+    { key: "factories", label: "Factories", icon: Factory, count: book.factories.length },
+    ...(book.brokers.length > 0 || book.designers.length > 0 ? [{ key: "brokers", label: "Brokers & designers", icon: Handshake, count: book.brokers.length + book.designers.length }] : []),
+    ...(book.employees.length > 0 ? [{ key: "employees", label: "Employees", icon: HandCoins, count: book.employees.length }] : []),
+    { key: "lockers", label: "Cash & bank", icon: Landmark, count: book.lockers.length },
+    { key: "stock", label: "Closing stock", icon: Layers, count: book.stock.length },
+  ];
+  const [tabWant, setTab] = useState("clients");
+  const tab = bookTabs.some(t => t.key === tabWant) ? tabWant : "clients";
 
   const stockCols: DataColumn<StockLine>[] = [
     { key: "what", header: "Material", always: true, sortValue: s => `${s.material}|${s.bucket}`, csv: s => `${s.material === "gold" ? "Gold" : s.material === "diamond" ? "Diamond" : materialName(db.settings, s.material)} ${s.bucket}`,
@@ -556,31 +569,33 @@ function BookBody({ book }: { book: YearBook }) {
         </div>
       </section>
 
-      <PartyTable title="Clients" sub="$ — + they owe us, − we hold their money" rows={book.clients} id="yb-clients" exportName={`Year-book-clients${suffix}`}
-        href={r => `/clients/${r.id}`} figures={[{ key: "net", header: "Balance", get: r => r.net, fmt: usd }]} />
-      <PartyTable title="Suppliers" sub="₹ — + we owe them, − they hold ours; gold owed in fine grams" rows={book.suppliers} id="yb-suppliers" exportName={`Year-book-suppliers${suffix}`}
-        href={r => `/suppliers/${r.id}`} figures={[{ key: "net", header: "Balance", get: r => r.net, fmt: inr }, { key: "gold", header: "Gold owed", get: r => r.goldFine, fmt: n => (n ? grams(n) : "") }]} />
-      <PartyTable title="Factories" sub="Labour owed (₹), and what they hold of ours" rows={book.factories} id="yb-factories" exportName={`Year-book-factories${suffix}`}
+      <TabBar label="Year book" value={tab} onChange={setTab} tabs={bookTabs} />
+
+      {tab === "clients" && <PartyTable title="Clients" sub="$ — + they owe us, − we hold their money" rows={book.clients} id="yb-clients" exportName={`Year-book-clients${suffix}`}
+        href={r => `/clients/${r.id}`} figures={[{ key: "net", header: "Balance", get: r => r.net, fmt: usd }]} />}
+      {tab === "suppliers" && <PartyTable title="Suppliers" sub="₹ — + we owe them, − they hold ours; gold owed in fine grams" rows={book.suppliers} id="yb-suppliers" exportName={`Year-book-suppliers${suffix}`}
+        href={r => `/suppliers/${r.id}`} figures={[{ key: "net", header: "Balance", get: r => r.net, fmt: inr }, { key: "gold", header: "Gold owed", get: r => r.goldFine, fmt: n => (n ? grams(n) : "") }]} />}
+      {tab === "factories" && <PartyTable title="Factories" sub="Labour owed (₹), and what they hold of ours" rows={book.factories} id="yb-factories" exportName={`Year-book-factories${suffix}`}
         href={r => `/factories/${r.id}`} figures={[
           { key: "owed", header: "Labour owed", get: r => r.owed, fmt: inr },
           { key: "gold", header: "Fine gold", get: r => r.fineGold, fmt: n => (n ? grams(n) : "") },
           { key: "dia", header: "Diamonds", get: r => r.diamondCt, fmt: n => (n ? carats(n) : "") },
           { key: "other", header: "Other", get: r => Object.keys(r.other).length, text: r => Object.entries(r.other).map(([k, q]) => `${materialName(db.settings, k)} ${q}`).join(" · ") },
-        ]} />
-      {(book.brokers.length > 0 || book.designers.length > 0) && (
+        ]} />}
+      {tab === "brokers" && (
         <PartyTable title="Brokers & designers" sub="₹ — + we owe them, − they hold ours" id="yb-brokers" exportName={`Year-book-brokers-designers${suffix}`}
           rows={[...book.brokers.map(b => ({ ...b, net: b.due, kind: "Broker" })), ...book.designers.map(d => ({ ...d, net: d.due, kind: "Designer" }))]}
           href={r => (r.kind === "Broker" ? `/suppliers/brokers/${r.id}` : `/designers/${r.id}`)}
           figures={[{ key: "kind", header: "", get: () => 0, text: r => r.kind }, { key: "net", header: "Balance", get: r => r.net, fmt: inr }]} />
       )}
-      {book.employees.length > 0 && (
+      {tab === "employees" && (
         <PartyTable title="Employees — advance (upad)" sub="What each still owed back" rows={book.employees} id="yb-employees" exportName={`Year-book-employee-advances${suffix}`}
           href={r => `/employees/${r.id}`} figures={[{ key: "owed", header: "Advance owed", get: r => Object.values(r.owed).reduce((s, v) => s + v, 0), text: r => Object.entries(r.owed).map(([c, v]) => fmtCcy(v, c)).join(" · ") }]} />
       )}
-      <PartyTable title="Cash & bank accounts" sub="Each in its own currency" rows={book.lockers} id="yb-lockers" exportName={`Year-book-accounts${suffix}`}
-        href={() => "/locker"} figures={[{ key: "bal", header: "Balance", get: r => r.balance, text: r => fmtCcy(r.balance, r.currency) }]} />
+      {tab === "lockers" && <PartyTable title="Cash & bank accounts" sub="Each in its own currency" rows={book.lockers} id="yb-lockers" exportName={`Year-book-accounts${suffix}`}
+        href={() => "/locker"} figures={[{ key: "bal", header: "Balance", get: r => r.balance, text: r => fmtCcy(r.balance, r.currency) }]} />}
 
-      <section>
+      {tab === "stock" && <section>
         <SectionTitle title="Closing stock" sub={`At each lot's average cost on ${fmtDate(book.to)}`} />
         <div className="mt-3">
           <DataTable id="yb-stock" noun="lot" rows={book.stock} columns={stockCols} rowKey={s => `${s.companyId}|${s.material}|${s.bucket}`}
@@ -592,7 +607,7 @@ function BookBody({ book }: { book: YearBook }) {
           {" "}Ready Stock: {book.readyStock.pieces} piece{book.readyStock.pieces === 1 ? "" : "s"} · cost {usd(book.readyStock.costUsd)}{book.readyStock.unpriced ? ` · ${book.readyStock.unpriced} with no cost` : ""}.
           {book.memoOut && book.memoOut.lines > 0 && <>{" "}Out on memo (still ours, not in the figures above): {inr(book.memoOut.costInr)} at cost{book.memoOut.pieces ? ` + ${book.memoOut.pieces} piece${book.memoOut.pieces === 1 ? "" : "s"}` : ""}{book.memoOut.unpriced ? ` · ${book.memoOut.unpriced} not priced` : ""}.</>}
         </p>
-      </section>
+      </section>}
     </div>
   );
 }

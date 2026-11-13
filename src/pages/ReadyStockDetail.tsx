@@ -23,6 +23,7 @@ import { ShareProductsSheet } from "@/components/ShareProductsSheet";
 import { DataTable, CellMain, CellTag, CellAmount, CellDate, type DataColumn } from "@/components/DataTable";
 import type { MoreAction } from "@/components/MoreMenu";
 import { PageHeader, TabBar } from "@/components/PageHeader";
+import { usePageTab } from "@/hooks/usePageTab";
 import { StatusBadge } from "@/components/StatusBadge";
 import { CompanyBadge, useMultiCo } from "@/components/CompanyFields";
 import { MoveOfficeDialog, OfficeChip } from "@/components/ReadyStockOffices";
@@ -116,7 +117,8 @@ function PieceBody({ item }: { item: ReadyStockItem }) {
   const [moving, setMoving] = useState(false);
   const [bandOpen, setBandOpen] = useState(false);
   const [sharing, setSharing] = useState(false);
-  const [tab, setTab] = useState<"history" | "sales" | "lots">("history");
+  // Kept in the address, remembered in this visit (hooks/usePageTab.ts) — Back returns to it.
+  const [tab, setTab] = usePageTab("piece", ["history", "sales", "lots"] as const, "history");
   const [shown, setShown] = useState(0);
   // The bills, for "Bought from" — staff only (clients can't read purchases), asked for here.
   const purchasesReady = useLoaded(canManage ? ["purchases"] : []);

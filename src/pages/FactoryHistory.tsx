@@ -4,7 +4,8 @@ import { bagNoOf } from "@/lib/diamondBags";
 import { purchaseBucket } from "@/lib/materials";
 import { useCan, useHas, useMayExport } from "@/hooks/useCan";
 import { MoreMenu, type MoreAction } from "@/components/MoreMenu";
-import { PageHeader } from "@/components/PageHeader";
+import { PageHeader, TabBar } from "@/components/PageHeader";
+import { usePageTab } from "@/hooks/usePageTab";
 import { SectionTitle } from "@/components/SectionTitle";
 import { StatStrip } from "@/components/TableToolbar";
 import { IssuanceEditSheet } from "@/components/IssuanceEditSheet";
@@ -144,11 +145,9 @@ function FactoryHistoryPageBody() {
   const account = factoryAccount(issuances, firstCo ? factory : undefined, advances);
   const [movingPool, setMovingPool] = useState(false);
   // The account as a statement (one line per voucher, the balance carried down —
-  // as the factory's own books), or order by order. Remembered on this device.
-  const [ledgerView, setLedgerViewRaw] = useState<"statement" | "orders">(() => {
-    try { return localStorage.getItem("factory-ledger-view") === "orders" ? "orders" : "statement"; } catch { return "statement"; }
-  });
-  const setLedgerView = (v: "statement" | "orders") => { setLedgerViewRaw(v); try { localStorage.setItem("factory-ledger-view", v); } catch { /* private mode */ } };
+  // as the factory's own books), or order by order, or the material issued — one
+  // list at a time (hooks/usePageTab.ts), so a long ledger never hides the issues under it.
+  const [ledgerView, setLedgerView] = usePageTab("factory", ["statement", "orders", "issues"] as const, "statement");
   const statement = buildFactoryStatement({
     issuances, orders: db.orders, advances, factoryId: id!, opening: firstCo ? factory : undefined,
     materialLabel: k => ({ name: materialName(db.settings, k), unit: materialUnit(db.settings, k) }),
@@ -1226,16 +1225,11 @@ function FactoryHistoryPageBody() {
           account statement, gold ledger, diamond ledger and movement sheet,
           which meant four tables to cross-reference for one job. */}
       {/* Statement (as the factory keeps it) or order by order — the same records. */}
-      <div className="flex items-center justify-between gap-3">
-        <div role="tablist" aria-label="Ledger" className="inline-flex rounded-xl bg-secondary p-1 border border-border/60">
-          {([["statement", "Statement"], ["orders", "By order"]] as const).map(([v, label]) => (
-            <button key={v} type="button" role="tab" aria-selected={ledgerView === v} onClick={() => setLedgerView(v)}
-              className={`h-8 px-3.5 rounded-lg text-xs font-medium transition-colors ${ledgerView === v ? "bg-white text-brand-dark shadow-soft" : "text-muted-foreground hover:text-foreground"}`}>
-              {label}
-            </button>
-          ))}
-        </div>
-      </div>
+      <TabBar label="Factory" value={ledgerView} onChange={setLedgerView} tabs={[
+        { key: "statement", label: "Statement", icon: BookOpen, count: statement.lines.length },
+        { key: "orders", label: "By order", icon: Package, count: orderRows.length },
+        { key: "issues", label: "Material issued", icon: ArrowUpCircle, count: issuances.length },
+      ]} />
       {ledgerView === "statement" && (
         <FactoryStatement lines={statement.lines} check={statement.check} factoryName={factory.name}
           orderNo={oid => db.orders.find(o => o.id === oid)?.orderNumber}
@@ -1253,7 +1247,7 @@ function FactoryHistoryPageBody() {
       />}
 
 
-      <div className="space-y-3">
+      {ledgerView === "issues" && <div className="space-y-3">
         <SectionTitle title="Material Issuances" sub={issuances.length ? `${issuances.length} issue${issuances.length !== 1 ? "s" : ""}` : undefined} className="px-1" />
         {issuances.map(mi => {
           const order = db.orders.find(o => o.id === mi.orderId);
@@ -1331,7 +1325,7 @@ function FactoryHistoryPageBody() {
           );
         })}
         {issuances.length === 0 && <div className="card-luxe p-12 text-center text-muted-foreground">No material issuances yet.</div>}
-      </div>
+      </div>}
 
       {/* Issuing material is a panel, so the account and the ledger behind stay
           where they were. Closing it keeps what was typed; Cancel clears it,

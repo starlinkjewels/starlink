@@ -294,7 +294,7 @@ export function StockLotsTable({ material, companyId, selected, onSelect }: {
     <div className="card-luxe p-3 sm:p-4 space-y-3">
       <SectionTitle className="px-1" title={diamond ? (together ? "In stock by size" : "Bags in stock") : together && gold ? "In stock by karat" : together ? "In stock by size" : "In stock"}
         sub={selected
-          ? `Showing the history of ${open && selected.length > 1 ? `${open.label} — all ${open.members!.length} ${diamond ? "bags" : "lines"}` : (() => { const r = rows.find(x => x.key === selected[0]); return r ? nameOf(r) : selected[0]; })()} below`
+          ? `Movement history shows only ${open && selected.length > 1 ? `${open.label} — all ${open.members!.length} ${diamond ? "bags" : "lines"}` : (() => { const r = rows.find(x => x.key === selected[0]); return r ? nameOf(r) : selected[0]; })()}`
           : together
             ? (gold ? "Every purity of one karat on one line — open a line for its history" : "Every bag of one size on one line — opening and bought, added up. Open a line for its bags and their history")
             : diamond ? "Shape · type · mm · sieve · colour · clarity — open a bag for its history, to move stones or recount" : gem ? "Shape · type · mm · sieve · colour · grade — open a line for its history" : "Open a line for its history"}

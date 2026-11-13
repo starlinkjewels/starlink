@@ -14,7 +14,7 @@ import { SectionTitle } from "@/components/SectionTitle";
 import { StatStrip } from "@/components/TableToolbar";
 import { Button } from "@/components/ui/button";
 
-export function CommissionPanel({ employee }: { employee: User }) {
+export function CommissionPanel({ employee, always }: { employee: User; /** Shown even with nothing yet — its own tab, where "Change %" sets their first. */ always?: boolean }) {
   const db = useDb();
   const { user } = useAuth();
   const ready = useCommissionData();
@@ -26,7 +26,7 @@ export function CommissionPanel({ employee }: { employee: User }) {
   const plan = commissionPlan(db);
   const paid = commissionPayments(db, employee.id);
   // Nothing to say about someone who never had a % and never earned or was paid any.
-  if (ready && !rows.length && !paid.length && !plan.staff[employee.id]?.length && !onCompanyRate(db, employee)) return null;
+  if (!always && ready && !rows.length && !paid.length && !plan.staff[employee.id]?.length && !onCompanyRate(db, employee)) return null;
 
   const year = String(new Date().getFullYear());
   const month = new Date().toISOString().slice(0, 7);

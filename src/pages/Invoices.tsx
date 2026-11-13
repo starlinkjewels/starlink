@@ -23,7 +23,8 @@ import { useStickyFilter } from "@/hooks/useStickyFilter";
 import { selHas, selList, selOn } from "@/lib/filterSel";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { FileText, CheckCircle2, Clock, Plus, DollarSign, Printer, Gift, Undo2, Eye, Pencil, Trash2, XCircle, MessageCircle, Mail } from "lucide-react";
-import { PageHeader } from "@/components/PageHeader";
+import { PageHeader, TabBar } from "@/components/PageHeader";
+import { usePageTab } from "@/hooks/usePageTab";
 import { ActionSheet } from "@/components/ActionSheet";
 import { SectionTitle } from "@/components/SectionTitle";
 import { StatStrip, type TableFilter } from "@/components/TableToolbar";
@@ -94,6 +95,9 @@ export function InvoicesPage() {
   const multiCo = hasCompanies(db.settings);
   const [ledgerQ, setLedgerQ] = useState("");
   const [ledgerClientFilter, setLedgerClientFilter] = useStickyFilter("invoices.advances.client", "all");
+  // Invoices, or the advance payments — one list at a time (hooks/usePageTab.ts).
+  // A link for an invoice (?q=) or to bill a client (?bill=) opens on the invoices.
+  const [tabWant, setTab] = usePageTab("invoices", ["invoices", "advances"] as const, "invoices", "tab", sp.has("q") || sp.has("bill"));
 
   // The client being invoiced. Its own choice, not the list's Client filter:
   // picking someone to bill used to filter the list behind the panel too, and
@@ -326,6 +330,9 @@ export function InvoicesPage() {
   let ordersWithAdvanceBase = db.orders.filter(o => (o.advances || []).length > 0);
   if (user!.role === "client") ordersWithAdvanceBase = ordersWithAdvanceBase.filter(o => o.clientId === user!.clientId);
   if (ownReach) ordersWithAdvanceBase = ordersWithAdvanceBase.filter(o => worksOnOrder(db, user!, o));
+  // The advances tab is there for staff once any order has an advance.
+  const hasAdvances = isStaff && ordersWithAdvanceBase.length > 0;
+  const tab = hasAdvances ? tabWant : "invoices";
   let ordersWithAdvance = ordersWithAdvanceBase;
   if (isStaff && selOn(ledgerClientFilter)) ordersWithAdvance = ordersWithAdvance.filter(o => selHas(ledgerClientFilter, o.clientId));
   const lq = ledgerQ.trim().toLowerCase();
@@ -524,8 +531,16 @@ export function InvoicesPage() {
           setCreating(true);
         } } : null} />
 
+      {/* One list at a time — a long invoice list never hides the advances under it. */}
+      {hasAdvances && (
+        <TabBar label="Invoices" value={tab} onChange={setTab} tabs={[
+          { key: "invoices", label: "Invoices", icon: FileText, count: invRows.length },
+          { key: "advances", label: "Advance payments", icon: DollarSign, count: ordersWithAdvanceBase.length },
+        ]} />
+      )}
+
       {/* Invoices section — the page title already names it. */}
-      <div className="card-luxe overflow-hidden">
+      {tab === "invoices" && <div className="card-luxe overflow-hidden">
         {/* One table at every size: click any heading to sort (amounts and dates
             high → low first); on a phone the invoice number stays in view. Its
             search and filters are the page's (the figures follow them); the
@@ -578,11 +593,11 @@ export function InvoicesPage() {
             ]}
           />
         </div>
-      </div>
+      </div>}
 
       {/* Advance Payment Ledger section — staff only. Clients see ONLY the invoices
           that were generated for them, never their un-invoiced orders. */}
-      {isStaff && ordersWithAdvanceBase.length > 0 && (
+      {tab === "advances" && (
         <div className="card-luxe overflow-hidden">
           <div className="px-5 py-4 border-b border-border/60">
             <SectionTitle title="Advance Payment Ledger" />

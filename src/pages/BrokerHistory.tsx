@@ -10,6 +10,7 @@ import { brokerAccount, brokerCollected, brokerHandovers, brokerPassed, brokerPa
 import { fmtMoneyInr, purchasePending, purchasePaid } from "@/lib/manufacturing";
 import { purchaseText } from "@/lib/materials";
 import { PageHeader, TabBar } from "@/components/PageHeader";
+import { usePageTab } from "@/hooks/usePageTab";
 import { StatStrip } from "@/components/TableToolbar";
 import { DataTable, CellMain, CellTag, CellAmount, CellDate, type DataColumn } from "@/components/DataTable";
 import { BrokerCreateDialog } from "@/components/create/BrokerCreateDialog";
@@ -32,7 +33,8 @@ export function BrokerHistoryPage() {
   const has = useHas();
   // Paying is Payments → Add; changing the broker, Suppliers → Edit; money a broker collected, its own switch.
   const mayPay = can("payments", "add"), mayEdit = can("suppliers", "edit"), mayReceive = has("payments.broker");
-  const [tab, setTab] = useState<Tab>("bills");
+  // Kept in the address, remembered in this visit (hooks/usePageTab.ts) — Back returns to it.
+  const [tabWant, setTab] = usePageTab<Tab>("broker", ["bills", "sales", "suppliers", "money"], "bills");
   const [paying, setPaying] = useState(false);
   const [editing, setEditing] = useState(false);
   const [receiving, setReceiving] = useState(false);
@@ -128,6 +130,7 @@ export function BrokerHistoryPage() {
   ];
 
   const weOwe = Math.max(0, acc.due);
+  const tab: Tab = tabWant === "sales" && !sales.length ? "bills" : tabWant;
 
   return (
     <div className="space-y-5">

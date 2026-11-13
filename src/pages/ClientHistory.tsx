@@ -10,7 +10,8 @@ import { metalLabel } from "@/lib/metals";
 import { MAIN_COMPANY_ID, companyById, companyIdOfClient, hasCompanies } from "@/lib/companies";
 import { useCan, useMayExport } from "@/hooks/useCan";
 import type { MoreAction } from "@/components/MoreMenu";
-import { PageHeader } from "@/components/PageHeader";
+import { PageHeader, TabBar } from "@/components/PageHeader";
+import { usePageTab } from "@/hooks/usePageTab";
 import { SectionTitle } from "@/components/SectionTitle";
 import { StatStrip, type TableFilter } from "@/components/TableToolbar";
 import { advanceIds, receiptForAdvance } from "@/lib/receipts";
@@ -54,7 +55,7 @@ import { useAuth } from "@/lib/auth";
 import { downloadCsv, downloadLedgerPdf, downloadLedgerPdfMulti, pdfThumbs } from "@/lib/ledgerExport";
 import { ExportDialog, inDateRange } from "@/components/ExportDialog";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
-import { FileSpreadsheet } from "lucide-react";
+import { FileSpreadsheet, Coins } from "lucide-react";
 import { confirmBox } from "@/lib/confirm";
 import { RefundClientSheet } from "@/components/RefundClientSheet";
 import { clientRefunds, deleteClientRefund } from "@/lib/clientRefunds";
@@ -121,10 +122,14 @@ function ClientHistoryPageBody() {
     if (!askedPay && !askedStatement) return;
     const next = new URLSearchParams(sp);
     next.delete("pay"); next.delete("statement");
+    // "Open the statement" from elsewhere: its tab.
+    if (askedStatement) next.set("tab", "statement");
     setSp(next, { replace: true });
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const client = db.clients.find(c => c.id === id);
+  // One list at a time (hooks/usePageTab.ts) — before the early return below, so it runs on every draw.
+  const [tabWant, setTab] = usePageTab("client", ["orders", "statement", "material", "diamond", "refunds"] as const, "orders");
 
   // A client's statements carry the company that sells to them; the first
 
@@ -511,6 +516,16 @@ function ClientHistoryPageBody() {
 
   // The status filter narrows the rows; the table's own search box does the rest.
   const filtered = allOrders.filter(o => selHas(statusFilter, o.status));
+  // The page's lists as tabs — only those there are, each with how many.
+  const showDiamond = diamondSales.length > 0 && !hiddenFromMe("lockerTransactions");
+  const tabList = [
+    { key: "orders" as const, label: "Orders", icon: Package, count: allOrders.length },
+    { key: "statement" as const, label: "Invoice statement", icon: FileText, count: invoiceBlocks.length },
+    ...(user!.role !== "client" ? [{ key: "material" as const, label: "Own material", icon: Coins, count: (client.materialLedger ?? []).length }] : []),
+    ...(showDiamond ? [{ key: "diamond" as const, label: "Diamond sales", icon: Gem, count: diamondSales.length }] : []),
+    ...(refunds.length ? [{ key: "refunds" as const, label: "Refunds", icon: Undo2, count: refunds.length }] : []),
+  ];
+  const tab = tabList.some(t => t.key === tabWant) ? tabWant : "orders";
   // Behind the table's one Filters button; "All" is the page's own "all".
   const orderFilters: TableFilter[] = [
     { kind: "select", label: "Status", multi: true, value: statusFilter === "all" ? "" : statusFilter, onChange: v => setStatusFilter(v || "all"),
@@ -798,71 +813,19 @@ function ClientHistoryPageBody() {
           sub: refundedUsd > 0.005 ? `Held for them · ${fmtMoney(refundedUsd)} refunded` : "Held for them" },
       ]} />
 
-      {/* Diamonds sold to them straight out of stock — paid at once, or on credit
-          until their payments cover it (lib/diamondSalePay.ts). */}
-      {diamondSales.length > 0 && !hiddenFromMe("lockerTransactions") && (
-        <div className="card-luxe overflow-hidden">
-          <SectionTitle title="Diamond sales" className="px-5 py-4 border-b border-border/60"
-            sub={owedByCcy.length ? `Still owed: ${owedByCcy.join(" + ")}` : "Sold from stock — all paid"} />
-          <div className="p-3 sm:p-4">
-            <DataTable id="client-diamond-sales" noun="sale" rows={diamondSales} rowKey={x => x.id} columns={diamondSaleColumns}
-              defaultSort={{ key: "date", dir: "desc" }} details={false}
-              rowActions={x => [
-                { label: "Receive payment", icon: Wallet, show: !!x.unpaid, disabled: !can("payments", "add"),
-                  hint: !can("payments", "add") ? needsAccess("payments", "add") : saleOwed(db.lockerTransactions, x) > 0 ? `${fmtCcy(saleOwed(db.lockerTransactions, x), saleCcy(x))} still owed` : "Paid in full — see the payments",
-                  onSelect: () => setPaySale(x) },
-                { label: "Open in Buy & Assign", icon: Eye, onSelect: () => navigate("/buy-assign"), hint: "Cancel or check the sale there" },
-              ]} />
-          </div>
-        </div>
-      )}
 
-      {/* Credit paid back to them — each refund, and Delete puts the credit back. */}
-      {refunds.length > 0 && (
-        <div className="card-luxe overflow-hidden">
-          <SectionTitle title="Refunds" sub="Credit paid back to them" className="px-5 py-4 border-b border-border/60" />
-          <div className="p-3 sm:p-4">
-            <DataTable id="client-refunds" noun="refund" rows={refunds} rowKey={t => t.id} columns={refundColumns}
-              defaultSort={{ key: "date", dir: "desc" }} details={false}
-              rowActions={t => [
-                { label: "Delete refund", icon: Trash2, danger: true, disabled: !mayPayDelete,
-                  hint: mayPayDelete ? "The credit goes back on their account" : needsAccess("payments", "delete"),
-                  onSelect: () => { void removeRefund(t); } },
-              ]}
-              totals={{ usd: list => fmtMoney(list.reduce((s, t) => s + (t.refundUsd || 0), 0)) }} />
-          </div>
-        </div>
-      )}
       <ExportDialog open={showExport} onClose={() => setShowExport(false)} title={`${client.companyName} statement`} options={[
         { label: "Invoice Statement — PDF", sublabel: "Invoice by invoice, with the pieces on each one", kind: "pdf", run: exportInvoiceStatementPdf },
         { label: "Invoice Statement — Excel", sublabel: "Invoice by invoice, with the pieces on each one", kind: "excel", run: exportInvoiceStatementCsv },
       ]} />
 
-      {/* Their own gold and diamonds, held for them (lib/clientMaterial.ts). */}
-      {user!.role !== "client" && <ClientMaterialCard clientId={id!} />}
 
       {/* ── Gift Card & Cashback (admin only) ── */}
       <GiftCardAdminPanel clientId={id!} />
 
-      <ClientInvoiceLedger
-        blocks={invoiceBlocks}
-        client={client}
-        openingDebit={openingDebitAmt(client)}
-        openingCredit={openingCreditAmt(client)}
-        onExport={() => setShowExport(true)}
-        invoiceActions={invoiceActions}
-        paymentActions={paymentActions}
-        creditActions={creditActions}
-      />
-      <ClientEditDialog clientId={editingClient ? client.id : null} onClose={() => setEditingClient(false)} />
-      <ReceiptEditSheet receiptId={editReceiptId} onClose={() => setEditReceiptId(null)} />
-      {can("payments", "add") && <RefundClientSheet open={refunding} onOpenChange={setRefunding} clientId={client.id} />}
-      <SalePaymentSheet sale={paySale} onClose={() => setPaySale(null)} />
-
-      {/* Account Statement — same ledger as Stock and Locker: summary, filters,
-          then every entry with a running balance. */}
-
-
+      {/* One list at a time (hooks/usePageTab.ts) — a long one never hides another under it. */}
+      <TabBar label="Client" value={tab} onChange={setTab} tabs={tabList} />
+      {tab === "orders" && (<>
       {/* Order History */}
       <div className="card-luxe overflow-hidden">
         {/* How many is the table's own count; the status filter shows as a chip. */}
@@ -899,6 +862,70 @@ function ClientHistoryPageBody() {
           />
         </div>
       </div>
+      </>)}
+      {tab === "statement" && (<>
+      <ClientInvoiceLedger
+        blocks={invoiceBlocks}
+        client={client}
+        openingDebit={openingDebitAmt(client)}
+        openingCredit={openingCreditAmt(client)}
+        onExport={() => setShowExport(true)}
+        invoiceActions={invoiceActions}
+        paymentActions={paymentActions}
+        creditActions={creditActions}
+      />
+      </>)}
+      {tab === "material" && (<>
+      {/* Their own gold and diamonds, held for them (lib/clientMaterial.ts). */}
+      {user!.role !== "client" && <ClientMaterialCard clientId={id!} />}
+      </>)}
+      {tab === "diamond" && (<>
+      {/* Diamonds sold to them straight out of stock — paid at once, or on credit
+          until their payments cover it (lib/diamondSalePay.ts). */}
+      {showDiamond && (
+        <div className="card-luxe overflow-hidden">
+          <SectionTitle title="Diamond sales" className="px-5 py-4 border-b border-border/60"
+            sub={owedByCcy.length ? `Still owed: ${owedByCcy.join(" + ")}` : "Sold from stock — all paid"} />
+          <div className="p-3 sm:p-4">
+            <DataTable id="client-diamond-sales" noun="sale" rows={diamondSales} rowKey={x => x.id} columns={diamondSaleColumns}
+              defaultSort={{ key: "date", dir: "desc" }} details={false}
+              rowActions={x => [
+                { label: "Receive payment", icon: Wallet, show: !!x.unpaid, disabled: !can("payments", "add"),
+                  hint: !can("payments", "add") ? needsAccess("payments", "add") : saleOwed(db.lockerTransactions, x) > 0 ? `${fmtCcy(saleOwed(db.lockerTransactions, x), saleCcy(x))} still owed` : "Paid in full — see the payments",
+                  onSelect: () => setPaySale(x) },
+                { label: "Open in Buy & Assign", icon: Eye, onSelect: () => navigate("/buy-assign"), hint: "Cancel or check the sale there" },
+              ]} />
+          </div>
+        </div>
+      )}
+      </>)}
+      {tab === "refunds" && (<>
+      {/* Credit paid back to them — each refund, and Delete puts the credit back. */}
+      {refunds.length > 0 && (
+        <div className="card-luxe overflow-hidden">
+          <SectionTitle title="Refunds" sub="Credit paid back to them" className="px-5 py-4 border-b border-border/60" />
+          <div className="p-3 sm:p-4">
+            <DataTable id="client-refunds" noun="refund" rows={refunds} rowKey={t => t.id} columns={refundColumns}
+              defaultSort={{ key: "date", dir: "desc" }} details={false}
+              rowActions={t => [
+                { label: "Delete refund", icon: Trash2, danger: true, disabled: !mayPayDelete,
+                  hint: mayPayDelete ? "The credit goes back on their account" : needsAccess("payments", "delete"),
+                  onSelect: () => { void removeRefund(t); } },
+              ]}
+              totals={{ usd: list => fmtMoney(list.reduce((s, t) => s + (t.refundUsd || 0), 0)) }} />
+          </div>
+        </div>
+      )}
+      </>)}
+      <ClientEditDialog clientId={editingClient ? client.id : null} onClose={() => setEditingClient(false)} />
+      <ReceiptEditSheet receiptId={editReceiptId} onClose={() => setEditReceiptId(null)} />
+      {can("payments", "add") && <RefundClientSheet open={refunding} onOpenChange={setRefunding} clientId={client.id} />}
+      <SalePaymentSheet sale={paySale} onClose={() => setPaySale(null)} />
+
+      {/* Account Statement — same ledger as Stock and Locker: summary, filters,
+          then every entry with a running balance. */}
+
+
 
       {/* Recording a payment is a panel, so the ledger and the order history
           behind stay where they were. Closing it keeps what was typed; Cancel

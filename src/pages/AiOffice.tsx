@@ -16,7 +16,8 @@ import { Link, useSearchParams } from "react-router-dom";
 import type { FunctionsError } from "firebase/functions";
 import { toast } from "sonner";
 import { AlertTriangle, ArrowUp, AudioLines, BookOpen, Compass, Check, CheckCircle2, ChevronRight, ClipboardList, Clock, Headphones, Languages, Lightbulb, Loader2, MessageSquare, Mic, Package, Phone, Plus, RefreshCw, Settings2, ShieldCheck, Sparkles, SquarePen, Square, Sun, Trash2, TrendingUp, Users, Volume2, VolumeX, Wallet, X, type LucideIcon } from "lucide-react";
-import { TabBar } from "@/components/PageHeader";
+import { TabBar, SubTabs } from "@/components/PageHeader";
+import { usePageTab } from "@/hooks/usePageTab";
 import { StrategyTab } from "@/components/ai/StrategyTab";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { AgentOrb } from "@/components/ai/AgentVisuals";
@@ -171,6 +172,9 @@ export function AiOfficePage() {
   const brief = office.briefs.find(b => b.date === today);
   const lastBrief = office.briefs[0];
   const proposed = office.actions.filter(a => a.status === "proposed");
+  const decided = office.actions.filter(a => a.status !== "proposed");
+  // Waiting, or decided — one list at a time (hooks/usePageTab.ts).
+  const [actView, setActView] = usePageTab("ai-actions", ["waiting", "decided"] as const, "waiting", "actions");
   const signals = useMemo(() => growthSignals(db, new Date(), fineNow), [db, fineNow]);
   const highSignals = signals.filter(s => s.level === "high").length;
   const pulses = useMemo(() => allPulses(db), [db]);
@@ -577,10 +581,14 @@ export function AiOfficePage() {
       {tab === "actions" && (
         <div className="space-y-3">
           {office.actions.length === 0 && <div className="card-luxe p-8 text-center text-sm text-muted-foreground">No actions yet. Make today&rsquo;s brief, ask a question, or turn a client&rsquo;s next step into a task — they come here for you to approve.</div>}
-          {proposed.length > 0 && <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Waiting for approval · {proposed.length}</p>}
-          {proposed.map(a => <ActionCard key={a.id} a={a} db={db} me={{ id: user!.id, name: user!.name }} />)}
-          {office.actions.some(a => a.status !== "proposed") && <p className="pt-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Decided</p>}
-          {office.actions.filter(a => a.status !== "proposed").slice(0, 40).map(a => <ActionCard key={a.id} a={a} db={db} me={{ id: user!.id, name: user!.name }} />)}
+          {office.actions.length > 0 && <SubTabs label="Actions" value={actView} onChange={setActView} tabs={[
+            { key: "waiting", label: "Waiting for approval", count: proposed.length },
+            { key: "decided", label: "Decided", count: decided.length },
+          ]} />}
+          {office.actions.length > 0 && actView === "waiting" && proposed.length === 0 && <div className="card-luxe p-8 text-center text-sm text-muted-foreground">Nothing waiting — every action is decided.</div>}
+          {actView === "waiting" && proposed.map(a => <ActionCard key={a.id} a={a} db={db} me={{ id: user!.id, name: user!.name }} />)}
+          {office.actions.length > 0 && actView === "decided" && decided.length === 0 && <div className="card-luxe p-8 text-center text-sm text-muted-foreground">None decided yet.</div>}
+          {actView === "decided" && decided.slice(0, 40).map(a => <ActionCard key={a.id} a={a} db={db} me={{ id: user!.id, name: user!.name }} />)}
         </div>
       )}
 
