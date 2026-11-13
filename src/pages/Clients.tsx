@@ -16,6 +16,7 @@ import { invoicedOrderIds, splitClientAccount } from "@/components/billing/clien
 import { useEffect, useState, type MouseEvent } from "react";
 import { MoreMenu, type MoreAction } from "@/components/MoreMenu";
 import { Link, useNavigate } from "react-router-dom";
+import { overdueByClient } from "@/lib/paymentTerms";
 import { loadDb, updateDbAs, fmtMoney, fmtDate, isOnline, timeAgo, currentUserClients, hasOpeningBalance, cashbackPercentFor, giftMaxRedeemPctFor, type Client, type Order } from "@/lib/db";
 import { filled, refLink, noteText, type Detail } from "@/components/rowDetails";
 import { useDb } from "@/hooks/useDb";
@@ -200,6 +201,8 @@ export function ClientsPage() {
     c.id,
     splitClientAccount(db.orders.filter(o => o.clientId === c.id && o.status !== "Rejected"), c.creditBalance || 0, c, invoiced),
   ]));
+  // Who is past due, in one pass over the invoices (lib/paymentTerms.ts).
+  const overdueOf = overdueByClient(db);
   // The biggest account to settle comes first, whichever way it runs: money a
   // client owes us now, or credit we are holding for them; then work on order
   // not billed yet. Square accounts sink to the bottom, alphabetically.
@@ -355,6 +358,18 @@ export function ClientsPage() {
         );
         if (a.credit > 0) return <div><CellAmount tone="in">{fmtMoney(a.credit)}</CellAmount><p className="text-[10px] text-muted-foreground whitespace-nowrap">credit held</p></div>;
         return <span className="text-xs font-semibold text-success whitespace-nowrap">✓ Clear</span>;
+      } },
+    // Invoices past their due day (lib/paymentTerms.ts) — a column only once someone is late.
+    { key: "overdue", header: "Overdue", align: "right", kind: "number", hideIfEmpty: true,
+      sortValue: c => overdueOf.get(c.id)?.amount ?? null, csv: c => overdueOf.get(c.id)?.amount ?? "",
+      cell: c => {
+        const o = overdueOf.get(c.id);
+        return o ? (
+          <div>
+            <CellAmount tone="out">{fmtMoney(o.amount)}</CellAmount>
+            <p className="text-[10px] text-destructive whitespace-nowrap">{o.count} bill{o.count === 1 ? "" : "s"} · {o.oldestDays} d late</p>
+          </div>
+        ) : null;
       } },
     // Work not invoiced yet: owed once it is billed, not before. Due now plus
     // this is the whole balance the page used to show as one figure.
@@ -605,6 +620,8 @@ export function ClientsPage() {
                   <p className={`mt-0.5 text-[clamp(0.8rem,6cqi,0.95rem)] font-semibold tabular-nums whitespace-nowrap ${acc.dueNow > 0 ? "text-destructive" : "text-success"}`}>
                     {acc.dueNow > 0 ? fmtMoney(acc.dueNow) : acc.credit > 0 ? `+${fmtMoney(acc.credit)}` : "Cleared"}
                   </p>
+                  {/* Past the due day (lib/paymentTerms.ts). */}
+                  {overdueOf.get(c.id) && <p className="text-[10px] font-semibold text-destructive tabular-nums whitespace-nowrap truncate">{fmtMoney(overdueOf.get(c.id)!.amount)} overdue · {overdueOf.get(c.id)!.oldestDays} d</p>}
                   {acc.notBilled > 0 && <p className="text-[10px] text-muted-foreground tabular-nums whitespace-nowrap truncate">+{fmtMoney(acc.notBilled)} on order</p>}
                 </div>
               </div>

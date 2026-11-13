@@ -16,7 +16,7 @@ import { PageHeader, TabBar } from "@/components/PageHeader";
 import { usePageTab } from "@/hooks/usePageTab";
 import { SectionTitle } from "@/components/SectionTitle";
 import { StatStrip, type TableFilter } from "@/components/TableToolbar";
-import { advanceIds, receiptForAdvance } from "@/lib/receipts";
+import { addBankCharge, advanceIds, receiptForAdvance } from "@/lib/receipts";
 import { useEffect, useState } from "react";
 import { useStickyFilter } from "@/hooks/useStickyFilter";
 import { selHas } from "@/lib/filterSel";
@@ -64,6 +64,8 @@ import { clientRefunds, deleteClientRefund } from "@/lib/clientRefunds";
 import { saleCcy, saleOwed, saleReceived, saleTotal } from "@/lib/diamondSalePay";
 import { SalePaymentSheet } from "@/components/SalePaymentSheet";
 import type { DiamondSale } from "@/lib/db";
+import { creditCheck, invoiceDueAt, termsDaysOf, termsLabel } from "@/lib/paymentTerms";
+import { creditHeldFor, downloadInvoiceStatementPdf, dueNote } from "@/lib/clientStatement";
 import type { LockerTransaction } from "@/lib/db";
 import { PhoneLink, EmailLink } from "@/components/ContactLink";
 import { zoomable } from "@/components/ImageViewer";
@@ -172,7 +174,12 @@ function ClientHistoryPageBody() {
   // order can be paid before it is billed, and an invoice raised by mistake can
   // be deleted from Settings — neither may move this statement by a cent.
   // A client reads their account by INVOICE, not by our internal order numbers.
-  const invoiceBlocks = buildInvoiceBlocks(db.invoices ?? [], db.orders, id!);
+  // Each invoice with its due day by the client's terms (lib/paymentTerms.ts), when they have terms.
+  const invoiceBlocks = buildInvoiceBlocks(db.invoices ?? [], db.orders, id!).map(b => {
+    const inv = (db.invoices ?? []).find(i => i.id === b.id);
+    const dueAt = inv ? invoiceDueAt(inv, client, db.settings) : undefined;
+    return dueAt ? { ...b, dueAt } : b;
+  });
 
   // Gross billed and gift-card credit, so the summary reconciles with the
   // statement columns line for line.
@@ -193,6 +200,9 @@ function ClientHistoryPageBody() {
   // Split as Invoices reads it: due now (on an invoice, unpaid) + on order (not
   // billed yet) = outstanding. Nothing about the account changes, only how it reads.
   const account = splitClientAccount(billableOrders, client?.creditBalance || 0, client, invoicedOrderIds(db.invoices));
+  // Their terms, what is past due and where they stand against their credit limit (lib/paymentTerms.ts).
+  const standing = creditCheck(db, id!);
+  const terms = termsDaysOf(client, db.settings);
   // Shipped work with no invoice — the Orders page's "Not invoiced", for them.
   const toBill = user!.role !== "client" ? readyToBill(db, id!) : { ready: [], noPrice: [], total: 0 };
   // Saves what the payment panel took (its fields already checked there).
@@ -216,7 +226,7 @@ function ClientHistoryPageBody() {
       // With an invoice named, settles that invoice (the client's held credit
       // with it); without one, all of it is held as their credit — nothing is
       // spread over the oldest bills (Apply credit does that, deliberately).
-      settleClientAccount(d, id!, amt, user!.id, now, note, payInvoiceId || undefined);
+      settleClientAccount(d, id!, amt, user!.id, now, note, v.invoiceIds?.length ? v.invoiceIds : payInvoiceId || undefined);
       newAdvanceIds = [...advanceIds(d, id!)].filter(x => !beforeIds.has(x));
       // Cash-position tracking — separate from the USD billing allocation above:
       // this is ONE deposit event, so it's recorded once here rather than split
@@ -238,7 +248,9 @@ function ClientHistoryPageBody() {
         id: uid("n_"), userId: clientUser.id,
         title: "Payment Received",
         // Says what happened: against the invoice named, or held as their credit.
-        body: payInvoiceId
+        body: v.invoiceIds?.length
+          ? `${fmtMoney(amt)} received via ${payMethod} against invoices ${v.invoiceIds.map(iid => d.invoices.find(i => i.id === iid)?.number).filter(Boolean).join(", ")}.`
+          : payInvoiceId
           ? `${fmtMoney(amt)} received via ${payMethod} against invoice ${d.invoices.find(i => i.id === payInvoiceId)?.number ?? ""}.`.replace(" .", ".")
           : `${fmtMoney(amt)} received via ${payMethod} — held as credit on your account.`,
         type: "info", read: false, createdAt: now,
@@ -253,11 +265,23 @@ function ClientHistoryPageBody() {
           lockerTxnId: payLockerId ? txnId : undefined, userId: user!.id,
         });
         receiptNo = ` · ${r.receiptNo}`;
+        // Several invoices named on the receipt; the bank charges booked against it (lib/receipts.ts).
+        if (v.invoiceIds?.length || v.bankChargesUsd) {
+          updateDb(d => {
+            const rec = (d.clientReceipts ?? []).find(x => x.id === r.id);
+            if (!rec) return;
+            if (v.invoiceIds?.length) { rec.invoiceId = v.invoiceIds[0]; if (v.invoiceIds.length > 1) rec.invoiceIds = [...v.invoiceIds]; }
+            if (v.bankChargesUsd) {
+              rec.bankChargesUsd = v.bankChargesUsd;
+              addBankCharge(d, rec, { usd: v.bankChargesUsd, lockerId: payLockerId, rate: v.exchangeRate, userId: user!.id });
+            }
+          });
+        }
       } catch {
-        toast.error("Payment saved, but its receipt number could not be reserved");
+        toast.error(v.bankChargesUsd ? "Payment saved, but its receipt number could not be reserved — its bank charges were not booked; add them in Expenses" : "Payment saved, but its receipt number could not be reserved");
       }
     }
-    toast.success(`Payment recorded${receiptNo} (${payMethod}) — ${payInvoiceId ? "against the invoice; anything over is held as credit" : "held as credit"}`);
+    toast.success(`Payment recorded${receiptNo} (${payMethod}) — ${v.invoiceIds?.length ? `against ${v.invoiceIds.length} invoices, oldest first; anything over is held as credit` : payInvoiceId ? "against the invoice; anything over is held as credit" : "held as credit"}`);
   };
 
   const applyCredit = () => {
@@ -391,7 +415,7 @@ function ClientHistoryPageBody() {
   // Credit the client holds (an overpayment, a refund kept on account): it can pay what is
   // owed, so a statement up to today says what is left after it. Not on a statement ending
   // in the past — the credit is today's.
-  const creditHeld = (to: Date | null) => (!to && (client.creditBalance || 0) > 0.009 ? Math.round((client.creditBalance || 0) * 100) / 100 : 0);
+  const creditHeld = (to: Date | null) => creditHeldFor(client, to);
   const exportInvoiceStatementCsv = (from: Date | null, to: Date | null) => {
     const blocks = invoiceBlocks.filter(b => inDateRange(b.date, from, to));
     const rows: (string | number)[][] = [];
@@ -406,7 +430,7 @@ function ClientHistoryPageBody() {
       for (const p of b.payments) {
         rows.push([b.number, fmtDate(p.date), "", p.note, "", "", "", "", p.amount, ""]);
       }
-      rows.push([b.number, "", "", "Invoice total", "", b.gross, b.gift || "", b.returned || "", b.received, b.balance]);
+      rows.push([b.number, "", "", `Invoice total${dueNote(b)}`, "", b.gross, b.gift || "", b.returned || "", b.received, b.balance]);
     }
     // Diamond sales on credit still owed — apart from the invoices, each in its own currency.
     if (salesOwed.length) {
@@ -433,91 +457,23 @@ function ClientHistoryPageBody() {
   };
 
 
+  // The shared statement (lib/clientStatement.ts) — the client's own Home downloads the same one;
+  // only what is staff's to see (diamond sales on credit) is added here.
   const exportInvoiceStatementPdf = (from: Date | null, to: Date | null) => {
-    const blocks = invoiceBlocks.filter(b => inDateRange(b.date, from, to));
-    const oD = openingDebitAmt(client), oC = openingCreditAmt(client);
-    const T = blocks.reduce((t, b) => ({
-      gross: t.gross + b.gross, gift: t.gift + b.gift, returned: t.returned + b.returned,
-      received: t.received + b.received, balance: t.balance + b.balance,
-    }), { gross: 0, gift: 0, returned: 0, received: 0, balance: 0 });
-    // Still owed on invoices before the period: brought forward with the opening,
-    // or a year's statement would leave older unpaid bills out of what is owed.
-    const before = from ? invoiceBlocks.filter(b => +new Date(b.date) < +from).reduce((t, b) => t + b.balance, 0) : 0;
-    const bf = oD - oC + before;
-    const closing = bf + T.balance;
-
-    // One table per invoice: its pieces, then the payments received against it.
-    const sections = blocks.map(b => ({
-      heading: `Invoice ${b.number} · ${fmtDate(b.date)} · ${fmtMoney(b.gross)}${b.balance > 0.009 ? ` · ${fmtMoney(b.balance)} outstanding` : " · settled"}`,
-      columns: [
-        { header: "Order / Date", x: 14 },
-        { header: "Description", x: 52 },
-        { header: "Qty", x: 160 },
-        { header: "Billed", x: 176 },
-        { header: "Gift card", x: 202 },
-        { header: "Returned", x: 224 },
-        { header: "Received", x: 246 },
-        { header: "Balance", x: 266 },
-      ],
-      align: ["left", "left", "right", "right", "right", "right", "right", "right"] as ("left" | "right")[],
-      rows: [
-        ...b.items.map(i => [
-          i.orderNo, fit(i.description || "—", 104), String(i.qty),
-          fmtMoney(i.gross), i.gift ? `-${fmtMoney(i.gift)}` : "",
-          i.returned ? `-${fmtMoney(i.returned)}` : "",
-          i.received ? fmtMoney(i.received) : "",
-          i.balance > 0.009 ? fmtMoney(i.balance) : "Cleared",
+    downloadInvoiceStatementPdf({
+      client, allBlocks: invoiceBlocks, from, to, company: statementCompany,
+      // Diamond sales on credit still owed — their own table, apart from the invoices,
+      // each in its own currency (never added into the dollar figures above).
+      extraSections: salesOwed.length ? [{
+        heading: "Diamond sales on credit — not fully paid (apart from the invoices)",
+        columns: [{ header: "Date", x: 14 }, { header: "Diamond", x: 52 }, { header: "Sale", x: 206 }, { header: "Received", x: 240 }, { header: "Owed", x: 270 }],
+        align: ["left", "left", "right", "right", "right"],
+        rows: salesOwed.map(x => [
+          fmtDate(x.createdAt), fit(`${x.carat}ct ${x.kind === "certified" ? "certified " : ""}${x.shape}${x.notes ? ` — ${x.notes}` : ""}`, 104),
+          fmtCcyPdf(saleTotal(x), saleCcy(x)), fmtCcyPdf(saleReceived(db.lockerTransactions, x), saleCcy(x)), fmtCcyPdf(saleOwed(db.lockerTransactions, x), saleCcy(x)),
         ]),
-        ...b.credits.map(c => [
-          fmtDate(c.date), fit(`Credit note ${c.note}`, 104), "", "", "", `-${fmtMoney(c.amount)}`, "", "",
-        ]),
-        ...b.payments.map(p => [
-          fmtDate(p.date), fit(`Payment received — ${p.note}`, 104), "", "", "", "", fmtMoney(p.amount), "",
-        ]),
-      ],
-      totalsRow: ["", "Invoice total", "", fmtMoney(b.gross), b.gift ? `-${fmtMoney(b.gift)}` : "",
-        b.returned ? `-${fmtMoney(b.returned)}` : "",
-        fmtMoney(b.received), b.balance > 0.009 ? fmtMoney(b.balance) : "Cleared"],
-    }));
-    // Diamond sales on credit still owed — their own table, apart from the invoices,
-    // each in its own currency (never added into the dollar figures above).
-    if (salesOwed.length) sections.push({
-      heading: "Diamond sales on credit — not fully paid (apart from the invoices)",
-      columns: [{ header: "Date", x: 14 }, { header: "Diamond", x: 52 }, { header: "Sale", x: 206 }, { header: "Received", x: 240 }, { header: "Owed", x: 270 }],
-      align: ["left", "left", "right", "right", "right"],
-      rows: salesOwed.map(x => [
-        fmtDate(x.createdAt), fit(`${x.carat}ct ${x.kind === "certified" ? "certified " : ""}${x.shape}${x.notes ? ` — ${x.notes}` : ""}`, 104),
-        fmtCcyPdf(saleTotal(x), saleCcy(x)), fmtCcyPdf(saleReceived(db.lockerTransactions, x), saleCcy(x)), fmtCcyPdf(saleOwed(db.lockerTransactions, x), saleCcy(x)),
-      ]),
-    } as (typeof sections)[number]);
-
-    downloadLedgerPdfMulti({
-      company: statementCompany,
-      title: "Client Account Statement",
-      subjectLines: [
-        client.companyName,
-        [client.ownerName, client.country].filter(Boolean).join(" · "),
-        [client.email, client.phone].filter(Boolean).join("   "),
-        from || to ? `Period: ${from ? fmtDate(from.toISOString()) : "start"} → ${to ? fmtDate(to.toISOString()) : "today"}` : "Period: all time",
-        `Report Generated: ${new Date().toLocaleDateString("en-IN", { month: "long", day: "numeric", year: "numeric" })}`,
-      ].filter(Boolean),
-      summary: [
-        ...(Math.abs(bf) > 0.009 ? [{ label: from ? `Brought forward to ${fmtDate(from.toISOString())}` : "Balance brought forward", value: fmtMoney(bf) }] : []),
-        { label: "Total billed (gross)", value: fmtMoney(T.gross) },
-        ...(T.gift > 0 ? [{ label: "Gift card used", value: fmtMoney(T.gift) }] : []),
-        ...(T.returned > 0 ? [{ label: "Returned (credit notes)", value: fmtMoney(T.returned) }] : []),
-        { label: "Received", value: fmtMoney(T.received) },
-        { label: "Outstanding", value: fmtMoney(Math.max(0, closing)) },
-        ...(creditHeld(to) > 0 ? [
-          { label: "Credit held", value: `-${fmtMoney(creditHeld(to))}` },
-          { label: "Net due", value: fmtMoney(Math.max(0, Math.max(0, closing) - creditHeld(to))) },
-        ] : []),
-        ...(salesOwed.length ? [{ label: "Diamond sales owed", value: owedByCcy.join(" + ") }] : []),
-        { label: "Invoices", value: String(blocks.length) },
-      ],
-      landscape: true,
-      sections,
-      filename: `Client-Statement-${client.companyName.replace(/\s+/g, "_")}`,
+      }] : [],
+      extraSummary: salesOwed.length ? [{ label: "Diamond sales owed", value: owedByCcy.join(" + ") }] : [],
     });
   };
 
@@ -728,7 +684,7 @@ function ClientHistoryPageBody() {
             disabled: !((client.creditBalance || 0) > 0.005),
             hint: (client.creditBalance || 0) > 0.005 ? `Pay their ${fmtMoney(client.creditBalance || 0)} back to them` : "They hold no credit to refund" },
           { label: "Edit details", icon: Pencil, onSelect: () => setEditingClient(true), disabled: !mayEditClient,
-            hint: mayEditClient ? "Name, contact, address, opening balance" : needsAccess("clients", "edit") },
+            hint: mayEditClient ? "Name, contact, address, opening balance, payment terms, credit limit" : needsAccess("clients", "edit") },
           { label: client.status === "active" ? "Deactivate" : "Activate", icon: Power, onSelect: () => toggleClientActive(client.id), disabled: !mayEditClient,
             hint: !mayEditClient ? needsAccess("clients", "edit") : client.status === "active" ? "Stops sign-in; history stays" : "They can sign in again" },
           { label: "Delete client", icon: Trash2, danger: true, onSelect: removeClient, disabled: !!clientDeleteWhy, hint: clientDeleteWhy },
@@ -815,10 +771,15 @@ function ClientHistoryPageBody() {
       <PartyMemos party={{ kind: "client", id: client.id }} />
       <StatStrip items={[
         { label: "Due now", value: account.dueNow > 0 ? fmtMoney(account.dueNow) : "✓ Cleared", tone: account.dueNow > 0 ? "out" : "in", icon: AlertCircle,
-          sub: openingDebitAmt(client) > 0 ? "Billed, unpaid · with balance brought forward" : "Billed, not paid" },
+          sub: standing.overdue.count > 0
+            ? <span className="text-destructive font-medium">{fmtMoney(standing.overdue.amount)} overdue · oldest {standing.overdue.oldestDays} day{standing.overdue.oldestDays === 1 ? "" : "s"}</span>
+            : `${openingDebitAmt(client) > 0 ? "Billed, unpaid · with balance brought forward" : "Billed, not paid"}${terms != null ? ` · ${termsLabel(terms)}` : ""}` },
         { label: "On order, not billed", value: fmtMoney(account.notBilled), icon: Hourglass, sub: "Owed once invoiced" },
         { label: "Order value", value: fmtMoney(account.billed), icon: FileText,
           sub: `${fmtMoney(account.allocated)} received · ${fmtMoney(account.outstanding)} owed in all` },
+        // Their credit limit, when set: what is left of it, or by how much they are over.
+        ...(standing.limit != null ? [{ label: "Credit limit", value: fmtMoney(standing.limit), tone: (standing.left! < 0 ? "out" : undefined) as "out" | undefined,
+          sub: standing.left! < 0 ? <span className="text-destructive font-medium">{fmtMoney(-standing.left!)} over</span> : `${fmtMoney(standing.left!)} left · ${fmtMoney(standing.owed)} owed` }] : []),
         { label: "Credit (advance)", value: fmtMoney(account.credit), icon: Wallet,
           sub: refundedUsd > 0.005 ? `Held for them · ${fmtMoney(refundedUsd)} refunded` : "Held for them" },
         // Diamonds sold to them on credit, still owed — beside the invoices, never in them.
@@ -942,7 +903,7 @@ function ClientHistoryPageBody() {
 
       {/* Recording a payment: the one shared panel (components/payments/ReceiveFromClient.tsx),
           saved by this page's own recordPayment — the ledger and order history stay behind it. */}
-      <ReceiveFromClient open={showPayForm} onOpenChange={setShowPayForm} clientId={client.id} onSave={recordPayment}
+      <ReceiveFromClient open={showPayForm} onOpenChange={setShowPayForm} clientId={client.id} onSave={recordPayment} extras
         title="Record Client Payment"
         description={<>From {client.companyName} · pick an invoice to settle it, or it's held as credit{account.credit > 0 && <> · {fmtMoney(account.credit)} credit held</>}</>} />
     </div>

@@ -44,6 +44,10 @@ export interface ReceiveValues {
   depositAmount: number;
   /** The invoice it was sent for (a client's money, not one order's). */
   invoiceId?: string;
+  /** Several invoices it pays, oldest first (the first is also `invoiceId`) — only where `extras`. */
+  invoiceIds?: string[];
+  /** $ the banks kept: the client is credited the whole amount, these go to Expenses — only where `extras`. */
+  bankChargesUsd?: number;
 }
 
 /** The account last paid into, on this device — offered first next time. */
@@ -63,7 +67,7 @@ const lastLockerKey = (uid: string) => `pay-locker:${uid}`;
  */
 export function ReceiveFromClient({
   open, onOpenChange, lockerId: fixedLocker, frame = sheetFrame,
-  clientId: fixedClient, orderId, invoiceId: presetInvoice, amount: presetAmount, onSave, title, description, forNewOrder, initial,
+  clientId: fixedClient, orderId, invoiceId: presetInvoice, amount: presetAmount, onSave, title, description, forNewOrder, initial, extras,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -87,6 +91,9 @@ export function ReceiveFromClient({
   forNewOrder?: boolean;
   /** What it starts with when changing one already taken down (New order's advance). */
   initial?: { amount?: number; method?: string; remark?: string; lockerId?: string; rate?: number; date?: string };
+  /** The saver takes several invoices and bank charges too (ReceiveValues.invoiceIds / bankChargesUsd).
+   *  Unset: only the panel's own saving (a numbered receipt) does. */
+  extras?: boolean;
 }) {
   const { user } = useAuth();
   const db = useDb();
@@ -103,6 +110,11 @@ export function ReceiveFromClient({
   // typed for one currency is never saved against another.
   const [exchangeRate, setExchangeRate] = useState<number | "">("");
   const [invoiceId, setInvoiceId] = useState("");
+  // Several invoices: ticked by hand (the oldest pre-ticked to cover the amount), paid oldest first.
+  const [several, setSeveral] = useState(false);
+  const [picked, setPicked] = useState<string[]>([]);
+  // What the banks kept on the way ($).
+  const [fee, setFee] = useState("");
   const [saving, setSaving] = useState(false);
   // Entries are often written up a day or two later, so the date is chosen
   // rather than assumed to be today.
@@ -115,6 +127,7 @@ export function ReceiveFromClient({
     const start = initial?.amount ?? presetAmount;
     setAmount(start && start > 0 ? String(r2(start)) : "");
     setMethod(initial?.method || "Cash"); setNote(initial?.remark ?? ""); setExchangeRate(initial?.rate ?? ""); setDate(initial?.date || todayLocal());
+    setSeveral(false); setPicked([]); setFee("");
     let last = initial?.lockerId ?? "";
     if (!last) { try { last = localStorage.getItem(lastLockerKey(user?.id ?? "")) ?? ""; } catch { /* private window */ } }
     setLockerId(loadDb().lockers.some(l => l.id === last && l.active !== false) ? last : "");
@@ -142,8 +155,25 @@ export function ReceiveFromClient({
   useEffect(() => {
     if (!open) return;
     setInvoiceId(presetInvoice ?? (openUnpaid.length === 1 ? openUnpaid[0].inv.id : ""));
+    setSeveral(false); setPicked([]);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [clientId, open]);
+  // Where the saver takes them (or the panel saves itself): several invoices and bank charges.
+  const withExtras = (extras ?? !onSave) && !order && !forNewOrder;
+  const canSeveral = withExtras && !presetInvoice && openUnpaid.length >= 2;
+  // Oldest first — the order a payment for several bills pays them in.
+  const oldestFirst = [...openUnpaid].sort((a, b) => +new Date(a.inv.createdAt) - +new Date(b.inv.createdAt));
+  /** Tick the oldest bills until `amt` is covered (all of them when no amount yet). */
+  const tickToCover = (amt: number) => {
+    const out: string[] = [];
+    let left = amt;
+    for (const x of oldestFirst) {
+      if (amt > 0 && left <= 0.005) break;
+      out.push(x.inv.id);
+      left -= x.bal;
+    }
+    setPicked(out);
+  };
 
   const locker = db.lockers.find(l => l.id === lockerId);
   const lockerCurrency = ccy(locker?.currency);
@@ -175,12 +205,19 @@ export function ReceiveFromClient({
     if (!lockerId) { toast.error("Choose which account this was deposited into"); return; }
     if (needsRate && (!rate || rate <= 0)) { toast.error("Enter the exchange rate before saving this payment"); return; }
     if (order && order.status === "Rejected") { toast.error("This order is cancelled — take it as the client's money instead"); return; }
+    // Several invoices: the ticked ones, oldest first.
+    const ids = several ? oldestFirst.map(x => x.inv.id).filter(i => picked.includes(i)) : [];
+    if (several && !ids.length) { toast.error("Tick the invoices it pays — or choose No invoice to hold it as credit"); return; }
+    const feeUsd = withExtras && fee.trim() !== "" ? Number(fee) : 0;
+    if (!(feeUsd >= 0) || !Number.isFinite(feeUsd)) { toast.error("Bank charges: an amount of 0 or more"); return; }
+    if (feeUsd >= amt) { toast.error("Bank charges can't be the whole payment — check the amounts"); return; }
     // The rate is "1 USD = rate of the account's currency".
     const depositAmount = needsRate ? roundCcy(amt * rate, lockerCurrency) : amt;
     const v: ReceiveValues = {
       clientId, amountUsd: amt, date, at: stampFor(date), method, remark: note.trim(),
       lockerId, lockerCurrency, ...(needsRate ? { exchangeRate: rate } : {}), depositAmount,
-      ...(!order && invoiceId ? { invoiceId } : {}),
+      ...(!order && several ? { invoiceId: ids[0], ...(ids.length > 1 ? { invoiceIds: ids } : {}) } : !order && invoiceId ? { invoiceId } : {}),
+      ...(feeUsd > 0 ? { bankChargesUsd: Math.round(feeUsd * 100) / 100 } : {}),
     };
     // The same money entered twice is the commonest slip: the same client, the same amount
     // (within 1%), within a week of this date — asked, never refused (two equal payments happen).
@@ -198,9 +235,11 @@ export function ReceiveFromClient({
           lockerId, lockerAmount: depositAmount, lockerCurrency,
           exchangeRate: v.exchangeRate,
           invoiceId: v.invoiceId,
+          invoiceIds: v.invoiceIds,
+          bankChargesUsd: v.bankChargesUsd,
           userId: user!.id,
         });
-        updateDb(d => notifyClientPayment(d, clientId, amt, method, v.invoiceId, v.at));
+        updateDb(d => notifyClientPayment(d, clientId, amt, method, v.invoiceIds ?? v.invoiceId, v.at));
         toast.success(`Receipt ${receipt.receiptNo} — ${fmtMoney(amt)} received from ${c.companyName}`);
       }
       try { localStorage.setItem(lastLockerKey(user!.id), lockerId); } catch { /* private window */ }
@@ -215,9 +254,12 @@ export function ReceiveFromClient({
   const heldCredit = db.clients.find(x => x.id === clientId)?.creditBalance || 0;
   const orderBal = order ? balanceDue(order) : 0;
   const onOrder = order ? r2(Math.min(amt0, orderBal)) : 0;
-  const invoiceDue = invoiceId ? openInvoices.find(x => x.inv.id === invoiceId)?.bal ?? 0 : 0;
-  const onInvoice = invoiceId ? r2(Math.min(amt0 + heldCredit, invoiceDue)) : 0;
+  // The bills it goes on: the one named, or the ticked ones.
+  const named = several ? picked : invoiceId ? [invoiceId] : [];
+  const invoiceDue = named.reduce((t, iid) => t + (openInvoices.find(x => x.inv.id === iid)?.bal ?? 0), 0);
+  const onInvoice = named.length ? r2(Math.min(amt0 + heldCredit, invoiceDue)) : 0;
   const creditAfter = order ? r2(heldCredit + amt0 - onOrder) : r2(amt0 + heldCredit - onInvoice);
+  const fee0 = withExtras ? Number(fee) || 0 : 0;
   // Unknown until there is a rate — never shown as if the dollars landed unconverted.
   const depositPreview = !amount ? null : needsRate ? (rate > 0 ? roundCcy(Number(amount) * rate, lockerCurrency) : null) : Number(amount);
   const clientName = db.clients.find(c => c.id === clientId)?.companyName;
@@ -235,9 +277,9 @@ export function ReceiveFromClient({
               <p className="font-medium text-foreground tabular-nums break-words">{fmtMoney(amt0)}</p>
             </div>
             <div className="min-w-0">
-              <p className="text-[10px] uppercase tracking-wider text-muted-foreground">{forNewOrder ? "Advance on the new order" : order ? "On this order" : invoiceId ? "On the invoice" : "Held as credit"}</p>
-              <p className="font-semibold text-primary tabular-nums break-words">{fmtMoney(order ? onOrder : invoiceId ? onInvoice : amt0)}</p>
-              {!forNewOrder && (order ? amt0 - onOrder > 0.005 : invoiceId ? creditAfter > 0.005 || heldCredit > 0.005 : heldCredit > 0.005) && (
+              <p className="text-[10px] uppercase tracking-wider text-muted-foreground">{forNewOrder ? "Advance on the new order" : order ? "On this order" : named.length > 1 ? `On ${named.length} invoices` : named.length ? "On the invoice" : "Held as credit"}</p>
+              <p className="font-semibold text-primary tabular-nums break-words">{fmtMoney(order ? onOrder : named.length ? onInvoice : amt0)}</p>
+              {!forNewOrder && (order ? amt0 - onOrder > 0.005 : named.length ? creditAfter > 0.005 || heldCredit > 0.005 : heldCredit > 0.005) && (
                 <p className="text-[11px] text-muted-foreground tabular-nums">Credit after: {fmtMoney(creditAfter)}</p>
               )}
             </div>
@@ -245,6 +287,7 @@ export function ReceiveFromClient({
               <div className="min-w-0">
                 <p className="text-[10px] uppercase tracking-wider text-muted-foreground break-words">Deposited to {locker.name}</p>
                 <p className="font-semibold text-foreground tabular-nums break-words">{fmtCcy(depositPreview, lockerCurrency)}</p>
+                {fee0 > 0 && <p className="text-[11px] text-muted-foreground tabular-nums">Bank charges −{fmtMoney(fee0)} (Expenses)</p>}
               </div>
             )}
           </div>
@@ -272,11 +315,16 @@ export function ReceiveFromClient({
           {clientId && openInvoices.length > 0 && (
             <div>
               <Label className="text-xs">Against {invoiceId && !presetInvoice ? <span className="text-success">(auto-selected)</span> : ""}</Label>
-              <Select value={invoiceId || "fifo"} onValueChange={v => setInvoiceId(v === "fifo" ? "" : v)}>
+              <Select value={several ? "__several" : invoiceId || "fifo"}
+                onValueChange={v => {
+                  if (v === "__several") { setSeveral(true); setInvoiceId(""); tickToCover(Number(amount) || 0); return; }
+                  setSeveral(false); setInvoiceId(v === "fifo" ? "" : v);
+                }}>
                 <SelectTrigger className="h-10 rounded-xl mt-1" aria-label="Against"><SelectValue /></SelectTrigger>
                 <SelectContent>
                   {/* No invoice named means the money is simply held on the client's account. */}
                   <SelectItem value="fifo">No invoice — hold as credit</SelectItem>
+                  {canSeveral && <SelectItem value="__several">Several invoices — oldest first ({openUnpaid.length} open)</SelectItem>}
                   {openInvoices.map(({ inv, bal }) => (
                     <SelectItem key={inv.id} value={inv.id}>
                       Invoice {inv.number} — {bal > 0 ? `${fmtMoney(bal)} pending` : "settled"}
@@ -319,6 +367,34 @@ export function ReceiveFromClient({
             <Input id="rcv-note" value={note} onChange={e => setNote(e.target.value)} className="rounded-xl h-10 mt-1" placeholder="optional" />
           </div>
 
+          {/* The invoices it pays — ticked; the oldest first are pre-ticked to cover the amount. */}
+          {several && (
+            <div className="sm:col-span-2 rounded-xl border border-border/70 p-3 space-y-1.5" role="group" aria-label="Invoices it pays">
+              <div className="flex items-center justify-between gap-2">
+                <p className="text-xs font-medium text-brand-dark">Invoices it pays — oldest first</p>
+                <button type="button" className="text-[11px] text-primary hover:underline" onClick={() => tickToCover(Number(amount) || 0)}>Tick to cover the amount</button>
+              </div>
+              {oldestFirst.map(({ inv, bal }) => (
+                <label key={inv.id} className="flex items-center gap-2.5 text-sm cursor-pointer">
+                  <input type="checkbox" className="h-4 w-4 accent-primary" checked={picked.includes(inv.id)}
+                    onChange={e => setPicked(p => (e.target.checked ? [...p, inv.id] : p.filter(x => x !== inv.id)))} />
+                  <span className="flex-1 min-w-0 truncate">Invoice {inv.number} <span className="text-muted-foreground text-xs">· {fmtDate(inv.createdAt)}</span></span>
+                  <span className="tabular-nums text-xs font-medium">{fmtMoney(bal)}</span>
+                </label>
+              ))}
+              <p className="text-[11px] text-muted-foreground">Ticked: {fmtMoney(invoiceDue)} owed. Paid in this order; anything over is held as credit.</p>
+            </div>
+          )}
+
+          {/* What the banks kept on the way: the client is credited the whole payment. */}
+          {withExtras && (
+            <div>
+              <Label htmlFor="rcv-fee" className="text-xs">Bank charges kept ($) <span className="font-normal text-muted-foreground">· optional</span></Label>
+              <Input id="rcv-fee" type="number" min={0} step="0.01" value={fee} onChange={e => setFee(e.target.value)} className="rounded-xl h-10 mt-1" placeholder="0" />
+              {fee0 > 0 && <p className="text-[11px] text-muted-foreground mt-1">They are credited {fmtMoney(amt0)}; {fmtMoney(fee0)} goes to Expenses as Bank Charges, so the account shows what arrived.</p>}
+            </div>
+          )}
+
           {needsRate && (
             <div className="sm:col-span-2 p-3 rounded-xl bg-secondary">
               <RateInput id="rcv-rate" from="USD" to={lockerCurrency} value={exchangeRate} onChange={setExchangeRate}
@@ -330,7 +406,8 @@ export function ReceiveFromClient({
 
         {clientId && openInvoices.length > 0 && (
           <p className="text-[11px] text-muted-foreground">
-            {invoiceId ? "Settles that invoice; anything over is held as credit." : "Held as credit — pick an invoice to settle one."}
+            {several ? `Pays ${picked.length} invoice${picked.length === 1 ? "" : "s"}, oldest first; anything over is held as credit.`
+              : invoiceId ? "Settles that invoice; anything over is held as credit." : "Held as credit — pick an invoice to settle one."}
           </p>
         )}
         {order && (

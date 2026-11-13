@@ -12,6 +12,8 @@ import { useDb } from "@/hooks/useDb";
 import { useAuth } from "@/lib/auth";
 import { hasFeature } from "@/lib/permissions";
 import { OpeningBalanceFields } from "@/components/OpeningBalanceFields";
+import { PaymentTermsFields } from "@/components/billing/PaymentTermsFields";
+import { termsProblem } from "@/lib/paymentTerms";
 import { ActionSheet } from "@/components/ActionSheet";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -24,6 +26,7 @@ const fieldsOf = (c: Client): Partial<Client> => ({
   accountManagerId: c.accountManagerId,
   companyId: companyIdOfClient(c),
   openingBalance: c.openingBalance, openingDir: c.openingDir, openingDate: c.openingDate,
+  paymentTermsDays: c.paymentTermsDays, creditLimitUsd: c.creditLimitUsd,
 });
 
 /**
@@ -71,6 +74,8 @@ export function ClientEditDialog({ clientId, onClose }: { clientId: string | nul
     if (!hasLogin && email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { toast.error("Check the email"); return; }
     const cfWhy = customProblem(db.settings, "clients", cf, user, valuesOf(db, "clients", clientId));
     if (cfWhy) { toast.error(cfWhy); return; }
+    const termsWhy = termsProblem(ef.paymentTermsDays, ef.creditLimitUsd);
+    if (termsWhy) { toast.error(termsWhy); return; }
     setSavingEdit(true);
     try {
       updateDbAs({ summary: `Edited client ${ef.companyName.trim()}` }, d => {
@@ -90,6 +95,10 @@ export function ClientEditDialog({ clientId, onClose }: { clientId: string | nul
         c.openingBalance = ef.openingBalance || undefined;
         c.openingDir = ef.openingBalance ? (ef.openingDir || "debit") : undefined;
         c.openingDate = ef.openingBalance ? (ef.openingDate || undefined) : undefined;
+        // Terms and limit (lib/paymentTerms.ts): blank = the Settings default / no limit. Invoices
+        // already raised keep the due date stamped on them.
+        if (ef.paymentTermsDays != null) c.paymentTermsDays = ef.paymentTermsDays; else delete c.paymentTermsDays;
+        if (ef.creditLimitUsd != null && ef.creditLimitUsd > 0) c.creditLimitUsd = ef.creditLimitUsd; else delete c.creditLimitUsd;
         if (mayHandler) c.accountManagerId = ef.accountManagerId;
         // Moving a client to another company changes who bills them from now
         // on; every invoice already raised keeps the company that issued it.
@@ -154,6 +163,10 @@ export function ClientEditDialog({ clientId, onClose }: { clientId: string | nul
           creditLabel="We owe client / advance (Credit)"
           hint="Carried in from your previous system."
         />
+      </div>
+      <div className="mt-4">
+        <PaymentTermsFields terms={ef.paymentTermsDays} limit={ef.creditLimitUsd} defaultDays={db.settings.defaultPaymentTermsDays}
+          onTerms={v => setEf(prev => ({ ...prev, paymentTermsDays: v }))} onLimit={v => setEf(prev => ({ ...prev, creditLimitUsd: v }))} />
       </div>
       <CustomFieldInputs target="clients" values={cf} onChange={setCf} className="mt-4" />
       {mayHandler && multiCo && (

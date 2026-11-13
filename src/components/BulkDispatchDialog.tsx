@@ -1,4 +1,5 @@
 import { useMemo, useState } from "react";
+import { creditCheck } from "@/lib/paymentTerms";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -46,13 +47,19 @@ export function BulkDispatchDialog({ orders, onClose, onDone }: {
   const plan = useMemo(() => planDispatch(orders, db, user!), [orders, db, user]);
   const totalDue = plan.unpaid.reduce((s, u) => s + u.due, 0);
   const willWrite = plan.go.length + plan.update.length;
+  // Each client in the parcel over their credit limit or with bills overdue (lib/paymentTerms.ts) —
+  // the same question as the order page's Dispatch, ticked with the unpaid one.
+  const accountIssues = useMemo(() => [...new Set(plan.go.filter(o => !o.forReadyStock).map(o => o.clientId))]
+    .map(cid => ({ name: db.clients.find(c => c.id === cid)?.companyName ?? "A client", lines: creditCheck(db, cid).lines }))
+    .filter(x => x.lines.length), [plan, db]);
+  const needsAck = plan.unpaid.length > 0 || accountIssues.length > 0;
 
   const confirm = async () => {
     if (!courierName.trim()) { toast.error("Enter the courier name"); return; }
     if (!trackingNumber.trim()) { toast.error("Enter the tracking number"); return; }
     if (!willWrite) { toast.error("None of the selected orders can be dispatched"); return; }
-    if (plan.unpaid.length && !ackUnpaid) {
-      toast.error(`${fmtMoney(totalDue)} is still unpaid — tick the box to dispatch anyway`);
+    if (needsAck && !ackUnpaid) {
+      toast.error(plan.unpaid.length ? `${fmtMoney(totalDue)} is still unpaid — tick the box to dispatch anyway` : "Tick the box to dispatch anyway — see the client's account");
       return;
     }
     setSaving(true);
@@ -146,17 +153,22 @@ export function BulkDispatchDialog({ orders, onClose, onDone }: {
             updateLabel="already dispatched — details corrected"
             updateNote="No second email is sent for these." />
 
-          {plan.unpaid.length > 0 && (
+          {needsAck && (
             <label className="flex items-start gap-2.5 p-3 rounded-xl bg-amber-500/10 border border-amber-500/30 cursor-pointer">
               <input type="checkbox" checked={ackUnpaid} onChange={e => setAckUnpaid(e.target.checked)}
                 className="mt-0.5 h-4 w-4 accent-amber-600 shrink-0" />
               <span className="text-xs">
                 <span className="font-semibold text-amber-700 flex items-center gap-1.5 mb-1">
-                  <AlertTriangle className="h-3.5 w-3.5" /> {fmtMoney(totalDue)} still unpaid — dispatch anyway
+                  <AlertTriangle className="h-3.5 w-3.5" /> {plan.unpaid.length ? `${fmtMoney(totalDue)} still unpaid — dispatch anyway` : "Dispatch anyway"}
                 </span>
-                <span className="text-muted-foreground">
-                  {plan.unpaid.map(u => `${u.order.orderNumber} ${fmtMoney(u.due)}`).join(" · ")}
-                </span>
+                {plan.unpaid.length > 0 && (
+                  <span className="text-muted-foreground block">
+                    {plan.unpaid.map(u => `${u.order.orderNumber} ${fmtMoney(u.due)}`).join(" · ")}
+                  </span>
+                )}
+                {accountIssues.map(x => (
+                  <span key={x.name} className="text-amber-800 block mt-0.5">{x.name}: {x.lines.join(" ")}</span>
+                ))}
               </span>
             </label>
           )}

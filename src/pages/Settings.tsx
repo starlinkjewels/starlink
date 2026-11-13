@@ -895,6 +895,31 @@ export function SettingsPage() {
       <div className="card-luxe p-6 space-y-5">
         <SectionTitle icon={FileText} title="Invoice & Bill" sub="Address, contacts, bank details and stamp — on every printed bill" />
 
+        {/* Payment terms (lib/paymentTerms.ts): a client with none of their own gets these. Blank = no due dates. */}
+        <div className="rounded-xl border border-border/70 p-4 space-y-2">
+          <Label className="text-xs" htmlFor="set-terms">Default payment terms (days)</Label>
+          <div className="flex flex-wrap items-center gap-2">
+            <Input id="set-terms" type="number" inputMode="numeric" min={0} max={365} step={1} className="rounded-xl w-32"
+              value={db.settings.defaultPaymentTermsDays ?? ""} placeholder="No terms"
+              onChange={e => {
+                const v = e.target.value.trim() === "" ? undefined : Math.max(0, Math.min(365, Math.round(Number(e.target.value) || 0)));
+                const next = { ...db.settings };
+                if (v == null) delete next.defaultPaymentTermsDays; else next.defaultPaymentTermsDays = v;
+                setDb({ ...db, settings: next });
+              }} />
+            {[0, 15, 30, 45, 60].map(n => (
+              <button key={n} type="button" onClick={() => setDb({ ...db, settings: { ...db.settings, defaultPaymentTermsDays: n } })}
+                className={`h-8 px-3 rounded-lg border text-xs font-medium ${db.settings.defaultPaymentTermsDays === n ? "border-primary bg-primary/10 text-primary" : "border-border hover:bg-secondary"}`}>
+                {n === 0 ? "On receipt" : `Net ${n}`}
+              </button>
+            ))}
+          </div>
+          <p className="text-[11px] text-muted-foreground">
+            Each new invoice is due this many days after its date, unless the client has terms of their own (Edit client).
+            Past the due day it shows as Overdue on Invoices, the client's page and statement. Blank = no due dates.
+          </p>
+        </div>
+
         {/* Address fields */}
         <div className="grid grid-cols-1 gap-3">
           <div className="space-y-1">

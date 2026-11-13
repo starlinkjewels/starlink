@@ -1,6 +1,7 @@
 import { isShelfSale } from "./stockSale";
 import { approveOrderTimeline } from "./pure/pipelines";
 import { hasSwitch, myStepLimit } from "./access";
+import { cadClear } from "./cadApproval";
 import {
   TIMELINE_STEPS, isDiamondOnlyOrder, isProductionStep, loadDb, statusFromTimeline, uid, worksOnOrder,
   type DB, type Order, type Settings, type Worker,
@@ -189,6 +190,10 @@ export function planMove(o: Order, target: string): MovePlan {
       if (kind === "approve") {
         if (o.status !== "Waiting") { plan.complete.push(i); plan.names.push(step); continue; }
         plan.approve = true; plan.names.push(step); continue;
+      }
+      // CAD waits for the client's word on the design (lib/cadApproval.ts) — given or recorded on the order.
+      if (step === "CAD Designing" && !cadClear(o)) {
+        return { ...plan, blocked: `${o.orderNumber}: the client hasn't approved the CAD design yet. Open the order — they approve it there, or you record their approval.` };
       }
       if (kind === "plain") { plan.complete.push(i); plan.names.push(step); continue; }
       // Final Approval, Dispatch or Delivered: stop here and let its own screen finish it.

@@ -22,7 +22,7 @@ import {
   type DB, type ClientReceipt, type Order, type AdvancePayment, type LockerTransaction,
 } from "./db";
 import { reserveReceiptNumber } from "./counters";
-import { ccy, roundCcy, type CurrencyCode } from "./currency";
+import { ccy, fmtCcy, roundCcy, type CurrencyCode } from "./currency";
 import { moveToDay } from "./moneyEntries";
 import { closedWhy } from "./yearLock";
 
@@ -51,8 +51,8 @@ export function receiptApplied(db: DB, receiptId: string): number {
  * for, then oldest order first. The last one is the most recent landing.
  */
 function landings(d: DB, rec: ClientReceipt): { o: Order; a: AdvancePayment }[] {
-  const inv = rec.invoiceId ? (d.invoices ?? []).find(i => i.id === rec.invoiceId) : undefined;
-  const seq = inv ? invoiceOrderIds(inv) : [];
+  const named = rec.invoiceIds?.length ? rec.invoiceIds : rec.invoiceId ? [rec.invoiceId] : [];
+  const seq = named.flatMap(iid => { const inv = (d.invoices ?? []).find(i => i.id === iid); return inv ? invoiceOrderIds(inv) : []; });
   const rank = (o: Order) => { const i = seq.indexOf(o.id); return i < 0 ? seq.length : i; };
   const t = (s?: string) => +new Date(s ?? "") || 0;
   const out: { o: Order; a: AdvancePayment }[] = [];
@@ -235,6 +235,10 @@ export interface ReceiptInput {
    *  lockerAmount = amountUsd × this. */
   exchangeRate?: number;
   invoiceId?: string;
+  /** Several invoices it pays, in order (the first is also `invoiceId`). */
+  invoiceIds?: string[];
+  /** $ the banks kept: credited to the client in full, booked as a Bank charges expense. */
+  bankChargesUsd?: number;
   userId: string;
 }
 
@@ -248,8 +252,11 @@ export function recordReceipt(d: DB, receipt: ClientReceipt, input: ReceiptInput
   d.clientReceipts.push(receipt);
   const before = advanceIds(d, input.clientId);
   settleClientAccount(d, input.clientId, receipt.amountUsd, input.userId, input.date,
-    input.remarks?.trim() || input.method, input.invoiceId);
+    input.remarks?.trim() || input.method, input.invoiceIds?.length ? input.invoiceIds : input.invoiceId);
   tagNewAdvances(d, input.clientId, receipt.id, before);
+  if (input.bankChargesUsd && input.bankChargesUsd > 0) {
+    addBankCharge(d, receipt, { usd: input.bankChargesUsd, lockerId: input.lockerId, rate: input.exchangeRate, userId: input.userId });
+  }
   if (input.lockerId) {
     const locker = d.lockers.find(l => l.id === input.lockerId);
     if (locker) {
@@ -266,6 +273,52 @@ export function recordReceipt(d: DB, receipt: ClientReceipt, input: ReceiptInput
       });
     }
   }
+}
+
+// -- Bank / wire charges --------------------------------------------------------
+
+/**
+ * What the banks kept from a client's payment. The client is credited the whole receipt (they
+ * paid it), and its deposit is the whole receipt too, so every check that a receipt and its
+ * deposit agree still holds. The charge is a separate Bank charges expense from the same
+ * account, so the account nets to what actually arrived. Its account row is NOT tagged with
+ * the receipt (that tag means "the deposit"); the expense names the receipt instead
+ * (Expense.bankChargeOfReceipt), and cancelling the receipt takes it away with it.
+ * Call inside updateDb().
+ */
+export function addBankCharge(d: DB, rec: Pick<ClientReceipt, "id" | "receiptNo" | "clientId" | "date">,
+  args: { usd: number; lockerId?: string; rate?: number; userId: string }): void {
+  const usd = r2(args.usd);
+  if (!(usd > 0)) return;
+  const locker = args.lockerId ? d.lockers.find(l => l.id === args.lockerId) : undefined;
+  const cur = locker ? ccy(locker.currency) : "USD";
+  // In the account's own currency, at the payment's rate (1 USD = rate); dollars as they are.
+  const amount = cur === "USD" ? usd : args.rate && args.rate > 0 ? Math.round(usd * args.rate * 100) / 100 : usd;
+  const name = d.clients.find(c => c.id === rec.clientId)?.companyName ?? "Client";
+  const id = uid("exp_");
+  if (!d.expenses) d.expenses = [];
+  d.expenses.push({
+    id, title: rec.receiptNo ? `Bank charges — receipt ${rec.receiptNo} (${name})` : `Bank charges — ${name}`,
+    amount, category: "Bank Charges", currency: cur, employeeId: args.userId, clientId: rec.clientId,
+    note: `$${usd.toLocaleString("en-US")} kept by the banks from ${name}'s payment`,
+    createdAt: rec.date, ...(locker ? { lockerId: locker.id } : {}), bankChargeOfReceipt: rec.id,
+  });
+  if (locker) {
+    if (!d.lockerTransactions) d.lockerTransactions = [];
+    d.lockerTransactions.push({
+      id: uid("ltx_"), lockerId: locker.id, type: "expense", amountInr: amount, currency: cur,
+      category: `Expense — Bank Charges — ${name}`, refType: "expense", refId: id,
+      ...(cur === "USD" ? {} : { exchangeRate: args.rate }), recordedBy: args.userId, createdAt: rec.date,
+    });
+  }
+}
+
+/** A receipt's bank-charge expenses and their account rows. */
+function bankChargeOf(d: Pick<DB, "expenses" | "lockerTransactions">, receiptId: string) {
+  const exps = (d.expenses ?? []).filter(e => e.bankChargeOfReceipt === receiptId);
+  const ids = new Set(exps.map(e => e.id));
+  const rows = (d.lockerTransactions ?? []).filter(t => t.refType === "expense" && !!t.refId && ids.has(t.refId));
+  return { exps, rows };
 }
 
 /**
@@ -291,7 +344,9 @@ export async function createReceipt(input: ReceiptInput): Promise<ClientReceipt>
     exchangeRate: input.exchangeRate,
     method: input.method,
     remarks: input.remarks,
-    invoiceId: input.invoiceId,
+    invoiceId: input.invoiceIds?.[0] ?? input.invoiceId,
+    ...(input.invoiceIds && input.invoiceIds.length > 1 ? { invoiceIds: [...input.invoiceIds] } : {}),
+    ...(input.bankChargesUsd && input.bankChargesUsd > 0 ? { bankChargesUsd: r2(input.bankChargesUsd) } : {}),
     recordedBy: input.userId,
     createdAt: now,
   };
@@ -682,6 +737,7 @@ function planMoveClient(d: DB, receiptId: string, clientId: string, invoiceId: s
       // On the right one, as recording it would.
       rec.clientId = clientId;
       rec.invoiceId = invoiceId || undefined;
+      delete rec.invoiceIds;
       rec.updatedAt = at;
       const before = advanceIds(d, clientId);
       settleClientAccount(d, clientId, rec.amountUsd, userId, rec.date, shortNote(rec.method, rec.remarks), invoiceId);
@@ -692,6 +748,10 @@ function planMoveClient(d: DB, receiptId: string, clientId: string, invoiceId: s
         t.category = `Client Payment — ${to.companyName ?? "Client"}`;
         t.receiptId = rec.id;
       }
+      // Its bank charges are about the same payment — they move with it.
+      const fee = bankChargeOf(d, rec.id);
+      for (const e of fee.exps) { e.clientId = clientId; e.title = `Bank charges — receipt ${rec.receiptNo} (${to.companyName ?? "Client"})`; }
+      for (const t of fee.rows) t.category = `Expense — Bank Charges — ${to.companyName ?? "Client"}`;
     },
   };
 }
@@ -769,6 +829,13 @@ function planCancel(d: DB, receiptId: string, userId: string, at: string): Plan 
       }
       if (client) client.creditBalance = after > 0 ? after : undefined;
       if (drop.size) d.lockerTransactions = (d.lockerTransactions ?? []).filter(t => !drop.has(t.id));
+      // Its bank charges go with it: the expense and its account row.
+      const fee = bankChargeOf(d, rec.id);
+      if (fee.exps.length) {
+        const ex = new Set(fee.exps.map(e => e.id)), rw = new Set(fee.rows.map(t => t.id));
+        d.expenses = (d.expenses ?? []).filter(e => !ex.has(e.id));
+        d.lockerTransactions = (d.lockerTransactions ?? []).filter(t => !rw.has(t.id));
+      }
       d.clientReceipts = (d.clientReceipts ?? []).filter(r => r.id !== rec.id);
       // Trims any order now holding more than it is worth back to credit;
       // allocates nothing (no invoice named).
@@ -819,6 +886,8 @@ export function deleteImpact(db: DB, receiptId: string): string[] {
     const locker = db.lockers.find(l => l.id === (rec.lockerId ?? hint.lockerId));
     out.push(`• no account entry is linked to it, so nothing comes out of ${locker?.name ?? "the account"}`);
   }
+  const fee = bankChargeOf(db, rec.id);
+  if (fee.exps.length) out.push(`• its bank charges (${fee.exps.map(e => fmtCcy(e.amount, e.currency ?? "INR")).join(", ")}) are removed from Expenses${fee.rows.length ? " and the account" : ""}`);
   out.push("• nothing else changes — their other receipts and every other client stay exactly as they are");
   return out;
 }

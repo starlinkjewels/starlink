@@ -58,7 +58,7 @@ export async function deleteInvoiceFlow(invoiceId: string, user: Pick<User, "rol
   const why = invoiceDeleteBlocker(db, inv);
   if (why) { toast.error(why); return false; }
   const client = db.clients.find(c => c.id === inv.clientId)?.companyName ?? "the client";
-  const named = (db.clientReceipts ?? []).filter(r => r.invoiceId === inv.id);
+  const named = (db.clientReceipts ?? []).filter(r => r.invoiceId === inv.id || r.invoiceIds?.includes(inv.id));
   const n = invoiceOrderIds(inv).length;
   const lines = [
     `• the bill to ${client} is removed — its ${n} order${n !== 1 ? "s" : ""}, the client's ledger and every report stay exactly as they are`,
@@ -74,7 +74,14 @@ export async function deleteInvoiceFlow(invoiceId: string, user: Pick<User, "rol
     const live = (d.invoices ?? []).find(i => i.id === invoiceId);
     if (!live || invoiceDeleteBlocker(d, live)) return;
     d.invoices = (d.invoices ?? []).filter(i => i.id !== invoiceId);
-    for (const r of d.clientReceipts ?? []) if (r.invoiceId === invoiceId) delete r.invoiceId;
+    // A receipt that paid several invoices keeps naming the others.
+    for (const r of d.clientReceipts ?? []) {
+      if (r.invoiceIds?.includes(invoiceId)) {
+        const rest = r.invoiceIds.filter(x => x !== invoiceId);
+        if (rest.length > 1) r.invoiceIds = rest; else delete r.invoiceIds;
+        if (r.invoiceId === invoiceId) { if (rest[0]) r.invoiceId = rest[0]; else delete r.invoiceId; }
+      } else if (r.invoiceId === invoiceId) delete r.invoiceId;
+    }
     gone = true;
   });
   if (!gone) { toast.error("Could not delete — the invoice changed meanwhile"); return false; }
