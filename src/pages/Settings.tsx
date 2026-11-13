@@ -4,6 +4,7 @@ import { LiveRatesSettings } from "@/components/settings/LiveRatesSettings";
 import { YearClosingSettings } from "@/components/settings/YearClosingSettings";
 import { HealthSettings } from "@/components/settings/HealthSettings";
 import { ImportSettings } from "@/components/settings/ImportSettings";
+import { BackupsPanel } from "@/components/settings/BackupsPanel";
 import { CustomFieldsSettings } from "@/components/settings/CustomFieldsSettings";
 import { HeartPulse, FileUp } from "lucide-react";
 import { CatalogReadingSettings } from "@/components/settings/CatalogReadingSettings";
@@ -351,33 +352,8 @@ export function SettingsPage() {
     // worth knowing about.
     logEvent("export", "Downloaded a full backup of all data", { file: "ssdiam-backup.json" });
   };
-  const imp = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const f = e.target.files?.[0];
-    if (!f) return;
-    const r = new FileReader();
-    r.onload = async () => {
-      try {
-        const d = JSON.parse(r.result as string) as DB;
-        if (!d || !Array.isArray(d.orders) || !Array.isArray(d.clients)) { toast.error("This doesn't look like a valid backup file."); e.target.value = ""; return; }
-        const ok = (await confirmBox(
-          `Restore from this backup? It REPLACES all current data with the file's contents ` +
-          `(${d.clients.length} clients, ${d.orders.length} orders). This cannot be undone.`,
-        ));
-        if (!ok) { e.target.value = ""; return; }
-        // Push the restored data into Firestore (keep the current session).
-        const fresh = loadDb();
-        Object.assign(fresh, d, { session: fresh.session });
-        saveDb(fresh);
-        toast.success("Restored to database");
-        setDb(fresh);
-      } catch {
-        toast.error("Invalid file");
-      } finally {
-        e.target.value = ""; // allow re-selecting the same file
-      }
-    };
-    r.readAsText(f);
-  };
+  // Restoring from a file is the main admin's safe restore now (Backups below — components/settings/BackupsPanel.tsx):
+  // only what is missing or different comes back, never over anything newer.
   // "Clear Data & Reset Seed" used to live here: one button that emptied every
   // collection and every catalog item, guarded only by typing RESET into a
   // browser prompt. On a live business that is not a setting, it is an accident
@@ -1691,17 +1667,14 @@ export function SettingsPage() {
       {activeId === "data" && (
       <div className="card-luxe p-6 space-y-3">
         <SectionTitle icon={Database} title="Data & Backup" sub="A copy of everything, and putting one back" />
-        <div className="grid grid-cols-2 gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <Button variant="outline" onClick={exp} className="rounded-xl">
-            Backup
+            Download a copy
           </Button>
-          <label className="cursor-pointer">
-            <input type="file" accept="application/json" onChange={imp} className="hidden" />
-            <span className="inline-flex items-center justify-center w-full h-9 rounded-xl border text-sm hover:bg-secondary">
-              Restore
-            </span>
-          </label>
+          <span className="text-xs text-muted-foreground">Everything as one file, to keep on this computer.{isAdminUser ? " Restoring is below — only what is missing or different comes back." : ""}</span>
         </div>
+        {/* Backups every 6 hours by the server, checked; the main admin's safe restore. */}
+        {isAdminUser && <div className="rounded-xl border border-border/70 p-4 mt-2"><BackupsPanel /></div>}
         {/* ── Duplicate staff accounts (same person added twice) ── */}
         {isAdminUser && duplicateAccounts.length > 0 && (
           <div className="rounded-xl border border-destructive/30 bg-destructive/5 p-4 mt-2">

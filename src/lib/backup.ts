@@ -11,6 +11,7 @@
 // ⚠️ Backups contain EVERYTHING, so `storage.rules` restricts `backups/` to the
 // admin e-mails only — never leave it on the default "any signed-in user" rule.
 import { ref, uploadString, getDownloadURL, listAll, deleteObject } from "firebase/storage";
+import { lastServerBackupAt } from "./serverBackups";
 import { storage } from "./firebase";
 import { ensureFileClaims } from "./fileClaims";
 import { loadDb, ensureAllCollections, whenFresh } from "./db";
@@ -105,6 +106,10 @@ export async function autoBackup(): Promise<boolean> {
     }
     const day = today();
     if (last === day) return false;
+    // The server backs up every 6 hours (functions/src/backup/): while it does, this
+    // daily copy from the browser isn't needed — it is the fallback if that ever stops.
+    const server = await lastServerBackupAt();
+    if (server && Date.now() - new Date(server).getTime() < 24 * 3600_000) return false;
     // Don't re-upload if another device already made today's snapshot.
     const existing = await listBackups();
     if (existing.some((b) => b.date === day)) {
