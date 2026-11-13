@@ -54,7 +54,8 @@ export interface PageExtra { get: () => Record<string, string>; set: (v: Record<
 
 /* The table's remembered choices (components/DataTable.tsx keeps them at "dt:<id>"),
    for when the page shows a grid and the table isn't on screen. */
-type StoredPrefs = { sort?: ViewState["sort"]; hidden?: string[]; seen?: string[]; forced?: string[]; dense?: ViewState["dense"]; pageSize?: number; layout?: ViewState["layout"] };
+type StoredPrefs = { sort?: ViewState["sort"]; hidden?: string[]; seen?: string[]; forced?: string[]; dense?: ViewState["dense"]; pageSize?: number; layout?: ViewState["layout"];
+  widths?: Record<string, number>; order?: string[]; group?: string | null };
 const readPrefs = (id: string): StoredPrefs => { try { return JSON.parse(localStorage.getItem(`dt:${id}`) || "{}"); } catch { return {}; } };
 const writePrefs = (id: string, p: StoredPrefs) => { try { localStorage.setItem(`dt:${id}`, JSON.stringify(p)); } catch { /* private window */ } };
 /** A view's columns, sort and layout — from the table's remembered choices. */
@@ -66,6 +67,9 @@ export function prefsPart(p: StoredPrefs): Partial<ViewState> {
     ...(p.dense ? { dense: p.dense } : {}),
     ...(p.pageSize ? { pageSize: p.pageSize } : {}),
     ...(p.layout ? { layout: p.layout } : {}),
+    ...(p.widths && Object.keys(p.widths).length ? { widths: p.widths } : {}),
+    ...(p.order?.length ? { order: p.order } : {}),
+    ...(p.group ? { group: p.group } : {}),
   };
 }
 /** The table's remembered choices as a view sets them (its rows a page kept unless the view says). */
@@ -78,6 +82,9 @@ export function prefsFromView(v: ViewState, was: StoredPrefs): StoredPrefs {
     ...(v.dense ? { dense: v.dense } : {}),
     ...(pageSize ? { pageSize } : {}),
     ...(v.layout ? { layout: v.layout } : {}),
+    ...(v.widths ? { widths: v.widths } : {}),
+    ...(v.order ? { order: v.order } : {}),
+    ...(v.group ? { group: v.group } : {}),
   };
 }
 

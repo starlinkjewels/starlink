@@ -706,6 +706,8 @@ th.dt-stick-head { background: linear-gradient(color-mix(in oklab, var(--color-s
 :root[data-tbl] table:not(.tbl-plain) > thead > tr > th.dt-stick-head { background: var(--tbl-head-bg); }
 :root[data-tbl="minimal"] table:not(.tbl-plain) > thead > tr > th.dt-stick-head,
 :root[data-tbl="cards"] table:not(.tbl-plain) > thead > tr > th.dt-stick-head { background: white; }
+/* A group's heading row (View → Group rows by): its held cells take the row's tint. */
+tr.dt-group > td.dt-stick { background: linear-gradient(color-mix(in oklab, var(--color-secondary) 50%, transparent), color-mix(in oklab, var(--color-secondary) 50%, transparent)), white; }
 td.dt-stick-foot { background: linear-gradient(color-mix(in oklab, var(--color-secondary) 30%, transparent), color-mix(in oklab, var(--color-secondary) 30%, transparent)), white; }
 /* An edge that has more under it says so with a soft shadow. */
 .dt-scrolled .dt-stick-l { box-shadow: 8px 0 10px -8px rgb(15 23 42 / 0.22); }
