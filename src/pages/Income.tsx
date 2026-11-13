@@ -1,4 +1,5 @@
 import { useState, useMemo } from "react";
+import { receiptShareActions } from "@/lib/receiptShare";
 import { DataTable, CellTag, CellAmount, CellDate, type DataColumn } from "@/components/DataTable";
 import { useAuth } from "@/lib/auth";
 import { fmtMoney, fmtDate, orderTotal, currentUserOrders, worksOnClientId } from "@/lib/db";
@@ -298,6 +299,8 @@ export function IncomePage() {
       return [
         { label: "View order", icon: Eye, onSelect: () => navigate(`/orders/${r.editable!.orderId}`),
           disabled: !can("orders"), hint: can("orders") ? r.link?.label : needsAccess("orders", "view") },
+        // The receipt itself, to print or send (lib/receiptShare.ts).
+        ...(isClient ? [] : receiptShareActions(r.editable.receiptId)),
         { label: "Edit", icon: Pencil, onSelect: () => openEdit(r), disabled: !!lock || !mayPayEdit,
           hint: oneLine(lock) ?? (mayPayEdit ? "Amount, date, account, mode" : needsAccess("payments", "edit")) },
         { label: "Delete", icon: Trash2, danger: true, onSelect: () => cancelReceiptFlow(r.editable!.receiptId!, user!.id), disabled: !!lock || !mayPayDelete,
@@ -364,7 +367,9 @@ export function IncomePage() {
 
   return (
     <div className="max-w-7xl mx-auto space-y-5">
-      <PageHeader title="Passbook" />
+      {/* Each money page's job, in one line, and where the others are. */}
+      <PageHeader title="Passbook"
+        subtitle={isClient ? undefined : <>All money in and out, in each currency — clients, suppliers, factories, expenses · balances are in the <Link to="/locker" className="text-primary hover:underline">Locker</Link>, each account's cash book in its <Link to="/payments" className="text-primary hover:underline">Day book</Link></>} />
 
       {/* ── Currency tabs — never blend USD client billing with INR sourcing/cost, or either with any other account's currency ── */}
       {!isClient && (

@@ -37,7 +37,12 @@ service cloud.firestore {
     function hasIdx() { return signedIn() && exists(idxRef()); }
     function idx()    { return get(idxRef()).data; }
 
-    function isActive()     { return isAdmin() || (hasIdx() && idx().status == 'active'); }
+    // Active staff or client. A designer's login (role 'designer') is NOT counted:
+    // everything open to "any active user" stays closed to them — they read only
+    // their own profile, designer record and design jobs (below), nothing else.
+    function isActive()     { return isAdmin() || (hasIdx() && idx().status == 'active' && idx().role in ['admin', 'employee', 'client']); }
+    function isDesigner()   { return hasIdx() && idx().status == 'active' && idx().role == 'designer' && idx().get('designerId', '') != ''; }
+    function myDesignerId() { return hasIdx() ? idx().get('designerId', '') : ''; }
     function myRole()       { return isAdmin() ? 'admin' : (hasIdx() ? idx().role : 'none'); }
     function isStaff()      { return isAdmin() || (isActive() && myRole() == 'employee'); }
     function isClientRole() { return isActive() && myRole() == 'client'; }
@@ -209,7 +214,8 @@ service cloud.firestore {
     // UI). Admin manages all; staff manage clients; a user may edit their OWN
     // profile but never change their role/status/link.
     match /users/{id} {
-      allow read: if isActive();
+      // A designer reads only their own profile.
+      allow read: if isActive() || (isDesigner() && id == myAppId());
       allow create: if isAdmin() || (isStaff() && request.resource.data.role == 'client');
       allow update: if isAdmin()
         // Staff look after clients' profiles — but a client's stays a client's. Turning one
@@ -399,11 +405,13 @@ service cloud.firestore {
     match /supplierPayments/{id}   { allow read: if staffMay(rd_supplierPayments()); allow create: if staffMay(pol_supplierPayments_create()); allow update: if staffMay(pol_supplierPayments_update()); allow delete: if staffMay(pol_supplierPayments_delete()); }
     // Brokers (dalals) who bring purchases — Suppliers → Brokers. Staff only.
     match /brokers/{id}            { allow read: if isStaff(); allow create: if staffMay(pol_brokers_create()); allow update: if staffMay(pol_brokers_update()); allow delete: if staffMay(pol_brokers_delete()); }
-    // CAD designers and their design jobs (lib/designers.ts) — staff only for now.
+    // CAD designers and their design jobs (lib/designers.ts). A designer's own login reads
+    // only their own record and the jobs given to them; everything they do goes through
+    // the server (functions designerWork), never written from their device.
     // A design job holds no client and no price, so a designer's own login can be
     // given its jobs later without opening an order.
-    match /designers/{id}          { allow read: if isStaff(); allow create: if staffMay(pol_designers_create()); allow update: if staffMay(pol_designers_update()); allow delete: if staffMay(pol_designers_delete()); }
-    match /cadJobs/{id}            { allow read: if isStaff(); allow create: if staffMay(pol_cadJobs_create()); allow update: if staffMay(pol_cadJobs_update()); allow delete: if staffMay(pol_cadJobs_delete()); }
+    match /designers/{id}          { allow read: if isStaff() || (isDesigner() && id == myDesignerId()); allow create: if staffMay(pol_designers_create()); allow update: if staffMay(pol_designers_update()); allow delete: if staffMay(pol_designers_delete()); }
+    match /cadJobs/{id}            { allow read: if isStaff() || (isDesigner() && resource.data.designerId == myDesignerId()); allow create: if staffMay(pol_cadJobs_create()); allow update: if staffMay(pol_cadJobs_update()); allow delete: if staffMay(pol_cadJobs_delete()); }
     // Bags of loose diamonds, one per lot (lib/diamondBags.ts). Staff only.
     match /diamondBags/{id}        { allow read: if isStaff(); allow create: if staffMay(pol_diamondBags_create()); allow update: if staffMay(pol_diamondBags_update()); allow delete: if staffMay(pol_diamondBags_delete()); }
     // Custom-field values every staff member may see (lib/customFields.ts) — never a client.

@@ -5,7 +5,7 @@ import { updateDbAs, loadDb, type CadJob, type DB } from "@/lib/db";
 import { useDb } from "@/hooks/useDb";
 import { useAuth } from "@/lib/auth";
 import { fmtMoneyInr } from "@/lib/manufacturing";
-import { KIND_LABEL, activeDesigners, assignDesigner, briefRows, designerEmail, designerOf, isOpenJob, jobsOfOrder, type Who } from "@/lib/designers";
+import { KIND_LABEL, activeDesigners, assignDesigner, briefRows, designerEmail, designerLogin, designerOf, isOpenJob, jobsOfOrder, type Who } from "@/lib/designers";
 import { sendMail, designAssignedEmail } from "@/lib/email";
 import { ActionSheet } from "@/components/ActionSheet";
 import { AddNewItem, ADD_NEW, useAddNew, useMayCreate } from "@/components/create/QuickCreate";
@@ -43,7 +43,7 @@ export function mailAssigned(db: DB, job: CadJob) {
   const designer = designerOf(db, job.designerId);
   const to = designer ? designerEmail(db, designer) : undefined;
   if (!designer || !to) return;
-  const m = designAssignedEmail({ designerName: designer.name, orderNumber: job.orderNumber, brief: briefRows(job.brief), dueDate: job.dueDate });
+  const m = designAssignedEmail({ designerName: designer.name, orderNumber: job.orderNumber, brief: briefRows(job.brief), dueDate: job.dueDate, hasLogin: !!designerLogin(db, designer.id) });
   void sendMail(to, m.subject, m.html);
 }
 

@@ -1,4 +1,6 @@
 import { CustomFieldsView } from "@/components/CustomFields";
+import { ReceiveFromClient, type ReceiveValues } from "@/components/payments/ReceiveFromClient";
+import { receiptShareActions } from "@/lib/receiptShare";
 import { ourFinishedNet } from "@/lib/pure/accounts";
 import { ShopifyOrderCard } from "@/components/order/ShopifyOrderCard";
 import { EtsyOrderCard } from "@/components/order/EtsyOrderCard";
@@ -246,11 +248,8 @@ function OrderDetailPageBody() {
   const [bandOpen, setBandOpen] = useState(false);
 
   // Advance form state
+  // Taking a payment: the one shared panel (components/payments/ReceiveFromClient.tsx).
   const [showAdvForm, setShowAdvForm] = useState(false);
-  const [advAmt, setAdvAmt] = useState("");
-  const [advNote, setAdvNote] = useState("");
-  const [advLockerId, setAdvLockerId] = useState("");
-  const [advLockerAmount, setAdvLockerAmount] = useState("");
 
   // CAD image
   const cadRef = useRef<HTMLInputElement>(null);
@@ -1848,30 +1847,12 @@ function OrderDetailPageBody() {
     } finally { setCancelling(false); }
   };
 
-  // The advance is billed in USD; the locker it lands in can hold any currency.
-  // (The Settings rate as useSuggestedRate gives it — a hook can't sit after
-  // this page's early return.)
-  const advLockerCcy = ccy(db.lockers.find(l => l.id === advLockerId)?.currency);
-  const advRate = advLockerCcy === "USD" ? undefined : tableRate(db.settings.currencyRates, "USD", advLockerCcy);
-  // Picking a locker fills in what the advance comes to there — dollars as they
-  // are, any other currency at the Settings rate — still typed over with what
-  // actually landed. A figure already typed for a locker in the same currency is left alone.
-  const pickAdvLocker = (v: string) => {
-    const db0 = loadDb();
-    const l = db0.lockers.find(x => x.id === v);
-    const lc = ccy(l?.currency);
-    setAdvLockerId(v);
-    if (l && advLockerId && advLockerAmount && lc === advLockerCcy) return;
-    const usd = parseFloat(advAmt) || 0;
-    const rate = !l ? undefined : lc === "USD" ? 1 : tableRate(db0.settings.currencyRates, "USD", lc);
-    setAdvLockerAmount(rate && usd > 0 ? String(roundCcy(usd * rate, lc)) : "");
-  };
-
-  const addAdvance = async () => {
-    const amt = parseFloat(advAmt);
-    if (!amt || amt <= 0) { toast.error("Enter a valid amount"); return; }
-    if (!advLockerId) { toast.error("Choose which locker this was deposited into"); return; }
-    if (!advLockerAmount || Number(advLockerAmount) <= 0) { toast.error("Enter the amount actually deposited in that locker"); return; }
+  // Saves what the payment panel took on this order (its fields already checked there).
+  const addAdvance = async (v: ReceiveValues) => {
+    const amt = v.amountUsd;
+    const advLockerId = v.lockerId;
+    // A remark typed is the payment's note; none, and it is named as it always was below.
+    const advNote = v.remark;
     let paidInFull = false;
     let isFirst = false;
     let toCredit = 0;
@@ -1881,7 +1862,8 @@ function OrderDetailPageBody() {
     const advanceId = uid("adv_");
     const txnId = uid("ltx_");
     let applied = 0;
-    const at = new Date().toISOString();
+    // On the day it came in (the panel's date).
+    const at = v.at;
     updateDb(d => {
       const o = d.orders.find(x => x.id === order.id)!;
       if (!o.advances) o.advances = [];
@@ -1898,14 +1880,15 @@ function OrderDetailPageBody() {
         const defaultNote = paidInFull ? "Final Payment" : isFirst ? "Advance payment" : "Payment received";
         o.advances.push({
           id: advanceId, amount: applied, note: advNote || defaultNote, recordedBy: user!.id, createdAt: at,
-          lockerId: advLockerId || undefined, lockerAmount: advLockerId ? Number(advLockerAmount) : undefined,
+          lockerId: advLockerId || undefined, lockerAmount: advLockerId ? v.depositAmount : undefined,
         });
         if (advLockerId) {
           const locker = d.lockers.find(l => l.id === advLockerId);
           if (locker) {
             if (!d.lockerTransactions) d.lockerTransactions = [];
             d.lockerTransactions.push({
-              id: txnId, lockerId: advLockerId, type: "income", amountInr: Number(advLockerAmount),
+              id: txnId, lockerId: advLockerId, type: "income", amountInr: v.depositAmount,
+              ...(v.exchangeRate ? { exchangeRate: v.exchangeRate } : {}),
               currency: ccy(locker.currency), category: `Client Payment — ${o.orderNumber}`,
               refType: "clientPayment", refId: o.id, recordedBy: user!.id, createdAt: at,
             });
@@ -1935,7 +1918,7 @@ function OrderDetailPageBody() {
           // The whole amount received: what went past this order's balance
           // is credit this receipt left, and comes back off if it is cancelled.
           clientId: order.clientId, advanceIds: [advanceId], amountUsd: amt,
-          date: at, method: advNote || "Payment received",
+          date: at, method: v.method, remarks: v.remark || undefined,
           lockerTxnId: advLockerId ? txnId : undefined, userId: user!.id,
         });
         receiptNo = ` · ${r.receiptNo}`;
@@ -1951,8 +1934,6 @@ function OrderDetailPageBody() {
         : paidInFull ? `Final payment recorded${receiptNo} — order paid in full`
         : isFirst ? `Advance payment recorded${receiptNo}` : `Payment recorded${receiptNo}`
     );
-    try { if (advLockerId) localStorage.setItem(`pay-locker:${user!.id}`, advLockerId); } catch { /* private window */ }
-    setAdvAmt(""); setAdvNote(""); setAdvLockerId(""); setAdvLockerAmount(""); setShowAdvForm(false);
   };
 
   const saveCadImage = async (file: File) => {
@@ -2646,6 +2627,8 @@ It goes back to being our own build, and ${item ? item.name : "its piece"} goes 
     const editBlock = !can("payments", "edit") ? needsAccess("payments", "edit") : orderPaymentEditBlocker(db, order, a);
     const delBlock = !can("payments", "delete") ? needsAccess("payments", "delete") : why ?? (rec ? receiptCancelBlocker(db, rec.id) : undefined);
     return [
+      // The receipt itself, to print or send (lib/receiptShare.ts) — staff only; a client's view has no ⋯.
+      ...(user!.role !== "client" ? receiptShareActions(rec?.id ?? a.receiptId) : []),
       { label: "Edit", icon: Pencil, hint: editBlock ?? `Receipt ${rec?.receiptNo} — amount, day, note, account`, disabled: !!editBlock, onSelect: () => setEditingPayId(a.id) },
       { label: "Delete", icon: Trash2, danger: true, hint: delBlock ?? `Cancels receipt ${rec?.receiptNo} and its deposit`, disabled: !!delBlock, onSelect: () => removePayment(a) },
     ];
@@ -3670,19 +3653,8 @@ It goes back to being our own build, and ${item ? item.name : "its piece"} goes 
           <SectionTitle className="min-w-0 flex-1" icon={Wallet} title="Payments"
             sub={<>{advances.length} payment{advances.length !== 1 ? "s" : ""}{advances.length > 0 && balance <= 0 && <span className="text-success font-medium"> · Paid in full</span>}</>} />
           {canEditStage() && balance > 0 && (user!.role === "admin" || can("payments", "add")) && (
-            <Button size="sm" onClick={() => {
-              // Opens with what is still due and the account last paid into — both can be changed.
-              if (!showAdvForm) {
-                if (!advAmt) setAdvAmt(String(Math.round(balance * 100) / 100));
-                if (!advLockerId) {
-                  try {
-                    const last = localStorage.getItem(`pay-locker:${user!.id}`) ?? "";
-                    if (db.lockers.some(l => l.id === last && l.active !== false)) setAdvLockerId(last);
-                  } catch { /* private window */ }
-                }
-              }
-              setShowAdvForm(v => !v);
-            }} className="btn-hero rounded-xl gap-1.5 h-10 px-3 shrink-0">
+            // Opens the payment panel with what is still due and the account last paid into — both can be changed.
+            <Button size="sm" onClick={() => setShowAdvForm(true)} className="btn-hero rounded-xl gap-1.5 h-10 px-3 shrink-0">
               <Plus className="h-4 w-4" />
               <span className="sm:hidden">{advances.length === 0 ? "Advance" : "Collect"}</span>
               <span className="max-sm:hidden">{advances.length === 0 ? "Add Advance" : "Collect Payment"}</span>
@@ -3793,75 +3765,9 @@ It goes back to being our own build, and ${item ? item.name : "its piece"} goes 
           </div>
         )}
 
-        {/* Add advance form */}
-        <AnimatePresence>
-          {showAdvForm && (
-            <motion.div
-              initial={{ opacity: 0, height: 0 }}
-              animate={{ opacity: 1, height: "auto" }}
-              exit={{ opacity: 0, height: 0 }}
-              className="overflow-hidden"
-            >
-              <div className="pt-2 border-t border-border/60 space-y-3">
-                <p className="text-sm font-medium text-brand-dark">{advances.length === 0 ? "Record Advance" : "Collect Payment"}</p>
-                <div className="grid md:grid-cols-2 gap-3">
-                  <div className="space-y-1.5">
-                    <Label className="text-xs">Amount ($)</Label>
-                    <div className="relative">
-                      <DollarSign className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                      <Input
-                        type="number" min="1" step="0.01"
-                        value={advAmt} onChange={e => setAdvAmt(e.target.value)}
-                        className="pl-9 rounded-xl h-10"
-                        placeholder="0.00"
-                        autoFocus
-                      />
-                    </div>
-                  </div>
-                  <div className="space-y-1.5">
-                    <Label className="text-xs">Payment Note</Label>
-                    <Input
-                      value={advNote} onChange={e => setAdvNote(e.target.value)}
-                      className="rounded-xl h-10"
-                      placeholder="e.g. Cash, Bank transfer, Cheque #"
-                    />
-                  </div>
-                </div>
-                {db.lockers.filter(l => l.active !== false).length === 0 && (
-                  <p className="text-xs text-amber-600">
-                    No lockers yet — <Link to="/locker" className="underline font-medium">create one first</Link> before recording a payment.
-                  </p>
-                )}
-                <div className="grid md:grid-cols-2 gap-3">
-                  <div className="space-y-1.5">
-                    <Label className="text-xs">Deposited to Locker *</Label>
-                    <Select value={advLockerId} onValueChange={addNew("locker", pickAdvLocker)}>
-                      <SelectTrigger className="h-10 rounded-xl"><SelectValue placeholder="Choose a locker" /></SelectTrigger>
-                      <SelectContent>
-                        {db.lockers.filter(l => l.active !== false).map(l => <SelectItem key={l.id} value={l.id}>{l.name} ({ccy(l.currency)})</SelectItem>)}
-                      <AddNewItem kind="locker" /></SelectContent>
-                    </Select>
-                  </div>
-                  {advLockerId && (
-                    <div className="space-y-1.5">
-                      <Label className="text-xs">Amount Deposited ({ccySymbol(advLockerCcy).trim()})</Label>
-                      <Input type="number" min={0} step="0.01" value={advLockerAmount} onChange={e => setAdvLockerAmount(e.target.value)} className="rounded-xl h-10" />
-                      {advRate && parseFloat(advAmt) > 0 && (
-                        <p className="text-[11px] text-muted-foreground">
-                          {fmtMoney(parseFloat(advAmt))} at {rateText("USD", advLockerCcy, advRate)} is {fmtCcy(roundCcy(parseFloat(advAmt) * advRate, advLockerCcy), advLockerCcy)} — enter what actually landed.
-                        </p>
-                      )}
-                    </div>
-                  )}
-                </div>
-                <div className="flex gap-2">
-                  <AsyncButton size="sm" onClick={addAdvance} className="btn-hero rounded-xl">Save Payment</AsyncButton>
-                  <Button size="sm" variant="outline" onClick={() => { setShowAdvForm(false); setAdvAmt(""); setAdvNote(""); setAdvLockerId(""); setAdvLockerAmount(""); }} className="rounded-xl">Cancel</Button>
-                </div>
-              </div>
-            </motion.div>
-          )}
-        </AnimatePresence>
+        {/* Taking a payment on this order: the one shared panel, saved by this page's addAdvance. */}
+        <ReceiveFromClient open={showAdvForm} onOpenChange={setShowAdvForm} orderId={order.id} amount={balance} onSave={addAdvance}
+          title={advances.length === 0 ? "Add advance" : "Collect payment"} />
 
         {/* Advance ledger */}
         {advances.length > 0 ? (

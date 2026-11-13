@@ -5,7 +5,7 @@ import {
   PenTool, Upload, Box, FileText, Download, Trash2, CheckCircle2, MessageSquareWarning, Send, Ban, RotateCcw,
   RefreshCw, CalendarDays, History, Eye, X, Loader2,
 } from "lucide-react";
-import { updateDbAs, uid, fmtDate, worksOnOrder } from "@/lib/db";
+import { updateDbAs, uid, fmtDate, worksOnOrder, loadDb } from "@/lib/db";
 import { useCan } from "@/hooks/useCan";
 import { useDb } from "@/hooks/useDb";
 import { useAuth } from "@/lib/auth";
@@ -17,7 +17,7 @@ import { requestPlayable } from "@/lib/webVideo";
 import { downloadAsZip, downloadFile } from "@/lib/zipDownload";
 import {
   STATUS_LABEL, STATUS_TONE, KIND_LABEL, designableWhy, addJobFiles, approveJob, askChanges, briefRows, cancelJob, designerEmail, designerOf,
-  fileKind, isOpenJob, refreshBrief, removeJobFile, reopenJob, submitJob, updateJobTerms, jobPayState, jobNote,
+  fileKind, isOpenJob, refreshBrief, removeJobFile, reopenJob, submitJob, updateJobTerms, jobPayState, jobNote, designerLogin,
 } from "@/lib/designers";
 import { sendMail, designChangesEmail, designApprovedEmail } from "@/lib/email";
 import { ActionSheet } from "@/components/ActionSheet";
@@ -79,7 +79,8 @@ export function CadJobSheet({ jobId, onClose }: { jobId: string; onClose: () => 
     return true;
   };
   const mailTo = designer ? designerEmail(db, designer) : undefined;
-  const mailInfo = () => ({ designerName: designer?.name ?? "", orderNumber: job.orderNumber, brief: briefRows(job.brief), dueDate: job.dueDate });
+  const mailInfo = () => ({ designerName: designer?.name ?? "", orderNumber: job.orderNumber, brief: briefRows(job.brief), dueDate: job.dueDate,
+    hasLogin: !!designer && !!designerLogin(loadDb(), designer.id) });
 
   const pickFiles = async (list: FileList | null) => {
     const files = Array.from(list ?? []);

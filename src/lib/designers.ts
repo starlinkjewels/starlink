@@ -17,13 +17,14 @@
 // security rule can only hide a whole document — so whatever a designer may
 // one day open holds only what designing needs: no client, no prices.
 import {
-  uid, isDiamondOnlyOrder, openingCreditAmt, openingDebitAmt,
+  uid, isDiamondOnlyOrder,
   type CadJob, type CadJobFile, type CadJobStatus, type DB, type Designer, type LockerTransaction, type Order,
 } from "./db";
 import { notifyUsers } from "./notify";
 import { followOrderPictures, orderPictures } from "./readyStockPhotos";
 import { metalLabel } from "./metals";
 import { fmtG } from "./weights";
+import * as money from "./pure/designerMoney";
 
 const r2 = (n: number) => Math.round(n * 100) / 100;
 
@@ -40,6 +41,11 @@ export const OPEN_STATUSES: CadJobStatus[] = ["assigned", "working", "submitted"
 export const isOpenJob = (j: Pick<CadJob, "status">) => OPEN_STATUSES.includes(j.status);
 
 /* ── Who ─────────────────────────────────────────────────────────────── */
+
+/** A designer's own login (role "designer", Designers → Login), if they have one. */
+export function designerLogin(db: Pick<DB, "users">, designerId: string): DB["users"][number] | undefined {
+  return db.users.find(u => u.role === "designer" && u.designerId === designerId && !!u.authUid);
+}
 
 export function designerOf(db: Pick<DB, "designers">, id: string | undefined): Designer | undefined {
   return id ? (db.designers ?? []).find(x => x.id === id) : undefined;
@@ -367,83 +373,40 @@ export function refreshBrief(d: DB, jobId: string, by: Who): string | undefined 
 
 /* ── Money (freelancers) ─────────────────────────────────────────────── */
 
+// The sums themselves are pure (lib/pure/designerMoney.ts) — the designer's own
+// statement on the server works them out with exactly the same code.
+
 /** What we paid a designer: account entries "designerPayment" to them. */
 export function designerPayments(db: Pick<DB, "lockerTransactions">, designerId: string): LockerTransaction[] {
-  // In rupees, as their account is kept: one paid from another currency's account counts
-  // the rupees it settled (partyAmountInr), not the dollars that left the account.
-  return (db.lockerTransactions ?? []).filter(t => t.refType === "designerPayment" && t.refId === designerId && t.type === "expense")
-    .map(t => (t.partyAmountInr != null ? { ...t, amountInr: t.partyAmountInr } : t));
+  return money.designerPayments(db.lockerTransactions, designerId);
 }
 
 /** Their approved designs that carry a charge, oldest approved first. */
 export function chargedJobs(db: Pick<DB, "cadJobs">, designerId: string): CadJob[] {
-  return (db.cadJobs ?? []).filter(j => j.designerId === designerId && j.status === "approved" && (j.chargeInr ?? 0) > 0)
-    .sort((a, b) => (a.approvedAt ?? a.createdAt).localeCompare(b.approvedAt ?? b.createdAt));
+  return money.chargedJobs(db.cadJobs, designerId);
 }
 
-export interface DesignerAccount {
-  /** Approved designs and their charges (with any owed from before the app). */
-  designs: number; charged: number; opening: number;
-  paid: number;
-  /** Still to pay them. */
-  due: number;
-  /** Paid ahead of the work. */
-  advance: number;
-}
+export type DesignerAccount = money.DesignerAccount;
 
 /** A freelancer's account: charged on approval, less what we paid. In-house designers have none (salary is paid as salary). */
 export function designerAccount(db: Pick<DB, "cadJobs" | "lockerTransactions">, designer: Designer): DesignerAccount {
-  const jobs = chargedJobs(db, designer.id);
-  const charges = r2(jobs.reduce((s, j) => s + (j.chargeInr ?? 0), 0));
-  const opening = r2(openingCreditAmt(designer) - openingDebitAmt(designer));
-  const paid = r2(designerPayments(db, designer.id).reduce((s, t) => s + (t.amountInr || 0), 0));
-  const net = r2(opening + charges - paid);
-  return { designs: jobs.length, charged: charges, opening, paid, due: Math.max(0, net), advance: Math.max(0, r2(-net)) };
+  return money.designerAccount(db.cadJobs, db.lockerTransactions, designer);
 }
 
-/**
- * Each approved design's paid and still-due part. A payment made against one
- * design settles that one first; the rest — payments on account, overflow, an
- * advance from before the app — settles the oldest approved designs first
- * (after anything owed from before the app). Read-only: nothing is stored.
- */
+/** Each approved design's paid and still-due part (see lib/pure/designerMoney.ts jobPayState). */
 export function jobPayState(db: Pick<DB, "cadJobs" | "lockerTransactions">, designer: Designer): Map<string, { charge: number; paid: number; due: number }> {
-  const jobs = chargedJobs(db, designer.id);
-  const out = new Map(jobs.map(j => [j.id, { charge: j.chargeInr ?? 0, paid: 0, due: j.chargeInr ?? 0 }]));
-  let pool = r2(openingDebitAmt(designer));
-  let openingOwed = r2(openingCreditAmt(designer));
-  for (const t of designerPayments(db, designer.id)) {
-    const row = t.cadJobId ? out.get(t.cadJobId) : undefined;
-    if (row) {
-      const take = Math.min(row.due, t.amountInr || 0);
-      row.paid = r2(row.paid + take); row.due = r2(row.due - take);
-      pool = r2(pool + (t.amountInr || 0) - take);
-    } else pool = r2(pool + (t.amountInr || 0));
-  }
-  const first = Math.min(pool, openingOwed);
-  pool = r2(pool - first); openingOwed = r2(openingOwed - first);
-  for (const j of jobs) {
-    if (pool <= 0) break;
-    const row = out.get(j.id)!;
-    const take = Math.min(row.due, pool);
-    row.paid = r2(row.paid + take); row.due = r2(row.due - take); pool = r2(pool - take);
-  }
-  return out;
+  return money.jobPayState(db.cadJobs, db.lockerTransactions, designer);
 }
 
 /** A month's work and money, "2026-10" → designs approved, charged, paid. */
 export function designerMonths(db: Pick<DB, "cadJobs" | "lockerTransactions">, designer: Designer): Map<string, { designs: number; charged: number; paid: number }> {
-  const m = new Map<string, { designs: number; charged: number; paid: number }>();
-  const at = (k: string) => { let v = m.get(k); if (!v) m.set(k, v = { designs: 0, charged: 0, paid: 0 }); return v; };
-  for (const j of jobsOfDesigner(db, designer.id)) if (j.status === "approved" && j.approvedAt) {
-    const v = at(j.approvedAt.slice(0, 7)); v.designs++; v.charged = r2(v.charged + (j.chargeInr ?? 0));
-  }
-  for (const t of designerPayments(db, designer.id)) { const v = at(t.createdAt.slice(0, 7)); v.paid = r2(v.paid + (t.amountInr || 0)); }
-  return m;
+  return money.designerMonths(db.cadJobs, db.lockerTransactions, designer);
 }
 
 /** Why a designer can't be deleted (they have work or payments) — make them inactive instead. */
-export function designerDeleteWhy(db: Pick<DB, "cadJobs" | "lockerTransactions">, designer: Designer): string | undefined {
+export function designerDeleteWhy(db: Pick<DB, "cadJobs" | "lockerTransactions"> & { users?: DB["users"] }, designer: Designer): string | undefined {
+  // Their own login would be left pointing at nobody — switched off and kept, as their history is.
+  if ((db.users ?? []).some(u => u.role === "designer" && u.designerId === designer.id)) return `${designer.name} has a login — switch it off and make them inactive instead`;
   const jobs = jobsOfDesigner(db, designer.id).length;
   const pays = designerPayments(db, designer.id).length;
   if (jobs || pays) return `${designer.name} has ${[jobs && `${jobs} design${jobs === 1 ? "" : "s"}`, pays && `${pays} payment${pays === 1 ? "" : "s"}`].filter(Boolean).join(" and ")} — make them inactive instead`;

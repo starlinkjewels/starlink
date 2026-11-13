@@ -68,6 +68,9 @@ const RemindersPage = lazy(() => import("./pages/Reminders").then(m => ({ defaul
 const DocumentsPage = lazy(() => import("./pages/Documents").then(m => ({ default: m.DocumentsPage })));
 const StockApiPage = lazy(() => import("./pages/StockApi").then(m => ({ default: m.StockApiPage })));
 
+// A CAD designer's own login: their own screens, never the staff's (pages/designer/).
+const DesignerPortal = lazy(() => import("./pages/designer/DesignerPortal"));
+
 function Protected({ children, roles }: { children: React.ReactNode; roles?: Role[] }) {
   const { user } = useAuth();
   const loc = useLocation();
@@ -167,7 +170,8 @@ export function App() {
   // time. Each page is code-split, so the FIRST visit would otherwise flash a
   // loading spinner; prefetching makes navigation instant (chunk already cached).
   useEffect(() => {
-    if (!user) return;
+    // A designer's login never opens a staff page — nothing of them is fetched.
+    if (!user || user.role === "designer") return;
     const warm = () => {
       const chunks: Array<() => Promise<unknown>> = [
         () => import("./pages/Orders"), () => import("./pages/OrderDetail"),
@@ -202,6 +206,17 @@ export function App() {
     const id = window.setTimeout(warm, 1200);
     return () => clearTimeout(id);
   }, [user]);
+
+  // A designer's login: their own screens and nothing else — every other
+  // address (a staff page, a link someone pasted) lands back on them.
+  if (user?.role === "designer") {
+    return (
+      <Routes>
+        <Route path="/login" element={<LoginPage />} />
+        <Route path="/*" element={<Suspense fallback={<div className="min-h-screen grid place-items-center text-muted-foreground">Loading…</div>}><DesignerPortal /></Suspense>} />
+      </Routes>
+    );
+  }
 
   return (
     <>

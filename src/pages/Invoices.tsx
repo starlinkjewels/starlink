@@ -1,4 +1,5 @@
 import { pieceLine } from "@/lib/orderText";
+import { ReceiveFromClient, type ReceiveValues } from "@/components/payments/ReceiveFromClient";
 import { DataTable, CellAmount, type DataColumn } from "@/components/DataTable";
 import { metalLabel } from "@/lib/metals";
 import { AddNewItem, useAddNew } from "@/components/create/QuickCreate";
@@ -114,12 +115,8 @@ export function InvoicesPage() {
   // Pieces sent back from an invoice — which orders, and how many of each to start with.
   const [returning, setReturning] = useState<{ inv: Invoice; start?: Record<string, number> } | null>(null);
   const mayReturn = useMayReturn();
+  // Taking a payment on one of an invoice's orders: the one shared panel (components/payments/ReceiveFromClient.tsx).
   const [payOrderId, setPayOrderId] = useState<string | null>(null);
-  const [payAmount, setPayAmount] = useState("");
-  const [payLockerId, setPayLockerId] = useState("");
-  // The locker's currency for $1 (₹ per $, A$ per $…).
-  const [payRate, setPayRate] = useState<number | "">("");
-  const [payNote, setPayNote] = useState("");
 
   // ── Invoice list (filtered) ──
   let list = db.invoices;
@@ -262,38 +259,25 @@ export function InvoicesPage() {
   };
 
   // ── Per-order payment (order-wise collection from the invoice detail). ──
-  const startPay = (orderId: string) => { setPayOrderId(orderId); setPayAmount(""); setPayLockerId(""); setPayRate(""); setPayNote(""); };
-  const payLocker = db.lockers.find(l => l.id === payLockerId);
-  const payLockerCcy = ccy(payLocker?.currency);
-  // Billed in USD: a locker in any other currency needs the rate.
-  const payNeedsRate = !!payLocker && payLockerCcy !== "USD";
-  // A rate belongs to one currency: picking a locker in another starts it
-  // afresh (from Settings) instead of carrying ₹83 into an AUD locker.
-  const pickPayLocker = (v: string) => {
-    const next = db.lockers.find(l => l.id === v);
-    if (!next || ccy(next.currency) !== payLockerCcy) setPayRate("");
-    setPayLockerId(v);
-  };
+  const startPay = (orderId: string) => setPayOrderId(orderId);
 
-  const submitPayment = async (orderId: string) => {
-    const o = db.orders.find(x => x.id === orderId);
-    if (!o) return;
-    const amt = parseFloat(payAmount);
-    if (!amt || amt <= 0) { toast.error("Enter a valid amount"); return; }
-    if (!payLockerId) { toast.error("Choose which locker this was deposited into"); return; }
-    const rate = Number(payRate);
-    if (payNeedsRate && (!rate || rate <= 0)) { toast.error("Enter the exchange rate"); return; }
-    const depositAmt = payNeedsRate ? roundCcy(amt * rate, payLockerCcy) : amt;
+  // Saves what the payment panel took on this order (its fields already checked there).
+  const submitPayment = async (v: ReceiveValues) => {
+    const orderId = payOrderId;
+    const o = orderId ? db.orders.find(x => x.id === orderId) : undefined;
+    if (!o || !orderId) return false;
+    const amt = v.amountUsd, payLockerId = v.lockerId, depositAmt = v.depositAmount;
     // Minted here so the payment can be given its receipt number afterwards.
     const advanceId = uid("adv_");
     const txnId = uid("ltx_");
-    const at = new Date().toISOString();
+    // On the day it came in (the panel's date).
+    const at = v.at;
     let applied = 0;
     updateDb(d => {
       applied = recordOrderPayment(d, orderId, {
         amount: amt, recordedBy: user!.id, at,
-        note: payNote.trim() || undefined, lockerId: payLockerId, lockerAmount: depositAmt,
-        exchangeRate: payNeedsRate ? rate : undefined,
+        note: v.remark || undefined, lockerId: payLockerId, lockerAmount: depositAmt,
+        exchangeRate: v.exchangeRate,
         advanceId, lockerTxnId: txnId,
       }).applied;
       const inv = d.invoices.find(i => i.id === detailInvId);
@@ -306,7 +290,7 @@ export function InvoicesPage() {
           // The whole amount received: what went past this order's balance
           // is credit this receipt left, and comes back off if it is cancelled.
           clientId: o.clientId, advanceIds: [advanceId], amountUsd: amt,
-          date: at, method: payNote.trim() || "Payment received",
+          date: at, method: v.method, remarks: v.remark || undefined,
           lockerTxnId: payLockerId ? txnId : undefined, userId: user!.id,
         });
         receiptNo = ` · ${r.receiptNo}`;
@@ -315,7 +299,6 @@ export function InvoicesPage() {
       }
     }
     toast.success(`${fmtMoney(amt)} received for ${o.orderNumber}${receiptNo}`);
-    setPayOrderId(null); setPayAmount(""); setPayLockerId(""); setPayRate(""); setPayNote("");
   };
 
   const printInv = (inv: Invoice) => {
@@ -799,39 +782,6 @@ export function InvoicesPage() {
                             </div>
                           </div>
 
-                          {/* Inline per-order payment form */}
-                          {isStaff && payOrderId === o.id && (
-                            <div className="mt-3 pt-3 border-t border-border/60 space-y-2.5">
-                              <div className="grid grid-cols-2 gap-2.5">
-                                <div>
-                                  <Label className="text-xs">Amount Received ($)</Label>
-                                  <div className="relative mt-1">
-                                    <DollarSign className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
-                                    <Input type="number" min={0} step="0.01" value={payAmount} onChange={e => setPayAmount(e.target.value)} className="pl-8 h-9 rounded-xl" placeholder={String(oBal)} />
-                                  </div>
-                                </div>
-                                <div>
-                                  <Label className="text-xs">Deposited to locker</Label>
-                                  <Select value={payLockerId} onValueChange={addNew("locker", pickPayLocker)}>
-                                    <SelectTrigger className="h-9 rounded-xl mt-1"><SelectValue placeholder="Choose locker" /></SelectTrigger>
-                                    <SelectContent>{db.lockers.filter(l => l.active !== false).map(l => <SelectItem key={l.id} value={l.id}>{l.name} ({ccy(l.currency)})</SelectItem>)}<AddNewItem kind="locker" /></SelectContent>
-                                  </Select>
-                                </div>
-                              </div>
-                              {payNeedsRate && (
-                                <RateInput id={`inv-pay-rate-${o.id}`} from="USD" to={payLockerCcy} value={payRate}
-                                  onChange={setPayRate} amount={Number(payAmount) || undefined} />
-                              )}
-                              <div>
-                                <Label className="text-xs">Note (optional)</Label>
-                                <Input value={payNote} onChange={e => setPayNote(e.target.value)} className="h-9 rounded-xl mt-1" placeholder="e.g. Bank transfer" />
-                              </div>
-                              <div className="flex items-center gap-2 justify-end">
-                                <Button size="sm" variant="ghost" onClick={() => setPayOrderId(null)} className="rounded-lg h-8">Cancel</Button>
-                                <Button size="sm" onClick={() => submitPayment(o.id)} className="btn-hero rounded-lg h-8">Save Payment</Button>
-                              </div>
-                            </div>
-                          )}
                         </div>
                       );
                     })}
@@ -840,6 +790,10 @@ export function InvoicesPage() {
               </>
             );
           })()}
+          {/* Inside the invoice's window, so working in the panel never closes the window behind it. */}
+          {isStaff && <ReceiveFromClient open={!!payOrderId} onOpenChange={v => { if (!v) setPayOrderId(null); }} orderId={payOrderId ?? undefined}
+            amount={(() => { const po = payOrderId ? db.orders.find(x => x.id === payOrderId) : undefined; return po ? balanceDue(po) : undefined; })()}
+            onSave={submitPayment} />}
         </DialogContent>
       </Dialog>
       {/* ── Create invoice — the page's main button opens it. The client to

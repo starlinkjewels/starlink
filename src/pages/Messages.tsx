@@ -66,8 +66,9 @@ export function MessagesPage() {
   // Employee: only Admin(s) + the clients within their work (all, when their role reaches every client).
   // Admin: everyone.
   const myClient = user!.role === "client" ? db.clients.find(c => c.id === user!.clientId) : undefined;
+  // A designer's own login has no chat (it sees only its designs) — never offered here.
   const people = useMemo(() => (user!.role === "admin"
-    ? db.users.filter(u => u.id !== me)
+    ? db.users.filter(u => u.id !== me && u.role !== "designer")
     : user!.role === "client"
     ? db.users.filter(u => u.role === "admin" || (u.role === "employee" && u.id === myClient?.accountManagerId))
     : db.users.filter(u => u.role === "admin" || (u.role === "client" && (() => { const c = db.clients.find(x => x.id === u.clientId); return !!c && worksOnClient(db, user!, c); })()))

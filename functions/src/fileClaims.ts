@@ -25,13 +25,18 @@ import { REGION } from "./region";
  *
  * Only "sl" is ever written; any other claim on an account is left as it is.
  */
-export interface FileClaims { r: string; st: "active" | "off"; docs?: true }
+export interface FileClaims { r: string; st: "active" | "off"; docs?: true; /** A designer's login: their designer — their own upload folder (cad/by/{d}/…). */ d?: string }
 
 /** The claims a sign-in record gives — none for no record. */
-export function claimsOf(idx: { role?: unknown; status?: unknown; docs?: unknown } | null | undefined): FileClaims | null {
-  if (!idx || typeof idx.role !== "string" || !["admin", "employee", "client"].includes(idx.role)) return null;
+export function claimsOf(idx: { role?: unknown; status?: unknown; docs?: unknown; designerId?: unknown } | null | undefined): FileClaims | null {
+  if (!idx || typeof idx.role !== "string" || !["admin", "employee", "client", "designer"].includes(idx.role)) return null;
   const c: FileClaims = { r: idx.role, st: idx.status === "active" ? "active" : "off" };
   if (idx.role === "employee" && idx.docs === true) c.docs = true;
+  // A designer's login: which designer — the file rules let them add only to their own folder.
+  if (idx.role === "designer") {
+    if (typeof idx.designerId !== "string" || !idx.designerId) return { r: "designer", st: "off" };
+    c.d = idx.designerId;
+  }
   return c;
 }
 

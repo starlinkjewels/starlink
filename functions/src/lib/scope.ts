@@ -27,6 +27,9 @@ export async function resolveCaller(uid: string): Promise<Caller> {
   if (!snap.exists) throw new HttpsError("permission-denied", "This account has no access.");
   const data = snap.data() as IndexDoc;
   if (data.status !== "active") throw new HttpsError("permission-denied", "This account is inactive.");
+  // Only the three roles these tools know. Anyone else — a designer's login — is not
+  // staff and not a client, and gets nothing here (never taken for staff by "not a client").
+  if (data.role !== "admin" && data.role !== "employee" && data.role !== "client") throw new HttpsError("permission-denied", "This account can't use this.");
   return { uid, role: data.role, clientId: data.clientId ?? null, appId: data.appId };
 }
 

@@ -207,7 +207,7 @@ export const ROLE_TEMPLATES: { name: string; description: string; perms: PermMat
 export interface PermUser {
   /** The person's app id (User.id) — their own access record is keyed by it. */
   id?: string;
-  role: "admin" | "employee" | "client";
+  role: "admin" | "employee" | "client" | "designer";
   roleId?: string;
 }
 

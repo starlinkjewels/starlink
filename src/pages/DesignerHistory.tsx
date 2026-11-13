@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { Link, useParams } from "react-router-dom";
-import { PenTool, Pencil, Wallet, FolderOpen, CheckCircle2, CalendarDays, IndianRupee, Receipt } from "lucide-react";
+import { PenTool, Pencil, Wallet, FolderOpen, CheckCircle2, CalendarDays, IndianRupee, Receipt, KeyRound } from "lucide-react";
 import { fmtDate, currentUserOrders, type LockerTransaction } from "@/lib/db";
 import { useDb } from "@/hooks/useDb";
 import { useAuth } from "@/lib/auth";
@@ -15,6 +15,8 @@ import { StatStrip } from "@/components/TableToolbar";
 import { DataTable, CellMain, CellAmount, CellDate, type DataColumn } from "@/components/DataTable";
 import { DesignerCreateDialog } from "@/components/create/DesignerCreateDialog";
 import { PayDesignerSheet } from "@/components/PayDesignerSheet";
+import { DesignerLoginSheet } from "@/components/designers/DesignerLoginSheet";
+import { designerLogin } from "@/lib/designers";
 import { CadJobsTable } from "@/components/designers/CadJobsTable";
 
 type Tab = "designs" | "months" | "payments";
@@ -34,6 +36,7 @@ export function DesignerHistoryPage() {
   const [tabWant, setTab] = usePageTab<Tab>("designer", ["designs", "months", "payments"], "designs");
   const [editing, setEditing] = useState(false);
   const [paying, setPaying] = useState(false);
+  const [loginOpen, setLoginOpen] = useState(false);
   const designer = (db.designers ?? []).find(x => x.id === id);
 
   if (!designer) {
@@ -102,6 +105,8 @@ export function DesignerHistoryPage() {
   ];
 
   const contact = [designerEmail(db, designer), designer.phone].filter(Boolean).join(" · ");
+  // Their own login (admins) — components/designers/DesignerLoginSheet.tsx.
+  const login = designerLogin(db, designer.id);
   const tab: Tab = tabWant === "payments" && !freelance ? "designs" : tabWant;
   return (
     <div className="space-y-5">
@@ -111,6 +116,7 @@ export function DesignerHistoryPage() {
         subtitle={[KIND_LABEL[designer.kind], freelance && designer.ratePerDesign != null ? `${fmtMoneyInr(designer.ratePerDesign)} a design` : null, contact || null, designer.active === false ? "switched off" : null].filter(Boolean).join(" · ")}
         primary={freelance && mayPay ? { label: "Pay", icon: Wallet, onClick: () => setPaying(true) } : null}
         secondary={can("designers", "edit") ? { label: "Edit", icon: Pencil, onClick: () => setEditing(true) } : null}
+        menu={isAdmin ? [{ label: login ? "Login" : "Give login", icon: KeyRound, hint: login ? `${login.status === "inactive" ? "Switched off · " : ""}${login.email}` : "Their own sign-in — only their designs", onSelect: () => setLoginOpen(true) }] : undefined}
       />
 
       <StatStrip items={[
@@ -164,6 +170,7 @@ export function DesignerHistoryPage() {
 
       {can("designers", "edit") && <DesignerCreateDialog open={editing} onOpenChange={setEditing} designer={designer} />}
       {paying && <PayDesignerSheet designerId={designer.id} onClose={() => setPaying(false)} />}
+      {isAdmin && <DesignerLoginSheet designer={designer} open={loginOpen} onOpenChange={setLoginOpen} />}
     </div>
   );
 }
