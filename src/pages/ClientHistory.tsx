@@ -39,7 +39,7 @@ import { AsyncButton } from "@/components/AsyncButton";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { RateInput } from "@/components/CurrencyFields";
-import { ccy, fmtCcy, roundCcy } from "@/lib/currency";
+import { ccy, fmtCcy, fmtCcyPdf, roundCcy } from "@/lib/currency";
 import { DataTable, CellAmount, CellDate, CellTag, type DataColumn } from "@/components/DataTable";
 import { ClientMaterialCard } from "@/components/ClientMaterialCard";
 import type { Order } from "@/lib/db";
@@ -298,6 +298,11 @@ function ClientHistoryPageBody() {
 
   // ── Diamonds sold to them out of stock (Buy & Assign → Sell a diamond) ──
   const diamondSales = (db.diamondSales ?? []).filter(x => x.clientId === id);
+  // Diamond sales on credit not fully paid — owed apart from the invoices, in each sale's
+  // own currency (never added into the dollar figures). Read from the account entries,
+  // so shown only to someone who has them (lockerTransactions); staff only.
+  const diamondOwedShown = user!.role !== "client" && !hiddenFromMe("lockerTransactions");
+  const salesOwed = diamondOwedShown ? diamondSales.filter(x => saleOwed(db.lockerTransactions, x) > 0.005) : [];
   const owedByCcy = (["INR", "USD"] as const)
     .map(c => ({ c, v: diamondSales.filter(x => saleCcy(x) === c).reduce((t, x) => t + saleOwed(db.lockerTransactions, x), 0) }))
     .filter(x => x.v > 0.005).map(x => fmtCcy(x.v, x.c));
@@ -399,6 +404,15 @@ function ClientHistoryPageBody() {
       }
       rows.push([b.number, "", "", "Invoice total", "", b.gross, b.gift || "", b.returned || "", b.received, b.balance]);
     }
+    // Diamond sales on credit still owed — apart from the invoices, each in its own currency.
+    if (salesOwed.length) {
+      rows.push([], ["Diamond sales on credit — not fully paid (apart from the invoices)"]);
+      for (const x of salesOwed) {
+        rows.push(["Diamond sale", fmtDate(x.createdAt), "", `${x.carat}ct ${x.kind === "certified" ? "certified " : ""}${x.shape}${x.notes ? ` — ${x.notes}` : ""} (${saleCcy(x)})`, "",
+          saleTotal(x), "", "", saleReceived(db.lockerTransactions, x), saleOwed(db.lockerTransactions, x)]);
+      }
+      rows.push(["Diamond sales owed", "", "", owedByCcy.join(" + ")]);
+    }
     downloadCsv(
       `Client-Invoice-Statement-${client.companyName.replace(/\s+/g, "_")}`,
       ["Invoice", "Date", "Order", "Description / Particular", "Qty", "Billed", "Gift card", "Returned", "Received", "Balance"],
@@ -453,6 +467,17 @@ function ClientHistoryPageBody() {
         b.returned ? `-${fmtMoney(b.returned)}` : "",
         fmtMoney(b.received), b.balance > 0.009 ? fmtMoney(b.balance) : "Cleared"],
     }));
+    // Diamond sales on credit still owed — their own table, apart from the invoices,
+    // each in its own currency (never added into the dollar figures above).
+    if (salesOwed.length) sections.push({
+      heading: "Diamond sales on credit — not fully paid (apart from the invoices)",
+      columns: [{ header: "Date", x: 14 }, { header: "Diamond", x: 52 }, { header: "Sale", x: 206 }, { header: "Received", x: 240 }, { header: "Owed", x: 270 }],
+      align: ["left", "left", "right", "right", "right"],
+      rows: salesOwed.map(x => [
+        fmtDate(x.createdAt), fit(`${x.carat}ct ${x.kind === "certified" ? "certified " : ""}${x.shape}${x.notes ? ` — ${x.notes}` : ""}`, 104),
+        fmtCcyPdf(saleTotal(x), saleCcy(x)), fmtCcyPdf(saleReceived(db.lockerTransactions, x), saleCcy(x)), fmtCcyPdf(saleOwed(db.lockerTransactions, x), saleCcy(x)),
+      ]),
+    } as (typeof sections)[number]);
 
     downloadLedgerPdfMulti({
       company: statementCompany,
@@ -471,6 +496,7 @@ function ClientHistoryPageBody() {
         ...(T.returned > 0 ? [{ label: "Returned (credit notes)", value: fmtMoney(T.returned) }] : []),
         { label: "Received", value: fmtMoney(T.received) },
         { label: "Outstanding", value: fmtMoney(Math.max(0, closing)) },
+        ...(salesOwed.length ? [{ label: "Diamond sales owed", value: owedByCcy.join(" + ") }] : []),
         { label: "Invoices", value: String(blocks.length) },
       ],
       landscape: true,
@@ -779,6 +805,9 @@ function ClientHistoryPageBody() {
           sub: `${fmtMoney(account.allocated)} received · ${fmtMoney(account.outstanding)} owed in all` },
         { label: "Credit (advance)", value: fmtMoney(account.credit), icon: Wallet,
           sub: refundedUsd > 0.005 ? `Held for them · ${fmtMoney(refundedUsd)} refunded` : "Held for them" },
+        // Diamonds sold to them on credit, still owed — beside the invoices, never in them.
+        ...(salesOwed.length ? [{ label: "Diamonds owed", value: owedByCcy.join(" + "), icon: Gem, tone: "out" as const,
+          sub: `${salesOwed.length} diamond sale${salesOwed.length === 1 ? "" : "s"} on credit · apart from the invoices` }] : []),
       ]} />
 
 
