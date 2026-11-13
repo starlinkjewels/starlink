@@ -135,6 +135,9 @@ function baseDefs(db: DB): SheetDef[] {
         { key: "opening", header: "Opening balance ($)", help: "Owed or prepaid when you started with the app — blank or 0 if none", example: "1500", aliases: ["opening balance", "opening", "balance"] },
         { key: "openingDir", header: "Opening is", help: "They owe us / We owe them — blank = They owe us", list: ["They owe us", "We owe them"], aliases: ["opening direction", "dr cr", "direction"] },
         { key: "openingDate", header: "Opening as of", help: "A date — e.g. 2026-04-01", aliases: ["opening date", "as of"] },
+        // Payment terms and credit limit (lib/paymentTerms.ts) — as on New client.
+        { key: "terms", header: "Payment terms (days)", help: "30 = Net 30, 0 = due on receipt — blank = the default in Settings", example: "30", aliases: ["terms", "payment terms", "credit days", "credit period", "net days"] },
+        { key: "creditLimit", header: "Credit limit ($)", help: "What they may owe in all — blank = no limit", example: "5000", aliases: ["credit limit", "limit"] },
         ...(staff.length ? [{ key: "handledBy", header: "Handled by", help: "A team member's name or email — blank = you", list: staff, aliases: ["account manager", "sales person", "salesperson", "handler"] }] : []),
         ...(multi ? [{ ...company[0], header: "Our company", help: `Who bills them — blank = ${companiesOf(db.settings)[0].name}` }] : []),
       ],
@@ -475,6 +478,11 @@ function checkRow(kind: ImportKind, row: number, v: Record<string, string>, ctx:
     }
     const op = opening("debit", /owe us|debit|dr|receivable|they owe/, "Opening");
     if (typeof op === "string") return err(name, op);
+    const terms = numOf("terms", "Payment terms", { int: true });
+    if (typeof terms === "string") return err(name, terms);
+    if (terms != null && terms > 365) return err(name, "Payment terms: 365 days at most");
+    const limit = numOf("creditLimit", "Credit limit");
+    if (typeof limit === "string") return err(name, limit);
     let manager: string | undefined;
     if (g("handledBy")) {
       const w = g("handledBy").toLowerCase();
@@ -496,6 +504,8 @@ function checkRow(kind: ImportKind, row: number, v: Record<string, string>, ctx:
           gstVat: g("gstVat"), address: g("address"), shippingAddress: g("shippingAddress"),
           ...(manager ? { accountManagerId: manager } : {}),
           ...(op.bal ? { openingBalance: op.bal, openingDir: op.dir, ...(op.date ? { openingDate: op.date } : {}) } : {}),
+          ...(terms != null ? { paymentTermsDays: terms } : {}),
+          ...(limit ? { creditLimitUsd: Math.round(limit * 100) / 100 } : {}),
           ...(co.id !== MAIN_COMPANY_ID ? { companyId: co.id } : {}),
         } as ClientRec["v"],
       },

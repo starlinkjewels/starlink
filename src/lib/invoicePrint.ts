@@ -4,12 +4,25 @@ import { totalAdvance, orderTotal, balanceDue, returnedCredit, returnedQty, logE
 import { hasDiamonds, stoneOf } from "./orderText";
 import { brandForDocument, MAIN_COMPANY_ID, type BrandSettings } from "./companies";
 import { exportAllowed } from "./access";
+import { DAY_MS, invoiceDueAt, termsDaysOf, termsLabel } from "./paymentTerms";
 import { getBrand, brandName, BUILTIN } from "./brand";
 
 function dd(n: number) { return String(n).padStart(2, "0"); }
 function localDate(iso: string) {
   const d = new Date(iso);
   return `${dd(d.getDate())}/${dd(d.getMonth() + 1)}/${d.getFullYear()}`;
+}
+/** The terms and due day printed on a raised invoice — none when the client has no terms (lib/paymentTerms.ts). */
+function dueOnBill(invoiceNumber: string, client: Client | undefined): { terms: string; dateLabel: string } | undefined {
+  const db = loadDb();
+  const inv = (db.invoices ?? []).find(i => i.number === invoiceNumber);
+  if (!inv) return undefined;
+  const cl = client ?? db.clients.find(c => c.id === inv.clientId);
+  const dueAt = invoiceDueAt(inv, cl, db.settings);
+  if (!dueAt) return undefined;
+  // The terms the bill was raised on: from its own due stamp, else the client's now.
+  const days = inv.dueAt ? Math.max(0, Math.round((+new Date(inv.dueAt) - +new Date(inv.createdAt)) / DAY_MS)) : termsDaysOf(cl, db.settings);
+  return { terms: termsLabel(days) || "—", dateLabel: localDate(dueAt) };
 }
 /** Format a "YYYY-MM-DD" date-only string (no Date/timezone conversion needed). */
 function localDateStr(dateStr: string) {
@@ -223,8 +236,10 @@ function buildInvoiceDoc(opts: {
   draft?: boolean;
   /** A credit note for returned goods, against `againstInvoice`. */
   credit?: { againstInvoice?: string };
+  /** The client's payment terms on this bill (lib/paymentTerms.ts): "Net 30" and its due day. */
+  due?: { terms: string; dateLabel: string };
 }): string {
-  const { client, settings, invoiceNumber, dateLabel, itemRows, totalsRows, draft, credit } = opts;
+  const { client, settings, invoiceNumber, dateLabel, itemRows, totalsRows, draft, credit, due } = opts;
   // The first company prints as it always has, defaults and all; another
   // company prints only what it has been given.
   const isMain = ((settings as Partial<BrandSettings>).brandCompanyId ?? MAIN_COMPANY_ID) === MAIN_COMPANY_ID;
@@ -466,7 +481,9 @@ function buildInvoiceDoc(opts: {
         <tr><td>Date:</td><td>${dateLabel}</td></tr>
         ${credit
           ? `<tr><td>Against Invoice:</td><td>${credit.againstInvoice ? esc(credit.againstInvoice) : "—"}</td></tr>`
-          : `<tr><td>Terms:</td><td>${settings.invoiceTerms || "COD"}</td></tr>`}
+          : due
+            ? `<tr><td>Terms:</td><td>${esc(due.terms)}</td></tr><tr><td>Due Date:</td><td>${due.dateLabel}</td></tr>`
+            : `<tr><td>Terms:</td><td>${settings.invoiceTerms || "COD"}</td></tr>`}
       </table>
     </div>
   </div>
@@ -578,6 +595,7 @@ export function printInvoice(
   const brand = brandForDocument(loadDb(), { clientId: client?.id ?? order.clientId, invoiceNumber: draft ? undefined : invoiceNumber });
   const html = buildInvoiceDoc({
     client, settings: brand, invoiceNumber, draft,
+    due: draft ? undefined : dueOnBill(invoiceNumber, client),
     dateLabel: localDate(!draft && invoiceDate ? invoiceDate : order.createdAt),
     itemRows,
     totalsRows: totalsRowsHtml(total, adv, bal, shipping, gift, more),
@@ -625,6 +643,7 @@ export function printBatchInvoice(
   const brand = brandForDocument(loadDb(), { clientId: client?.id ?? orders[0]?.clientId, invoiceNumber });
   const html = buildInvoiceDoc({
     client, settings: brand, invoiceNumber,
+    due: dueOnBill(invoiceNumber, client),
     dateLabel: localDateStr(dateStr),
     itemRows,
     totalsRows: totalsRowsHtml(total, adv, bal, shipping, gift, more),

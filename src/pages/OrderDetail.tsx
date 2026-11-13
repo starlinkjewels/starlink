@@ -115,6 +115,9 @@ import { ccy, ccySymbol, fmtCcy, rateText, roundCcy, tableRate } from "@/lib/cur
 import { compressImage as compressImg, canUploadOriginal, imageForUpload, PRODUCT_PHOTO_MAX, PRODUCT_PHOTO_QUALITY } from "@/lib/images";
 import { downloadAsZip } from "@/lib/zipDownload";
 import { confirmBox } from "@/lib/confirm";
+import { creditCheck } from "@/lib/paymentTerms";
+import { cadClear, cadReviewNow, recordCadReview } from "@/lib/cadApproval";
+import { CadApprovalBox } from "@/components/order/CadApprovalBox";
 import { IfExport } from "@/components/IfExport";
 import { ReturnDialog, OrderReturns, useMayReturn } from "@/components/SalesReturn";
 import { returnBlocker } from "@/lib/salesReturn";
@@ -1121,10 +1124,29 @@ function OrderDetailPageBody() {
       toast.error(`First ${missingText} — then Final Approval.`);
       return false;
     }
+    // CAD waits for the client's word on the design on file (lib/cadApproval.ts). They may have
+    // said yes by phone or WhatsApp: asked, and then recorded for them under this person's name.
+    if (order.timeline[idx].step === "CAD Designing" && !cadClear(order)) {
+      const r = cadReviewNow(order);
+      const q = r?.status === "changes"
+        ? `The client asked for changes to this design${r.note ? `: “${r.note}”` : ""}.\n\nComplete CAD Designing anyway, recording that they approved it?`
+        : "The client hasn't approved this CAD design yet.\n\nRecord their approval (they said yes by phone, WhatsApp or in person) and complete CAD Designing?";
+      if (!(await confirmBox(q))) return false;
+      let ok = false;
+      updateDb(d => { ok = recordCadReview(d, order.id, { status: "approved", image: order.cadImage!, by: { id: user!.id, name: user!.name }, onBehalf: true }); });
+      if (!ok) { toast.error("The design was changed meanwhile — look at the new one"); return false; }
+    }
     // Never let goods leave without a price, and warn before shipping unpaid.
     if (order.timeline[idx].step === "Dispatch") {
       if (orderTotal(order) <= 0) { toast.error("Set the order price before dispatching."); return false; }
-      if (balanceDue(order) > 0 && !(await confirmBox(`Balance of ${fmtMoney(balanceDue(order))} is still unpaid on this order. Dispatch anyway?`))) return false;
+      // And the client's whole account: over their credit limit, or bills overdue (lib/paymentTerms.ts) —
+      // this order is already in what they owe. One question with every reason.
+      const cc = order.forReadyStock ? null : creditCheck(loadDb(), order.clientId);
+      const why = [
+        ...(balanceDue(order) > 0 ? [`Balance of ${fmtMoney(balanceDue(order))} is still unpaid on this order.`] : []),
+        ...(cc?.lines ?? []),
+      ];
+      if (why.length && !(await confirmBox(`Dispatch anyway?\n\n${why.join("\n")}`))) return false;
     }
     // The caller may know the stage happened on an earlier day than the one it
     // is being entered on; everything else is stamped as it is recorded.
@@ -1995,7 +2017,7 @@ function OrderDetailPageBody() {
         o.cadImage = cadUrl;
         followOrderPictures(d, order.id, before, whoOf(user)); // its piece in Ready Stock follows
         const clientUser = d.users.find(u => u.clientId === o.clientId);
-        if (clientUser) d.notifications.unshift({ id: uid("n_"), userId: clientUser.id, title: "CAD Design Ready", body: `CAD design uploaded for ${o.orderNumber}. Please review.`, type: "info", read: false, createdAt: new Date().toISOString() });
+        if (clientUser) d.notifications.unshift({ id: uid("n_"), userId: clientUser.id, title: "CAD Design Ready", body: `CAD design ready for ${o.orderNumber} — open the order to Approve it, or Ask for changes.`, type: "info", read: false, createdAt: new Date().toISOString() });
       });
       toast.success("CAD image uploaded — client notified");
     } catch { toast.error("Failed to upload image"); }
@@ -3432,6 +3454,9 @@ It goes back to being our own build, and ${item ? item.name : "its piece"} goes 
           })()}
 
           {isStaffUser && <OrderDesignBlock order={order} canAssign={mayDesign()} />}
+
+          {/* The client's word on the design (lib/cadApproval.ts) — asked of them until the CAD stage is done. */}
+          <CadApprovalBox order={order} stageDone={cadStepIdx >= 0 && order.timeline[cadStepIdx].status === "done"} mayRecord={mayStep("CAD Designing")} />
 
           {order.cadImage && (
             <div className="space-y-2">

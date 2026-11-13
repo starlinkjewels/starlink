@@ -5,6 +5,7 @@ import {
   invoiceOrderIds, type Order, type Invoice, type Client,
 } from "@/lib/db";
 import { Download, FileText, Package, Undo2, Gift } from "lucide-react";
+import { daysOverdue } from "@/lib/paymentTerms";
 import { StatStrip, type TableFilter } from "@/components/TableToolbar";
 import { DataTable, CellAmount, CellDate, type DataColumn } from "@/components/DataTable";
 import { type MoreAction } from "@/components/MoreMenu";
@@ -16,6 +17,8 @@ export interface InvoiceBlock {
   /** The invoice number, e.g. "0001". */
   number: string;
   date: string;
+  /** When it falls due by the client's terms (lib/paymentTerms.ts) — set by the client page; unset = no terms. */
+  dueAt?: string;
   items: {
     orderId: string;
     orderNo: string;
@@ -237,6 +240,18 @@ export function ClientInvoiceLedger({
         : <span className="inline-flex items-center gap-1.5 font-medium text-brand-dark whitespace-nowrap"><FileText className="h-3.5 w-3.5 text-primary" />{b.number}</span> },
     { key: "date", header: "Date", kind: "date", sortValue: b => b.date || null, csv: b => (b.date ? fmtDate(b.date) : ""),
       cell: b => (b.date ? <CellDate>{fmtDate(b.date)}</CellDate> : null) },
+    // Its due day, and how late while anything is owed (lib/paymentTerms.ts) — shown only once there are terms.
+    { key: "due", header: "Due", kind: "date", hideIfEmpty: true, sortValue: b => (b.dueAt ? +new Date(b.dueAt) : null), csv: b => (b.dueAt ? fmtDate(b.dueAt) : ""),
+      cell: b => {
+        if (!b.dueAt) return null;
+        const late = daysOverdue(b.dueAt, b.balance);
+        return (
+          <span className="text-xs whitespace-nowrap">
+            <span className={late > 0 ? "text-destructive font-semibold" : "text-muted-foreground"}>{fmtDate(b.dueAt)}</span>
+            {late > 0 && <span className="block text-[10px] text-destructive">{late} day{late === 1 ? "" : "s"} overdue</span>}
+          </span>
+        );
+      } },
     { key: "pieces", header: "Pieces", sortValue: b => b.items.length, csv: b => String(b.items.length),
       cell: b => (isOpening(b) ? null : <span className="text-xs text-muted-foreground whitespace-nowrap">{b.items.length} piece{b.items.length !== 1 ? "s" : ""}</span>) },
     { key: "billed", header: "Billed", align: "right", kind: "number", sortValue: b => b.gross, csv: b => b.gross,

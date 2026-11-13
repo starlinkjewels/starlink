@@ -139,7 +139,9 @@ export function ReceiptLedger() {
   const receiptDetails = (r: ClientReceipt): Detail[] => {
     const landed = db.orders.flatMap(o => (o.advances ?? []).filter(a => a.receiptId === r.id).map(a => ({ o, a })));
     const asCredit = Math.round((r.amountUsd - receiptApplied(db, r.id)) * 100) / 100;
-    const inv = r.invoiceId ? (db.invoices ?? []).find(i => i.id === r.invoiceId) : undefined;
+    const invs = (r.invoiceIds?.length ? r.invoiceIds : r.invoiceId ? [r.invoiceId] : [])
+      .map(iid => (db.invoices ?? []).find(i => i.id === iid)).filter((i): i is NonNullable<typeof i> => !!i);
+    const inv = invs[0];
     const deposit = (db.lockerTransactions ?? []).find(t => t.receiptId === r.id);
     return filled([
       can("clients") && { label: "Client page", value: refLink(`/clients/${r.clientId}`, clientName(r.clientId) || "Client") },
@@ -147,7 +149,10 @@ export function ReceiptLedger() {
         key: a.id, node: <>{refLink(`/orders/${o.id}`, o.orderNumber, can("orders"))} <span className="text-muted-foreground">{fmtMoney(a.amount)}</span></>,
       }))) },
       asCredit > 0.009 && { label: "Held as credit", value: fmtMoney(asCredit) },
-      !!inv && { label: "Sent for invoice", value: refLink(`/invoices?q=${encodeURIComponent(inv.number)}`, inv.number, can("invoices")) },
+      !!inv && { label: invs.length > 1 ? "Sent for invoices" : "Sent for invoice", value: invs.length > 1
+        ? linkList(invs.map(i => ({ key: i.id, node: refLink(`/invoices?q=${encodeURIComponent(i.number)}`, i.number, can("invoices")) })))
+        : refLink(`/invoices?q=${encodeURIComponent(inv.number)}`, inv.number, can("invoices")) },
+      (r.bankChargesUsd ?? 0) > 0 && { label: "Bank charges", value: `${fmtMoney(r.bankChargesUsd!)} kept by the banks — in Expenses` },
       { label: "Voucher", value: refNo(deposit?.voucherNo) },
       { label: "Recorded", value: recorded(db, r.createdAt, r.recordedBy) },
       !!r.updatedAt && { label: "Last corrected", value: when(r.updatedAt) },

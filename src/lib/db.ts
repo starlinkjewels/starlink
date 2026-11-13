@@ -122,6 +122,10 @@ export interface Client {
   // Overpayment carried forward as advance credit — auto-applied (oldest bill
   // first) whenever a payment is recorded or "Apply Credit" is used.
   creditBalance?: number;
+  /** Days they have to pay an invoice ("Net 30"); 0 = due on receipt; unset = Settings' default (lib/paymentTerms.ts). */
+  paymentTermsDays?: number;
+  /** $ they may owe in all before a new order or a dispatch is questioned; unset = no limit. Staff only. */
+  creditLimitUsd?: number;
   /** The client's own gold and diamonds held for them — every movement (lib/clientMaterial.ts). */
   materialLedger?: ClientMaterialEntry[];
   // Explicit per-client grant for the Product Photos page — unset/false means
@@ -424,6 +428,21 @@ export interface TimelineEntry {
   photo?: string;
 }
 
+/** The client's answer on a CAD design (lib/cadApproval.ts). */
+export interface CadReview {
+  status: "approved" | "changes";
+  at: string;
+  /** Who answered — the client's login, or the staff member who recorded it for them. */
+  by: string;
+  byName: string;
+  /** What they want changed (changes), or a remark. */
+  note?: string;
+  /** The CAD image it was given on — a new image needs a new answer. */
+  image?: string;
+  /** Recorded by staff for the client (they said so by phone, WhatsApp…). */
+  onBehalf?: boolean;
+}
+
 export interface AdvancePayment {
   id: string;
   amount: number;
@@ -686,6 +705,8 @@ export interface Order {
   engraving?: { text: string; font: "block" | "script" };
   // CAD design image (uploaded after CAD Approved step)
   cadImage?: string;
+  /** The client's word on each CAD image, newest last (lib/cadApproval.ts): approved, or changes asked. */
+  cadReviews?: CadReview[];
   // Optional 3D model file (.3dm) — when present, the order shows a "View 360°"
   // button that opens it in the Starlink360 web viewer (mobile + desktop).
   cad3dmUrl?: string;
@@ -865,6 +886,9 @@ export interface Invoice {
    *  Same idea as Order.previousOrderNumber. */
   previousNumber?: string;
   amount: number; // snapshot at creation; the UI always recomputes live from the orders
+  /** When it falls due — its date + the client's terms when it was raised (lib/paymentTerms.ts).
+   *  Unset (raised with no terms, or before terms existed): worked out from the terms now. */
+  dueAt?: string;
   paid: boolean;
   /** Each order's certified stones as printed on the bill ("GIA 2141438 · 1.01 ct
    *  Round · F VS1"), by order id — kept when it is raised, so the client's own
@@ -980,6 +1004,12 @@ export function createInvoiceFromOrders(d: DB, clientId: string, orderIds: strin
   };
   const stones = Object.fromEntries(eligible.map(oid => [oid, certStoneLines(d, oid)]).filter(([, l]) => l.length));
   if (Object.keys(stones).length) inv.stones = stones;
+  // Due by the client's terms as they are today (lib/paymentTerms.ts termsDaysOf, kept here
+  // in step) — fixed on the bill, so changing their terms later never moves it.
+  const cl = d.clients.find(c => c.id === clientId);
+  const terms = cl?.paymentTermsDays != null && cl.paymentTermsDays >= 0 ? cl.paymentTermsDays
+    : d.settings.defaultPaymentTermsDays != null && d.settings.defaultPaymentTermsDays >= 0 ? d.settings.defaultPaymentTermsDays : undefined;
+  if (terms != null) { const due = new Date(at); due.setDate(due.getDate() + Math.round(terms)); inv.dueAt = due.toISOString(); }
   d.invoices.push(inv);
   return inv;
 }
@@ -1035,6 +1065,9 @@ export interface Expense {
   orderIds?: string[];
   /** The courier and tracking number a shipping cost belongs to. */
   shipmentRef?: string;
+  /** Bank / wire charges kept from a client's payment — the receipt it came in on (lib/receipts.ts).
+   *  Goes with that receipt when it is cancelled. */
+  bankChargeOfReceipt?: string;
 }
 
 /** Format an expense amount in its own account currency (₹ default for legacy). */
@@ -1253,6 +1286,8 @@ export interface Settings {
    *  profit stays the admin's own table above. */
   currencyRates?: CurrencyRate[];
   defaultShippingCharge: number; // $ flat default per order
+  /** Payment terms for a client with none of their own, in days (30 = Net 30); unset = no due dates. */
+  defaultPaymentTermsDays?: number;
   /** The middle of the production timeline, in the admin's order — the
    *  built-in stages plus any of their own. The start (Submitted, Approved) and
    *  the end (Dispatch, Delivered) never move. Applies to orders created after
@@ -1847,6 +1882,11 @@ export interface ClientReceipt {
   method: string;         // Cash / Bank Transfer / UPI / Cheque …
   remarks?: string;
   invoiceId?: string;     // the invoice it was sent for, when one was named
+  /** Several invoices it was sent for, in the order it paid them (the first is `invoiceId`). */
+  invoiceIds?: string[];
+  /** $ the banks kept on the way (wire / bank charges): the client is credited the whole
+   *  amountUsd; the account shows them as a Bank charges expense (Expense.bankChargeOfReceipt). */
+  bankChargesUsd?: number;
   recordedBy: string;
   createdAt: string;
   updatedAt?: string;
@@ -2827,15 +2867,20 @@ export function settleClientAccount(
   recordedBy: string,
   at: string,
   note?: string,
-  firstInvoiceId?: string,
+  /** The invoice it was sent for — or several, paid in the order given (each one named by the user). */
+  firstInvoiceId?: string | string[],
 ): number {
   const client = d.clients.find(c => c.id === clientId);
   const orders = d.orders.filter(o => o.clientId === clientId && o.status !== "Rejected");
   let pool = (extra || 0) + (client?.creditBalance || 0);
   for (const o of orders) pool += capOrderAdvances(o);
   pool = Math.round(pool * 100) / 100;
-  const leftover = firstInvoiceId
-    ? allocateInOrder(invoiceOrders(d, firstInvoiceId), pool, recordedBy, at, note ?? "Payment received")
+  const named = (Array.isArray(firstInvoiceId) ? firstInvoiceId : firstInvoiceId ? [firstInvoiceId] : []).filter(Boolean);
+  // Only the invoices named, in their order — never anything else (see above).
+  const seen = new Set<string>();
+  const targets = named.flatMap(iid => invoiceOrders(d, iid)).filter(o => (seen.has(o.id) ? false : (seen.add(o.id), true)));
+  const leftover = named.length
+    ? allocateInOrder(targets, pool, recordedBy, at, note ?? "Payment received")
     : pool;
   if (client) client.creditBalance = leftover > 0 ? leftover : undefined;
   return leftover;

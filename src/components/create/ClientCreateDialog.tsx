@@ -11,6 +11,8 @@ import { authErrorMessage } from "@/lib/authErrors";
 import { useAuth } from "@/lib/auth";
 import { MAIN_COMPANY_ID, companiesForUser, hasCompanies, worksFor } from "@/lib/companies";
 import { OpeningBalanceFields } from "@/components/OpeningBalanceFields";
+import { PaymentTermsFields } from "@/components/billing/PaymentTermsFields";
+import { termsProblem } from "@/lib/paymentTerms";
 import { ActionSheet } from "@/components/ActionSheet";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -65,6 +67,8 @@ export function ClientCreateDialog({ open, onOpenChange, onCreated }: {
     if (withLogin && loadDb().users.some(u => (u.email ?? "").toLowerCase() === email)) { toast.error("That email is already in use"); return; }
     const cfWhy = customProblem(loadDb().settings, "clients", cf, user);
     if (cfWhy) { toast.error(cfWhy); return; }
+    const termsWhy = termsProblem(f.paymentTermsDays, f.creditLimitUsd);
+    if (termsWhy) { toast.error(termsWhy); return; }
     setSaving(true);
     try {
       // Create the client's Firebase Auth account (password lives in Auth).
@@ -75,11 +79,14 @@ export function ClientCreateDialog({ open, onOpenChange, onCreated }: {
       const accountManagerId = user!.role === "employee" ? user!.id : f.accountManagerId;
       updateDb(d => {
         // The password goes to Firebase Auth only — never onto the record.
-        const { companyId: _picked, password: _pw, ...rest } = f;
-        void _picked; void _pw;
+        const { companyId: _picked, password: _pw, paymentTermsDays: _t, creditLimitUsd: _l, ...rest } = f;
+        void _picked; void _pw; void _t; void _l;
         d.clients.unshift({
           ...rest, id, accountManagerId, username: authUid ? email : "", email, status: "active", createdAt: new Date().toISOString(),
           ...(sellerId && sellerId !== MAIN_COMPANY_ID ? { companyId: sellerId } : {}),
+          // Terms and limit only when given — blank keeps the Settings default / no limit (lib/paymentTerms.ts).
+          ...(f.paymentTermsDays != null ? { paymentTermsDays: f.paymentTermsDays } : {}),
+          ...(f.creditLimitUsd != null && f.creditLimitUsd > 0 ? { creditLimitUsd: f.creditLimitUsd } : {}),
         } as Client);
         if (authUid) d.users.push({
           id: uid("u_"), authUid, username: email, password: "", role: "client",
@@ -162,6 +169,10 @@ export function ClientCreateDialog({ open, onOpenChange, onCreated }: {
           creditLabel="We owe client / advance (Credit)"
           hint="Owed or prepaid when you started using the app."
         />
+      </div>
+      <div className="mt-4">
+        <PaymentTermsFields terms={f.paymentTermsDays} limit={f.creditLimitUsd} defaultDays={dbNow.settings.defaultPaymentTermsDays}
+          onTerms={v => setF(prev => ({ ...prev, paymentTermsDays: v }))} onLimit={v => setF(prev => ({ ...prev, creditLimitUsd: v }))} />
       </div>
       <CustomFieldInputs target="clients" values={cf} onChange={setCf} className="mt-4" />
       {multiCo && (

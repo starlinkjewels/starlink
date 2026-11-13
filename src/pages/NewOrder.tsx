@@ -58,6 +58,8 @@ import {
 } from "@/components/ui/select";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { toast } from "sonner";
+import { confirmBox } from "@/lib/confirm";
+import { creditCheck } from "@/lib/paymentTerms";
 import { Users, Coins, Plus, Trash2, DollarSign, Building2, ImagePlus, X, Gem, Clock, Sparkles, Truck, CreditCard, AlertCircle, BadgeCheck, Boxes, ShoppingBag, HelpCircle, PackageCheck, Gift, Factory as FactoryIconLucide, Search, MapPin, Copy, PenTool, Repeat } from "lucide-react";
 import { DesignerFields, NO_DESIGNER, assignAndTell, type DesignerChoice } from "@/components/designers/AssignDesigner";
 
@@ -524,6 +526,10 @@ function NewOrderForm() {
   };
   // "Repeat a recent order": the client's last three, each opening as Duplicate does.
   const recentOrders = !isClient && !forReadyStock && f.clientId && !copyBlocker(user, canDo) ? clientOrders(f.clientId).slice(0, 3) : [];
+  // Where the client stands before more is taken on for them: over their credit limit with
+  // this order (its value + shipping, less the advance), invoices overdue (lib/paymentTerms.ts).
+  const addingUsd = Math.max(0, (Number(f.orderValue) || 0) + (Number(f.shippingCharge) || 0) - (Number(f.advanceAmount) || 0));
+  const standing = !isClient && !forReadyStock && f.clientId ? creditCheck(db, f.clientId, addingUsd) : null;
 
   // Everything Submit finds simply missing — all at once, in the form's order, each
   // with the message it always had. Checks that weigh one field against another
@@ -628,6 +634,12 @@ function NewOrderForm() {
     const cfWhy = customProblem(db.settings, "orders", cf, user);
     if (cfWhy) { toast.error(cfWhy); return; }
     // The advance's locker and amount were checked with the other missing fields (fixesNow).
+    // Over the credit limit, or bills overdue: asked, never refused (lib/paymentTerms.ts).
+    if (!isClient && !forReadyStock && f.clientId) {
+      const cc = creditCheck(loadDb(), f.clientId, addingUsd);
+      const who = db.clients.find(c => c.id === f.clientId)?.companyName ?? "This client";
+      if (cc.lines.length && !(await confirmBox(`Place this order for ${who}?\n\n${cc.lines.join("\n")}`))) return;
+    }
 
     setSaving(true);
     const clientId = isClient ? user!.clientId! : (forReadyStock ? "" : f.clientId);
@@ -1141,6 +1153,11 @@ function NewOrderForm() {
             </div>
             {!forReadyStock && f.clientId && hasCompanies(db.settings) && (
               <p className="text-[11px] text-muted-foreground -mt-1 flex items-center gap-1.5">For <CompanyBadge id={orderCompany} /> — the client&rsquo;s company: its stock and its Ready Stock.</p>
+            )}
+            {standing && standing.lines.length > 0 && (
+              <div role="status" className="rounded-xl border border-destructive/30 bg-destructive/5 px-3 py-2 text-xs text-destructive space-y-0.5">
+                {standing.lines.map(l => <p key={l}>{l}</p>)}
+              </div>
             )}
             {/* The same client often asks for the same thing again: one tap opens it as Duplicate does. */}
             {recentOrders.length > 0 && (

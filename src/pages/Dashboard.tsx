@@ -1,3 +1,4 @@
+import { ClientPortal } from "@/components/home/ClientPortal";
 import { stageLabel } from "@/lib/stages";
 import { expensesInUsd, inrOn } from "@/lib/orderCost";
 import { SectionTitle } from "@/components/SectionTitle";
@@ -272,6 +273,9 @@ export function Dashboard() {
           </div>
         </>
       )}
+
+      {/* A client's own account: what is waiting on them, their statement, how to pay, "I've paid". */}
+      {user!.role === "client" && <ClientPortal />}
 
       {/* Gift Cards — all-time totals (staff). Issued = Redeemed + Pending + Expired. */}
       {user!.role !== "client" && gc.count > 0 && (

@@ -287,15 +287,20 @@ export function writeTransfer(d: DB, a: MoneyArgs & { toLockerId: string; rate?:
 }
 
 /** Tell a client (if they have a login) that their payment arrived. */
-export function notifyClientPayment(d: DB, clientId: string, amountUsd: number, method: string, invoiceId: string | undefined, at: string): void {
+export function notifyClientPayment(d: DB, clientId: string, amountUsd: number, method: string, invoiceId: string | string[] | undefined, at: string): void {
   const clientUser = d.users.find(u => u.clientId === clientId);
   if (!clientUser) return;
+  // One invoice or several (a payment that paid more than one, in order).
+  const nos = (Array.isArray(invoiceId) ? invoiceId : invoiceId ? [invoiceId] : [])
+    .map(iid => d.invoices.find(i => i.id === iid)?.number).filter(Boolean);
   d.notifications.unshift({
     id: uid("n_"), userId: clientUser.id, title: "Payment Received",
-    // Says what happened: against the invoice named, or held as their credit.
-    body: invoiceId
-      ? `${fmtMoney(amountUsd)} received via ${method} against invoice ${d.invoices.find(i => i.id === invoiceId)?.number ?? ""}.`.replace(" .", ".")
-      : `${fmtMoney(amountUsd)} received via ${method} — held as credit on your account.`,
+    // Says what happened: against the invoice(s) named, or held as their credit.
+    body: nos.length
+      ? `${fmtMoney(amountUsd)} received via ${method} against invoice${nos.length > 1 ? "s" : ""} ${nos.join(", ")}.`
+      : invoiceId
+        ? `${fmtMoney(amountUsd)} received via ${method} against your invoice.`
+        : `${fmtMoney(amountUsd)} received via ${method} — held as credit on your account.`,
     type: "info", read: false, createdAt: at,
   });
 }

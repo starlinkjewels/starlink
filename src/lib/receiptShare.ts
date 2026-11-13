@@ -24,7 +24,9 @@ function receiptFacts(db: DB, receiptId: string) {
   // Where it went: the bills it settled, and what is still held for them as credit.
   const settled = db.orders.flatMap(o => (o.advances ?? []).filter(a => a.receiptId === r.id).map(a => ({ order: o.orderNumber, amount: a.amount })));
   const credit = r2(r.amountUsd - receiptApplied(db, r.id));
-  const invoice = r.invoiceId ? db.invoices.find(i => i.id === r.invoiceId)?.number : undefined;
+  // Every invoice it was sent for, in the order it paid them.
+  const invoice = (r.invoiceIds?.length ? r.invoiceIds : r.invoiceId ? [r.invoiceId] : [])
+    .map(iid => db.invoices.find(i => i.id === iid)?.number).filter(Boolean).join(", ") || undefined;
   const account = r.lockerId ? db.lockers.find(l => l.id === r.lockerId)?.name : undefined;
   const deposited = r.lockerId && r.lockerAmount != null && r.lockerCurrency && r.lockerCurrency !== "USD" ? fmtCcy(r.lockerAmount, r.lockerCurrency) : undefined;
   // The company that sells to them — as their statements say.
@@ -46,7 +48,8 @@ export function downloadReceiptPdf(db: DB, receiptId: string): boolean {
     subjectLines: [
       `Receipt ${f.r.receiptNo} · ${fmtDate(f.r.date)}`,
       `Received from: ${f.client?.companyName ?? "—"}`,
-      [`Mode: ${f.r.method}`, f.invoice && `For invoice ${f.invoice}`, f.deposited && `Deposited ${f.deposited}`].filter(Boolean).join(" · "),
+      [`Mode: ${f.r.method}`, f.invoice && `For invoice ${f.invoice}`, f.deposited && `Deposited ${f.deposited}`,
+        (f.r.bankChargesUsd ?? 0) > 0 && `Bank charges ${fmtMoney(f.r.bankChargesUsd!)} (credited to you in full)`].filter(Boolean).join(" · "),
       ...(f.r.remarks ? [`Note: ${f.r.remarks}`] : []),
     ],
     summary: [{ label: "Amount received", value: fmtMoney(f.r.amountUsd) }],

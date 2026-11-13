@@ -23,7 +23,8 @@ import { useDb } from "@/hooks/useDb";
 import { useStickyFilter } from "@/hooks/useStickyFilter";
 import { selHas, selList, selOn } from "@/lib/filterSel";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
-import { FileText, CheckCircle2, Clock, Plus, DollarSign, Printer, Gift, Undo2, Eye, Pencil, Trash2, XCircle, MessageCircle, Mail } from "lucide-react";
+import { FileText, CheckCircle2, Clock, Plus, DollarSign, Printer, Gift, Undo2, Eye, Pencil, Trash2, XCircle, MessageCircle, Mail, AlertCircle } from "lucide-react";
+import { daysOverdue, daysToDue, invoiceDueAt, termsDaysOf, termsLabel } from "@/lib/paymentTerms";
 import { PageHeader, TabBar } from "@/components/PageHeader";
 import { usePageTab } from "@/hooks/usePageTab";
 import { ActionSheet } from "@/components/ActionSheet";
@@ -80,7 +81,7 @@ export function InvoicesPage() {
   // cleared; Client and Company can hold several choices (lib/filterSel.ts).
   const [clientFilter, setClientFilter] = useStickyFilter("invoices.client", "all");
   // Paid or still pending — the list's own filter, beside Client and Company.
-  const [statusFilter, setStatusFilter] = useStickyFilter<"all" | "pending" | "paid">("invoices.status", "all");
+  const [statusFilter, setStatusFilter] = useStickyFilter<"all" | "pending" | "paid" | "overdue">("invoices.status", "all");
   // Arriving with ?bill=<client> (the client page's "Create invoice", the
   // Clients list's ⋯): Create invoice opens on that client. Read once, then
   // taken off the address so a refresh doesn't open it again.
@@ -160,14 +161,20 @@ export function InvoicesPage() {
     const bal = orders.reduce((s, o) => s + balanceDue(o), 0);
     const gift = orders.reduce((s, o) => s + (o.giftCardRedeemed || 0), 0);
     const paid = orders.length ? bal <= 0 : inv.paid;
-    return { orders, amount, adv, bal, gift, paid };
+    // Due by the client's terms (lib/paymentTerms.ts); late = whole days past it with money owed.
+    const client = db.clients.find(c => c.id === inv.clientId);
+    const dueAt = invoiceDueAt(inv, client, db.settings);
+    const late = paid ? 0 : daysOverdue(dueAt, bal);
+    return { orders, amount, adv, bal, gift, paid, dueAt, late };
   };
 
   // Paid or Pending as the Status column reads it (the live figures). The
   // table's own order puts what is still owed first, newest first within each
   // (the sort is stable, so the date order above holds).
   const paidOf = new Map(list.map(inv => [inv.id, invLive(inv).paid]));
-  if (statusFilter !== "all") list = list.filter(inv => paidOf.get(inv.id) === (statusFilter === "paid"));
+  const lateOf = new Map(list.map(inv => [inv.id, invLive(inv).late]));
+  if (statusFilter === "overdue") list = list.filter(inv => (lateOf.get(inv.id) ?? 0) > 0);
+  else if (statusFilter !== "all") list = list.filter(inv => paidOf.get(inv.id) === (statusFilter === "paid"));
   list = [...list].sort((a, b) => Number(paidOf.get(a.id)) - Number(paidOf.get(b.id)));
 
   // ── Create invoice: DISPATCHED, priced, not-yet-invoiced orders only. ──
@@ -334,6 +341,9 @@ export function InvoicesPage() {
 
   // Each invoice's live figures, worked out once for the table.
   const invRows = list.map(inv => ({ inv, client: db.clients.find(c => c.id === inv.clientId), ...invLive(inv) }));
+  // Past their due day and still owed (lib/paymentTerms.ts).
+  const overdueRows = invRows.filter(r => r.late > 0);
+  const totalOverdue = overdueRows.reduce((s, r) => s + r.bal, 0);
 
   // The list's client filter — only the list. Who is being invoiced is the
   // Create invoice panel's own pick (billClient).
@@ -354,8 +364,8 @@ export function InvoicesPage() {
   // Paid or still to collect — for a client looking at their own bills too.
   invoiceFilters.push({
     kind: "select", label: "Status", allLabel: "Any status", value: statusFilter === "all" ? "" : statusFilter,
-    onChange: v => setStatusFilter((v || "all") as "all" | "pending" | "paid"),
-    options: [{ value: "pending", label: "Pending" }, { value: "paid", label: "Paid" }],
+    onChange: v => setStatusFilter((v || "all") as "all" | "pending" | "paid" | "overdue"),
+    options: [{ value: "pending", label: "Pending" }, { value: "overdue", label: "Overdue" }, { value: "paid", label: "Paid" }],
   });
 
   // The Advance Payment Ledger, one order a row, live from the order's payments.
@@ -410,9 +420,10 @@ export function InvoicesPage() {
   // receipts sent for it and the company that issued it.
   const invoiceDetails = (r: (typeof invRows)[number]): Detail[] => {
     const notes = invoiceCreditNotes(db, r.orders.map(o => o.id));
-    const receipts = isStaff ? (db.clientReceipts ?? []).filter(x => x.invoiceId === r.inv.id) : [];
+    const receipts = isStaff ? (db.clientReceipts ?? []).filter(x => x.invoiceId === r.inv.id || x.invoiceIds?.includes(r.inv.id)) : [];
     return filled([
       { label: "Raised", value: when(r.inv.createdAt) },
+      !!r.dueAt && { label: "Due", value: `${fmtDate(r.dueAt)}${r.inv.dueAt ? "" : ` · ${termsLabel(termsDaysOf(r.client, db.settings))}`}${r.late > 0 ? ` · ${r.late} day${r.late === 1 ? "" : "s"} overdue` : ""}` },
       { label: "Previous number", value: r.inv.previousNumber },
       r.orders.length > 0 && { label: r.orders.length > 1 ? `Orders (${r.orders.length})` : "Order", value: (
         <ul className="space-y-0.5">
@@ -538,6 +549,9 @@ export function InvoicesPage() {
                 { label: "Billed", value: fmtMoney(totalBilled), tone: "strong", icon: FileText },
                 { label: "Received", value: fmtMoney(totalReceived), tone: "in" },
                 { label: "Outstanding", value: fmtMoney(totalOutstanding), tone: "out" },
+                ...(totalOverdue > 0.005 ? [{ label: "Overdue", value: fmtMoney(totalOverdue), tone: "out" as const, icon: AlertCircle,
+                  sub: statusFilter === "overdue" ? `${overdueRows.length} invoice${overdueRows.length === 1 ? "" : "s"} past due`
+                    : <button type="button" onClick={() => setStatusFilter("overdue")} className="text-primary hover:underline">{overdueRows.length} invoice{overdueRows.length === 1 ? "" : "s"} past due — show</button> }] : []),
               ]} />
             }
             resetKey={JSON.stringify([ql, clientFilter, companyFilter, statusFilter])}
@@ -573,10 +587,27 @@ export function InvoicesPage() {
               { key: "age", header: "Age", align: "right", kind: "number", sortValue: r => (r.paid ? null : daysSince(r.inv.createdAt)),
                 cell: r => (r.paid ? <span className="text-muted-foreground/50 text-xs">—</span>
                   : <span className="text-xs tabular-nums whitespace-nowrap text-muted-foreground">{daysSince(r.inv.createdAt)} d</span>) },
-              { key: "status", card: "first" as const, header: "Status", align: "center", sortValue: r => (r.paid ? "Paid" : "Pending"),
+              // When it falls due by the client's terms (lib/paymentTerms.ts) — only once terms are set.
+              { key: "due", header: "Due", kind: "date", sortValue: r => (r.dueAt ? +new Date(r.dueAt) : null), csv: r => (r.dueAt ? fmtDate(r.dueAt) : ""),
+                cell: r => {
+                  if (!r.dueAt) return <span className="text-muted-foreground/50 text-xs">—</span>;
+                  if (r.paid) return <span className="text-xs text-muted-foreground whitespace-nowrap">{fmtDate(r.dueAt)}</span>;
+                  const left = daysToDue(r.dueAt);
+                  return (
+                    <span className="text-xs whitespace-nowrap">
+                      <span className={r.late > 0 ? "text-destructive font-semibold" : "text-brand-dark"}>{fmtDate(r.dueAt)}</span>
+                      <span className={`block text-[10px] ${r.late > 0 ? "text-destructive" : "text-muted-foreground"}`}>
+                        {r.late > 0 ? `${r.late} day${r.late === 1 ? "" : "s"} late` : left === 0 ? "due today" : `in ${left} day${left === 1 ? "" : "s"}`}
+                      </span>
+                    </span>
+                  );
+                } },
+              { key: "status", card: "first" as const, header: "Status", align: "center", sortValue: r => (r.paid ? "Paid" : r.late > 0 ? "Overdue" : "Pending"),
                 cell: r => r.paid
                   ? <span className="inline-flex items-center gap-1 text-xs font-medium text-success"><CheckCircle2 className="h-3 w-3" />Paid</span>
-                  : <span className="inline-flex items-center gap-1 text-xs font-medium text-warning-foreground"><Clock className="h-3 w-3" />Pending</span> },
+                  : r.late > 0
+                    ? <span className="inline-flex items-center gap-1 text-xs font-semibold text-destructive"><AlertCircle className="h-3 w-3" />Overdue</span>
+                    : <span className="inline-flex items-center gap-1 text-xs font-medium text-warning-foreground"><Clock className="h-3 w-3" />Pending</span> },
             ]}
           />
         </div>
@@ -633,7 +664,7 @@ export function InvoicesPage() {
       <Dialog open={!!detailInv} onOpenChange={o => { if (!o) { setDetailInvId(null); setPayOrderId(null); } }}>
         <DialogContent className="max-w-4xl rounded-2xl">
           {detailInv && (() => {
-            const { orders, amount, adv, bal, gift } = invLive(detailInv);
+            const { orders, amount, adv, bal, gift, dueAt, late } = invLive(detailInv);
             const client = db.clients.find(c => c.id === detailInv.clientId);
             // Sending it: a short note — the number, what it comes to, what is
             // still due, from which company — ready in WhatsApp or the mail app.
@@ -643,6 +674,8 @@ export function InvoicesPage() {
               `Invoice ${detailInv.number} from ${fromCo}`,
               `Amount: ${fmtMoney(amount)}`,
               bal > 0 ? `Balance due: ${fmtMoney(bal)}` : "Paid in full — thank you",
+              // Its due day (lib/paymentTerms.ts), while something is owed.
+              ...(bal > 0 && dueAt ? [late > 0 ? `Was due ${fmtDate(dueAt)} — ${late} day${late === 1 ? "" : "s"} overdue` : `Due by ${fmtDate(dueAt)}`] : []),
             ].join("\n");
             // wa.me wants the number in full with no + or leading zeros; one too
             // short to be that opens WhatsApp to pick the chat instead.
@@ -665,6 +698,11 @@ export function InvoicesPage() {
                     <div>
                       <p className="font-medium">{client?.companyName || "—"}</p>
                       <p className="text-xs text-muted-foreground">{fmtDate(detailInv.createdAt)} · {orders.length} order{orders.length !== 1 ? "s" : ""}</p>
+                      {dueAt && bal > 0 && (
+                        <p className={`text-xs font-medium ${late > 0 ? "text-destructive" : "text-muted-foreground"}`}>
+                          {late > 0 ? `Was due ${fmtDate(dueAt)} — ${late} day${late === 1 ? "" : "s"} overdue` : `Due ${fmtDate(dueAt)}`}
+                        </p>
+                      )}
                     </div>
                     <div className="flex items-center gap-2 flex-wrap">
                       {mayReturn && orders.some(o => !returnBlocker(o)) && (
