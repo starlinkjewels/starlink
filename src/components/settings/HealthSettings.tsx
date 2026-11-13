@@ -28,7 +28,7 @@ interface HealthState {
   since?: string; lastTickAt?: string;
   accounts?: { total?: number; unknownOld?: Acct[]; switchedOff?: Acct[]; inactiveCanSignIn?: Acct[]; error?: string };
   jobs?: { failing?: Record<string, number>; error?: string; checkedAt?: string };
-  backup?: { lastAt?: string | null; error?: string };
+  backup?: { lastAt?: string | null; error?: string; records?: number; verified?: boolean | null; every?: string };
   rules?: { database?: string | null; files?: string | null; error?: string };
   partners?: { alerts?: number; emails?: string[] };
 }
@@ -79,7 +79,9 @@ export function HealthSettings() {
   const openLook = events.filter(e => e.severity === "warning" && !e.handled && new Date(e.at).getTime() > week).length;
   const tickAge = state.lastTickAt ? Date.now() - new Date(state.lastTickAt).getTime() : Infinity;
   const running = tickAge < 45 * 60_000;
-  const backupOk = !!state.backup?.lastAt && Date.now() - new Date(state.backup.lastAt).getTime() < 48 * 3600_000;
+  // Every 6 hours by the server (functions/src/backup/), each checked; before the first of those, the app's daily one.
+  const sixHourly = state.backup?.every === "6h";
+  const backupOk = !!state.backup?.lastAt && Date.now() - new Date(state.backup.lastAt).getTime() < (sixHourly ? 7 : 48) * 3600_000 && state.backup?.verified !== false;
   const failing = Object.entries(state.jobs?.failing ?? {});
   const unknownOld = state.accounts?.unknownOld ?? [];
   const switchedOff = state.accounts?.switchedOff ?? [];
@@ -153,7 +155,11 @@ export function HealthSettings() {
           {check(inactive.length === 0, "Switched-off staff", inactive.length
             ? <>{inactive.length} person{inactive.length === 1 ? "" : "s"} marked inactive can still sign in — they see nothing of the business (the rules refuse them), but their login is still open: {inactive.map(a => a.email).filter(Boolean).slice(0, 4).join(", ")}.</>
             : "Nobody marked inactive can sign in.")}
-          {check(backupOk, "Backups", state.backup?.lastAt ? <>Last backup {ago(state.backup.lastAt)}{backupOk ? "" : " — older than 2 days: take one in Data & Backup"}.</> : "No backup found yet — take one in Data & Backup.")}
+          {check(backupOk, "Backups", state.backup?.lastAt
+            ? sixHourly
+              ? <>Every 6 hours by the server, each read back and checked. Last {ago(state.backup.lastAt)}{state.backup.records ? ` — ${state.backup.records.toLocaleString("en-IN")} records` : ""}{state.backup.verified === false ? " — its check found a problem: see Data & Backup" : state.backup.verified ? ", read back whole" : ""}{Date.now() - new Date(state.backup.lastAt).getTime() > 7 * 3600_000 ? ". Overdue — take one in Data & Backup" : ""}.</>
+              : <>Last backup {ago(state.backup.lastAt)}{backupOk ? "" : " — older than 2 days: take one in Data & Backup"}.</>
+            : "No backup found yet — take one in Data & Backup.")}
           {check(failing.length === 0 && !state.jobs?.error, "Server jobs", failing.length ? <>Failing since the last check: {failing.map(([k, n]) => `${k} (${n})`).join(", ")}.</> : state.jobs?.error ? "Couldn't read the server's logs." : "Mail, the Agent, totals, Autopilot and the rest — no errors.")}
           {check("off", "App Check", <>Off on purpose since 14 Oct (its key needs fixing). With it on, only the real app could reach the database; until then the rules above are what protects the data.</>)}
           {check(running, "This watch", running ? <>Running — last check {ago(state.lastTickAt)}. Owners: {ADMIN_EMAILS.join(", ")}.</> : "The 15-minute check has not run recently.")}

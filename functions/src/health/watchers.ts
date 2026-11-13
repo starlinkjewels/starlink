@@ -135,14 +135,24 @@ export const healthTick = onSchedule(
       out.jobs = { checkedAt: new Date().toISOString(), error: String(e).slice(0, 200) };
     }
 
-    // ── The last backup (the app's own, in Storage backups/) ──
+    // ── The last backup: the server's own every 6 hours (backup/run.ts), each checked ──
+    // Until the first of those, the app's daily one in Storage backups/.
     try {
-      const [files] = await getStorage(app).bucket().getFiles({ prefix: "backups/", maxResults: 400 });
-      const last = files.map(f => ({ name: f.name, at: String(f.metadata.timeCreated ?? "") })).sort((a, b) => b.at.localeCompare(a.at))[0];
-      out.backup = { lastAt: last?.at ?? null, name: last?.name ?? null, count: files.length };
-      const age = last?.at ? now - new Date(last.at).getTime() : Infinity;
-      if (age > 48 * 3600_000) {
-        await raise({ kind: "backupLate", severity: "warning", title: "No backup in the last 2 days", detail: last?.at ? `The last backup is from ${new Date(last.at).toLocaleString("en-GB", { timeZone: "Asia/Kolkata" })}. It is made when an admin opens the app; or take one in Settings → Data & Backup.` : "No backup found. Take one in Settings → Data & Backup." }, "backup", 1440);
+      const runs = await db.collection("backupRuns").orderBy("at", "desc").limit(1).get();
+      const run = runs.docs[0]?.data() as { at?: string; path?: string; records?: number; verified?: { ok?: boolean; at?: string } } | undefined;
+      if (run?.at) {
+        out.backup = { lastAt: run.at, name: run.path ?? null, records: run.records ?? 0, verified: run.verified?.ok ?? null, verifiedAt: run.verified?.at ?? null, every: "6h" };
+        if (now - new Date(run.at).getTime() > 7 * 3600_000) {
+          await raise({ kind: "backupLate", severity: "warning", title: "No backup in the last 7 hours", detail: `The last backup is from ${new Date(run.at).toLocaleString("en-GB", { timeZone: "Asia/Kolkata" })} — one should run every 6 hours. Take one now in Settings → Data & Backup.` }, "backup", 360);
+        }
+      } else {
+        const [files] = await getStorage(app).bucket().getFiles({ prefix: "backups/", maxResults: 400 });
+        const last = files.map(f => ({ name: f.name, at: String(f.metadata.timeCreated ?? "") })).sort((a, b) => b.at.localeCompare(a.at))[0];
+        out.backup = { lastAt: last?.at ?? null, name: last?.name ?? null, count: files.length };
+        const age = last?.at ? now - new Date(last.at).getTime() : Infinity;
+        if (age > 48 * 3600_000) {
+          await raise({ kind: "backupLate", severity: "warning", title: "No backup in the last 2 days", detail: last?.at ? `The last backup is from ${new Date(last.at).toLocaleString("en-GB", { timeZone: "Asia/Kolkata" })}. Take one in Settings → Data & Backup.` : "No backup found. Take one in Settings → Data & Backup." }, "backup", 1440);
+        }
       }
     } catch (e) {
       out.backup = { error: String(e).slice(0, 200) };

@@ -632,6 +632,8 @@ service cloud.firestore {
     // closed to everyone, by the rule below.
     match /securityEvents/{id} { allow read: if isAdmin(); allow write: if false; }
     match /healthState/{id} { allow read: if isAdmin(); allow write: if false; }
+    // Backups every 6 hours (functions/src/backup/): each run and its check — admins read, only the server writes.
+    match /backupRuns/{id} { allow read: if isAdmin(); allow write: if false; }
 
     // Deny everything else by default.
     match /{document=**} { allow read, write: if false; }

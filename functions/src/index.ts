@@ -25,6 +25,9 @@ export { fileClaimsOnIndex, syncFileClaims } from "./fileClaims";
 // Software health — attacks and failures watched, partners alerted (see health/).
 export { healthTick, healthDigest, healthOnDelete, healthOnActivity } from "./health/watchers";
 export { reportHealth, healthAction } from "./health/report";
+// Backups every 6 hours, each checked; the main admin's safe restore (functions/src/backup/).
+export { backupEvery6h, backupNow } from "./backup/run";
+export { backupRestore } from "./backup/restore";
 // Smart Pipelines — the business's own automations (Settings → Autopilot; see pipelines/).
 export { pipelineOnOrder, pipelineOnClient, pipelineOnInvoice, pipelineOnAnswer, pipelineTick, pipelineTest, pipelineRunNow } from "./pipelines";
 

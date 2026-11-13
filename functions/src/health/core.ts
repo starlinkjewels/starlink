@@ -23,7 +23,7 @@ import { BRAND, APP_URL } from "../pipelines/config";
 export type Severity = "critical" | "warning" | "info";
 export type EventKind =
   | "unknownAccount" | "unknownSignin" | "massDelete" | "bulkChange" | "madeAdmin" | "accessChange" | "yearReopened"
-  | "failedLogins" | "blocked" | "newDevice" | "appError" | "jobError" | "backupLate" | "test";
+  | "failedLogins" | "blocked" | "newDevice" | "appError" | "jobError" | "backupLate" | "backupBad" | "backupRestored" | "test";
 
 export interface HealthEvent {
   id: string;
