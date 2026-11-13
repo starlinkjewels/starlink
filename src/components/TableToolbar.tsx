@@ -368,7 +368,9 @@ export function StatStrip({ items, note }: { items: StatItem[]; note?: ReactNode
           const lastAlone = n % 2 === 1 && i === n - 1;
           return (
             <div key={it.label}
-              className={`@container relative min-w-0 px-4 sm:px-5 py-3.5 sm:py-4 flex items-start gap-3
+              // A phone: tighter — no picture, a smaller label, one line of note — so a strip
+              // of figures takes a little of the screen, not half of it.
+              className={`@container relative min-w-0 px-3 sm:px-5 py-2.5 sm:py-4 flex items-start gap-3
                 ${lastAlone ? "max-sm:col-span-2" : ""}
                 ${i > 0 ? "sm:border-l sm:border-border/60" : ""}
                 ${i % 2 === 1 ? "max-sm:border-l max-sm:border-border/60" : ""}
@@ -377,12 +379,12 @@ export function StatStrip({ items, note }: { items: StatItem[]; note?: ReactNode
                 <span aria-hidden className="max-sm:hidden absolute -left-[11px] top-1/2 -translate-y-1/2 z-[1] h-[22px] w-[22px] grid place-items-center rounded-full bg-white border border-border text-[13px] font-semibold text-muted-foreground leading-none">{it.op}</span>
               )}
               {/* The picture only where there is room for it beside the figure. */}
-              <span className={`ui-stat-icon h-9 w-9 shrink-0 rounded-xl grid place-items-center ${t.chip} @max-[14rem]:hidden`}><Icon className="h-[18px] w-[18px]" /></span>
+              <span className={`ui-stat-icon h-9 w-9 shrink-0 rounded-xl grid place-items-center ${t.chip} @max-[14rem]:hidden max-sm:hidden`}><Icon className="h-[18px] w-[18px]" /></span>
               <div className="min-w-0 flex-1">
-                <p className="ui-stat-label text-xs font-medium text-muted-foreground leading-snug line-clamp-2">{it.label}</p>
+                <p className="ui-stat-label text-[11px] sm:text-xs font-medium text-muted-foreground leading-snug line-clamp-2">{it.label}</p>
                 {/* A figure is never split across lines: it sizes to its tile instead. */}
-                <p className={`ui-stat-value mt-1 text-[clamp(0.95rem,11cqi,1.375rem)] font-semibold tracking-tight tabular-nums leading-tight whitespace-nowrap ${zero ? "text-muted-foreground" : t.value}`}>{it.value}</p>
-                {it.sub && <p className="mt-0.5 text-[11px] text-muted-foreground leading-snug line-clamp-2">{it.sub}</p>}
+                <p className={`ui-stat-value mt-0.5 sm:mt-1 text-[clamp(0.95rem,11cqi,1.375rem)] font-semibold tracking-tight tabular-nums leading-tight whitespace-nowrap ${zero ? "text-muted-foreground" : t.value}`}>{it.value}</p>
+                {it.sub && <p className="mt-0.5 text-[11px] text-muted-foreground leading-snug line-clamp-2 max-sm:line-clamp-1" title={typeof it.sub === "string" ? it.sub : undefined}>{it.sub}</p>}
               </div>
             </div>
           );

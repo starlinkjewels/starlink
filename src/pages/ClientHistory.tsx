@@ -1,4 +1,6 @@
 import { stageLabel } from "@/lib/stages";
+import { ReceiveFromClient, type ReceiveValues } from "@/components/payments/ReceiveFromClient";
+import { receiptShareActions } from "@/lib/receiptShare";
 import { CustomFieldsView } from "@/components/CustomFields";
 import { PartyMemos } from "@/components/MemoSheets";
 import { isDiamondOnlyOrder, orderImage, hiddenFromMe } from "@/lib/db";
@@ -186,60 +188,25 @@ function ClientHistoryPageBody() {
 
   const [showExport, setShowExport] = useState(() => askedStatement && mayExport);
 
-  // ── Client account / payments ──
-  const [payAmount, setPayAmount] = useState("");
-  const [payMethod, setPayMethod] = useState("Cash");
-  const [payRemark, setPayRemark] = useState("");
-  const [payInvoiceId, setPayInvoiceId] = useState("");
-  const [payLockerId, setPayLockerId] = useState("");
-  // The locker's currency for $1 (₹ per $, A$ per $…).
-  const [payExchangeRate, setPayExchangeRate] = useState<number | "">("");
+  // ── Client account / payments ── (taken in the one shared panel, components/payments/ReceiveFromClient.tsx)
   const [showPayForm, setShowPayForm] = useState(() => askedPay && can("payments", "add"));
   // Split as Invoices reads it: due now (on an invoice, unpaid) + on order (not
   // billed yet) = outstanding. Nothing about the account changes, only how it reads.
   const account = splitClientAccount(billableOrders, client?.creditBalance || 0, client, invoicedOrderIds(db.invoices));
   // Shipped work with no invoice — the Orders page's "Not invoiced", for them.
   const toBill = user!.role !== "client" ? readyToBill(db, id!) : { ready: [], noPrice: [], total: 0 };
-  const payLocker = db.lockers.find(l => l.id === payLockerId);
-  const payLockerCurrency = ccy(payLocker?.currency);
-  // A client always pays in USD (that's what the order is billed in) — a
-  // locker in any other currency needs converting for the deposit side.
-  const payNeedsRate = !!payLocker && payLockerCurrency !== "USD";
-  const payRate = Number(payExchangeRate);
-  // A rate belongs to one currency: picking a locker in another starts it
-  // afresh (from Settings) instead of carrying ₹83 into an AUD locker.
-  const pickPayLocker = (v: string) => {
-    const next = db.lockers.find(l => l.id === v);
-    if (!next || ccy(next.currency) !== payLockerCurrency) setPayExchangeRate("");
-    setPayLockerId(v);
-  };
-
-  // Which invoice this money is for. Left blank it is held as credit on the
-  // client's account rather than being spread over their oldest bills.
-  const openInvoicesForPay = (db.invoices ?? [])
-    .filter(inv => inv.clientId === id)
-    .map(inv => ({
-      inv,
-      bal: invoiceOrderIds(inv).reduce((s, oid) => {
-        const o = db.orders.find(x => x.id === oid);
-        return s + (o ? balanceDue(o) : 0);
-      }, 0),
-    }))
-    .filter(x => x.bal > 0.009)
-    .sort((a, b) => +new Date(b.inv.createdAt) - +new Date(a.inv.createdAt));
-
-  const recordPayment = async () => {
-    const amt = parseFloat(payAmount);
-    if (!amt || amt <= 0) { toast.error("Enter a valid amount"); return; }
-    if (!payLockerId) { toast.error("Choose which locker this was deposited into"); return; }
-    if (payNeedsRate && (!payRate || payRate <= 0)) { toast.error("Enter the exchange rate before saving this payment"); return; }
-    const depositAmt = payNeedsRate ? roundCcy(amt * payRate, payLockerCurrency) : amt;
+  // Saves what the payment panel took (its fields already checked there).
+  const recordPayment = async (v: ReceiveValues) => {
+    const amt = v.amountUsd;
+    const payLockerId = v.lockerId, payMethod = v.method, payInvoiceId = v.invoiceId ?? "";
+    const depositAmt = v.depositAmount;
     // Note recorded on each payment entry → shows in the Income Passbook.
-    const note = payRemark.trim() ? `${payMethod} · ${payRemark.trim()}` : payMethod;
+    const note = v.remark ? `${payMethod} · ${v.remark}` : payMethod;
     // The advances this payment creates are noted so it can be given its
     // receipt number straight after — every payment is a numbered receipt.
     const txnId = uid("ltx_");
-    const at = new Date().toISOString();
+    // On the day it came in (the panel's date).
+    const at = v.at;
     let newAdvanceIds: string[] = [];
     updateDb(d => {
       const c = d.clients.find(x => x.id === id);
@@ -262,7 +229,7 @@ function ClientHistoryPageBody() {
             id: txnId, lockerId: payLockerId, type: "income", amountInr: depositAmt,
             currency: ccy(locker.currency), category: `Client Payment — ${c.companyName}`,
             refType: "clientPayment", refId: c.id, note: note, recordedBy: user!.id, createdAt: now,
-            exchangeRate: payNeedsRate ? payRate : undefined,
+            exchangeRate: v.exchangeRate,
           });
         }
       }
@@ -282,7 +249,7 @@ function ClientHistoryPageBody() {
       try {
         const r = await receiptForAdvance({
           clientId: id!, advanceIds: newAdvanceIds, amountUsd: amt,
-          date: at, method: payMethod, remarks: payRemark.trim() || undefined,
+          date: at, method: payMethod, remarks: v.remark || undefined,
           lockerTxnId: payLockerId ? txnId : undefined, userId: user!.id,
         });
         receiptNo = ` · ${r.receiptNo}`;
@@ -291,7 +258,6 @@ function ClientHistoryPageBody() {
       }
     }
     toast.success(`Payment recorded${receiptNo} (${payMethod}) — ${payInvoiceId ? "against the invoice; anything over is held as credit" : "held as credit"}`);
-    setPayAmount(""); setPayRemark(""); setPayLockerId(""); setPayExchangeRate(""); setPayInvoiceId(""); setShowPayForm(false);
   };
 
   const applyCredit = () => {
@@ -378,6 +344,8 @@ function ClientHistoryPageBody() {
     const lock = paymentLockReason(db, p);
     const rcpt = receiptNo(p.receiptId) ? `receipt ${receiptNo(p.receiptId)}` : "the receipt";
     return [
+      // The receipt itself, to print or send (lib/receiptShare.ts).
+      ...receiptShareActions(p.receiptId),
       { label: "Edit", icon: Pencil, disabled: !!lock || !mayPayEdit,
         hint: lock ?? (mayPayEdit ? `Correct ${rcpt}` : needsAccess("payments", "edit")),
         onSelect: async () => { await loadReceipts(); setEditReceiptId(p.receiptId!); } },
@@ -927,110 +895,11 @@ function ClientHistoryPageBody() {
 
 
 
-      {/* Recording a payment is a panel, so the ledger and the order history
-          behind stay where they were. Closing it keeps what was typed; Cancel
-          clears the amount and remark, as the inline form did. */}
-      {(() => {
-        // No rate yet → nothing to show, rather than the dollar figure in another currency.
-        const payDepositPreview = !payAmount ? null : !payNeedsRate ? Number(payAmount) : payRate > 0 ? Number(payAmount) * payRate : null;
-        return (
-          <ActionSheet
-            open={showPayForm}
-            onOpenChange={setShowPayForm}
-            title="Record Client Payment"
-            description={<>From {client.companyName} · pick an invoice to settle it, or it's held as credit{account.credit > 0 && <> · {fmtMoney(account.credit)} credit held</>}</>}
-            icon={Wallet}
-            footer={
-              <div className="flex items-end justify-between gap-3 flex-wrap">
-                {payAmount && payLockerId && (
-                  <div className="min-w-0 flex-1 basis-56 space-y-1">
-                    <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Summary</p>
-                    <div className="flex items-center justify-between gap-3 text-sm">
-                      <span className="text-muted-foreground">Received</span>
-                      <span className="font-medium text-foreground">{fmtMoney(Number(payAmount))}</span>
-                    </div>
-                    {/* Where it goes, as it will be saved: against the invoice chosen, else held as credit. */}
-                    <div className="flex items-center justify-between gap-3 text-sm">
-                      <span className="text-muted-foreground min-w-0 truncate">{payInvoiceId
-                        ? `Against invoice ${openInvoicesForPay.find(x => x.inv.id === payInvoiceId)?.inv.number ?? ""}`
-                        : "Held as credit"}</span>
-                      <span className="font-semibold text-primary">{fmtMoney(Number(payAmount))}</span>
-                    </div>
-                    {!payInvoiceId && <p className="text-[11px] text-muted-foreground">Settles no bill yet — use “Apply credit” to put it on their bills.</p>}
-                    {payDepositPreview != null && payLocker && (
-                      <div className="flex items-center justify-between gap-3 text-sm">
-                        <span className="text-muted-foreground min-w-0 truncate">Deposited to {payLocker.name}</span>
-                        <span className="font-semibold text-foreground shrink-0">{fmtCcy(roundCcy(payDepositPreview, payLockerCurrency), payLockerCurrency)}</span>
-                      </div>
-                    )}
-                  </div>
-                )}
-                <div className="flex gap-2.5 ml-auto">
-                  <Button variant="outline" onClick={() => { setShowPayForm(false); setPayAmount(""); setPayRemark(""); }} className="rounded-xl h-10">Cancel</Button>
-                  <AsyncButton onClick={recordPayment} className="btn-hero rounded-xl h-10">Save &amp; Allocate</AsyncButton>
-                </div>
-              </div>
-            }
-          >
-            <div className="space-y-3">
-              {/* Amount */}
-              <div className="relative">
-                <DollarSign className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                <Input
-                  type="number" min="1" step="0.01" autoFocus
-                  value={payAmount} onChange={e => setPayAmount(e.target.value)}
-                  onKeyDown={e => e.key === "Enter" && recordPayment()}
-                  className="pl-9 rounded-xl h-10" placeholder="Amount received ($)" />
-              </div>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-                {/* Which bill this is for — blank holds it as credit */}
-                {openInvoicesForPay.length > 0 && (
-                  <Select value={payInvoiceId || "credit"} onValueChange={v => setPayInvoiceId(v === "credit" ? "" : v)}>
-                    <SelectTrigger className="h-10 rounded-xl">
-                      <FileText className="h-4 w-4 mr-2 shrink-0 text-muted-foreground" /><SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="credit">No invoice — hold as credit</SelectItem>
-                      {openInvoicesForPay.map(({ inv, bal }) => (
-                        <SelectItem key={inv.id} value={inv.id}>
-                          Invoice {inv.number} — {fmtMoney(bal)} pending
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                )}
-                {/* Method */}
-                <ListCombo list="paymentMethods" value={payMethod} onChange={setPayMethod} optional={false} className="h-10 rounded-xl" ariaLabel="Payment method" />
-              </div>
-              {/* Remark */}
-              <Input
-                value={payRemark} onChange={e => setPayRemark(e.target.value)}
-                onKeyDown={e => e.key === "Enter" && recordPayment()}
-                className="rounded-xl h-10" placeholder="Remark / ref (optional)" />
-
-              {db.lockers.filter(l => l.active !== false).length === 0 && (
-                <p className="text-xs text-amber-600">
-                  No lockers yet — <Link to="/locker" className="inline-block py-2.5 -my-2.5 underline font-medium">create one first</Link> before recording a payment.
-                </p>
-              )}
-              <Select value={payLockerId} onValueChange={addNew("locker", pickPayLocker)}>
-                <SelectTrigger className="h-10 rounded-xl"><SelectValue placeholder="Deposited to locker *" /></SelectTrigger>
-                <SelectContent>
-                  {db.lockers.filter(l => l.active !== false).map(l => <SelectItem key={l.id} value={l.id}>{l.name} ({ccy(l.currency)})</SelectItem>)}
-                <AddNewItem kind="locker" /></SelectContent>
-              </Select>
-
-              {payNeedsRate && (
-                <div className="p-3 rounded-xl bg-secondary space-y-2">
-                  <RateInput id="client-pay-rate" from="USD" to={payLockerCurrency} value={payExchangeRate}
-                    onChange={setPayExchangeRate} amount={Number(payAmount) || undefined} />
-                  <p className="text-xs text-muted-foreground">This locker holds {payLockerCurrency}, not USD — the rate converts what lands in it.</p>
-                </div>
-              )}
-            </div>
-          </ActionSheet>
-        );
-      })()}
+      {/* Recording a payment: the one shared panel (components/payments/ReceiveFromClient.tsx),
+          saved by this page's own recordPayment — the ledger and order history stay behind it. */}
+      <ReceiveFromClient open={showPayForm} onOpenChange={setShowPayForm} clientId={client.id} onSave={recordPayment}
+        title="Record Client Payment"
+        description={<>From {client.companyName} · pick an invoice to settle it, or it's held as credit{account.credit > 0 && <> · {fmtMoney(account.credit)} credit held</>}</>} />
     </div>
   );
 }

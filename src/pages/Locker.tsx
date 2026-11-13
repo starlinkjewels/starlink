@@ -3,7 +3,7 @@ import { lockerEntryText, lockerLookup } from "@/lib/lockerText";
 import { DataTable, CellMain, CellTag, CellAmount, CellDate, type DataColumn } from "@/components/DataTable";
 import { useCan, useHas } from "@/hooks/useCan";
 import { useState } from "react";
-import { useNavigate, useSearchParams } from "react-router-dom";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { loadDb, updateDb, fmtDate, collectionsLoaded, type Locker, type LockerType, type LockerTransaction, type LockerTxnType } from "@/lib/db";
 import { useDb } from "@/hooks/useDb";
 import { useLoaded } from "@/hooks/useLoaded";
@@ -429,7 +429,8 @@ export function LockerPage() {
     <div className="max-w-7xl mx-auto space-y-5">
       <PageHeader
         title="Locker"
-        subtitle="Bank and cash accounts"
+        // Each money page's job, in one line, and where the others are.
+        subtitle={<>Your bank and cash accounts and their balances · an account's money day by day is its <Link to="/payments" className="text-primary hover:underline">Day book</Link></>}
         primary={can("locker", "add") || can("payments", "add") ? { label: "Record entry", icon: Plus, onClick: () => setEntryOpen(true), disabled: lockers.length === 0 } : null}
         menu={can("locker", "add") ? [{ label: "New account", icon: Landmark, hint: "A bank or cash account", onSelect: () => setOpen(true) }] : undefined}
       />

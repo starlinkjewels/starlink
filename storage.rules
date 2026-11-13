@@ -3,8 +3,8 @@ rules_version = '2';
 // Files. Storage rules can't read this app's database ("diamondflow" is a named
 // database; Storage reads only "(default)"), so who someone is comes from their
 // sign-in token: the "sl" claim the server keeps there from their sign-in record
-// (functions/src/fileClaims.ts) — { r: admin | employee | client, st: active | off,
-// docs?: true }. An owner is known by email, always.
+// (functions/src/fileClaims.ts) — { r: admin | employee | client | designer,
+// st: active | off, docs?: true, d?: designer id }. An owner is known by email, always.
 //
 // Viewing a photo in the app goes through its link (a download URL carries its
 // own key), so these rules decide mostly who may ADD, CHANGE and DELETE files:
@@ -29,6 +29,8 @@ service firebase.storage {
     function isStaff() { return isOwner() || (on() && request.auth.token.sl.r in ['admin', 'employee']); }
     function isClient() { return on() && request.auth.token.sl.r == 'client'; }
     function hasDocs() { return isAdmin() || (on() && request.auth.token.sl.r == 'employee' && request.auth.token.sl.docs == true); }
+    // A CAD designer's own login — this designer.
+    function isDesignerOf(did) { return on() && request.auth.token.sl.r == 'designer' && request.auth.token.sl.d == did; }
 
     // Automatic database backups (src/lib/backup.ts). Each file is a FULL
     // snapshot of the whole account — admins only (any admin, not only an owner).
@@ -58,6 +60,14 @@ service firebase.storage {
       // A client only ever adds: never over a file already there.
       allow create: if isStaff() || (isClient() && resource == null);
       allow update, delete: if isStaff();
+    }
+
+    // A designer's own login adds files ONLY to their own folder (cad/by/{designer}/{job}/…),
+    // new files only, up to 500 MB each — never changing or removing anything. The server puts a
+    // file on a design only after checking the design is theirs (functions/src/designerWork.ts),
+    // and takes one out of storage for them. Staff keep their rights here (the rule below).
+    match /cad/by/{did}/{rest=**} {
+      allow create: if isDesignerOf(did) && resource == null && request.resource.size < 500 * 1024 * 1024;
     }
 
     // The rest of the app's folders: read by anyone signed in, written by staff only.

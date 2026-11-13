@@ -10,6 +10,9 @@ export { aiVoice } from "./aiVoice";
 export { sendMail } from "./mail";
 // An admin changing a client's sign-in email or password (see clientLogin.ts).
 export { setClientLogin } from "./clientLogin";
+
+// A CAD designer's own login: their files, hand-in and money statement — checked here.
+export { designerWork } from "./designerWork";
 // Product videos made playable on every browser and device (see videoWeb.ts).
 export { makeWebVideo } from "./videoWeb";
 // Documents: opening a password link without signing in (see docShare.ts).

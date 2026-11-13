@@ -1,4 +1,5 @@
 import { useCan } from "@/hooks/useCan";
+import { receiptShareActions } from "@/lib/receiptShare";
 import { listOf } from "@/lib/optionLists";
 import { useState } from "react";
 import { Pencil, Trash2 } from "lucide-react";
@@ -221,6 +222,8 @@ export function ReceiptLedger() {
           // account entry can't be told apart from its neighbours, isn't cancelled.
           const stuck = mayDelete ? receiptCancelBlocker(db, r.id) : undefined;
           return [
+            // The receipt itself, to print or send (lib/receiptShare.ts).
+            ...receiptShareActions(r.id),
             { label: "Edit", icon: Pencil, onSelect: () => setEditId(r.id), disabled: !mayEdit,
               hint: mayEdit ? "Amount, date, account, mode" : needsAccess("payments", "edit") },
             { label: "Delete", icon: Trash2, danger: true, onSelect: () => cancelReceiptFlow(r.id, user!.id), disabled: !mayDelete || !!stuck,

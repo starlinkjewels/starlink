@@ -1,11 +1,12 @@
 import { hasDiamonds, looseLabel, stonesLine } from "@/lib/orderText";
+import { ReceiveFromClient } from "@/components/payments/ReceiveFromClient";
 import { CustomFieldInputs } from "@/components/CustomFields";
 import { customProblem, valuesOf, writeValues, type CfValues } from "@/lib/customFields";
 import { activeMaterials, materialDef } from "@/lib/materials";
 import { COPY_PARAM, copyBlocker, copyFields, copyHref, copyKind } from "@/lib/orderCopy";
 import { chargeDrafts } from "@/components/OtherCharges";
 import { useCan, useHas } from "@/hooks/useCan";
-import { buildLooseTimelineSteps, byNewestEntered, type ReadyStockItem } from "@/lib/db";
+import { buildLooseTimelineSteps, byNewestEntered, stampFor, type ReadyStockItem } from "@/lib/db";
 import { looseStages } from "@/lib/stages";
 import { ProductionPlan, type OrderKind } from "@/components/order/ProductionPlan";
 import type { PlannedBuy } from "@/components/BuyMaterialForm";
@@ -32,7 +33,7 @@ import { metalHasKarats as hasKarats, metalColour } from "@/lib/metals";
 import { choicesOf, listOf } from "@/lib/optionLists";
 import { receiptForAdvance } from "@/lib/receipts";
 import { ccy, ccySymbol, fmtCcy, rateText, roundCcy, tableRate } from "@/lib/currency";
-import { RateInput, useSuggestedRate } from "@/components/CurrencyFields";
+import { RateInput } from "@/components/CurrencyFields";
 import { sendMail, orderReceivedEmail, MARKETING_EMAIL } from "@/lib/email";
 import { useDb } from "@/hooks/useDb";
 import { adminIds, notifyUsers } from "@/lib/notify";
@@ -145,6 +146,8 @@ function NewOrderForm() {
 
   // Custom fields (lib/customFields.ts) — the ones this person may see; a client only those shown to clients.
   const [cf, setCf] = useState<CfValues>({});
+  // The advance's payment panel (components/payments/ReceiveFromClient.tsx).
+  const [advOpen, setAdvOpen] = useState(false);
   const [f, setF] = useState({
     clientId: isClient ? (user!.clientId ?? "") : "",
     // The first of each of the business's own lists (Settings → Dropdown lists).
@@ -181,9 +184,14 @@ function NewOrderForm() {
     orderValue: 0,
     shippingCharge: defaultShipping,
     advanceAmount: 0,
+    // The advance as the payment panel took it (components/payments/ReceiveFromClient.tsx):
+    // the remark, the mode, the account and what landed there, its rate and its day.
     advanceNote: "",
     advanceLockerId: "",
     advanceLockerAmount: "",
+    advanceMethod: "",
+    advanceRate: 0,
+    advanceDate: "",
     certificate: "no" as "yes" | "no",
     certificateFee: 0,
     materialSourcing: "later" as "later" | "stock" | "purchase" | "readyStock",
@@ -659,7 +667,8 @@ function NewOrderForm() {
     // all be tied together afterwards.
     const advanceId = uid("adv_");
     const advTxnId = uid("ltx_");
-    const advAt = new Date().toISOString();
+    // On the day it came in (the payment panel's date), else now.
+    const advAt = f.advanceDate ? stampFor(f.advanceDate) : new Date().toISOString();
     const advance = Number(f.advanceAmount) || 0;
     updateDb(d => {
       const num = reservedNumber;
@@ -743,7 +752,7 @@ function NewOrderForm() {
           amount: advance,
           note: f.advanceNote || "Initial advance",
           recordedBy: user!.id,
-          createdAt: new Date().toISOString(),
+          createdAt: advAt,
           lockerId: f.advanceLockerId || undefined,
           lockerAmount: f.advanceLockerId ? Number(f.advanceLockerAmount) : undefined,
         }] : [],
@@ -879,7 +888,8 @@ function NewOrderForm() {
           d.lockerTransactions.push({
             id: advTxnId, lockerId: f.advanceLockerId, type: "income", amountInr: Number(f.advanceLockerAmount),
             currency: ccy(locker.currency), category: `Client Payment — ${order.orderNumber}`,
-            refType: "clientPayment", refId: order.id, recordedBy: user!.id, createdAt: new Date().toISOString(),
+            refType: "clientPayment", refId: order.id, recordedBy: user!.id, createdAt: advAt,
+            ...(f.advanceRate ? { exchangeRate: f.advanceRate } : {}),
           });
         }
       }
@@ -945,7 +955,8 @@ function NewOrderForm() {
       try {
         await receiptForAdvance({
           clientId, advanceIds: [advanceId], amountUsd: advance,
-          date: advAt, method: f.advanceNote || "Initial advance",
+          date: advAt, method: f.advanceMethod || f.advanceNote || "Initial advance",
+          ...(f.advanceMethod && f.advanceNote ? { remarks: f.advanceNote } : {}),
           lockerTxnId: f.advanceLockerId ? advTxnId : undefined, userId: user!.id,
         });
       } catch {
@@ -1019,7 +1030,8 @@ function NewOrderForm() {
   const balanceDue = Math.max(0, grandTotal - Number(f.advanceAmount));
   // The advance is billed in USD; the locker it lands in can hold any currency.
   const advLockerCcy = ccy(db.lockers.find(l => l.id === f.advanceLockerId)?.currency);
-  const advRate = useSuggestedRate("USD", advLockerCcy);
+  // Who the advance is from — the order's client.
+  const advClientId = isClient ? user!.clientId! : (forReadyStock ? "" : f.clientId);
   const autoValue  = Math.round(Number(f.estimatedNetWeight) * metalRate + (Number(f.diamondWeight) || 0) * diamondRate);
 
   // ── Gift card on this new order ──
@@ -1806,64 +1818,41 @@ function NewOrderForm() {
             {/* Taking money is Payments → Add — the advance is a payment like any other. */}
             {(isAdmin || canDo("payments", "add")) && (
             <SectionCard icon={<CreditCard className="h-4 w-4 text-success" />} title="Advance Payment" subtitle="Optional" iconBg="bg-success/10">
-              {/* Amount + Note — 2 cols on desktop only (note is wide) */}
-              <div className="grid md:grid-cols-2 gap-3">
-                <Field label="Advance Amount (USD)">
-                  <div className="relative">
-                    <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground font-medium text-sm">$</span>
-                    <Input type="number" min={0} max={grandTotal} step="0.01"
-                      value={f.advanceAmount || ""}
-                      onChange={e => set("advanceAmount", +e.target.value)}
-                      className="rounded-xl h-11 pl-7" placeholder="0" />
+              {/* The advance is taken in the one payment panel (components/payments/ReceiveFromClient.tsx)
+                  and saved with the order when it is placed. */}
+              {Number(f.advanceAmount) > 0 ? (
+                <div className="flex flex-wrap items-start justify-between gap-3 rounded-xl border border-border/70 px-4 py-3">
+                  <div className="min-w-0 text-sm">
+                    <p className="font-semibold text-foreground tabular-nums">{fmtCcy(Number(f.advanceAmount), "USD")} advance</p>
+                    <p className="text-xs text-muted-foreground break-words">{[
+                      f.advanceMethod,
+                      (() => { const l = db.lockers.find(x => x.id === f.advanceLockerId); return l ? `into ${l.name}${advLockerCcy !== "USD" ? ` (${fmtCcy(Number(f.advanceLockerAmount), advLockerCcy)})` : ""}` : ""; })(),
+                      f.advanceDate,
+                      f.advanceNote,
+                    ].filter(Boolean).join(" · ")}</p>
                   </div>
-                </Field>
-                <Field label="Payment Note">
-                  <Input value={f.advanceNote} onChange={e => set("advanceNote", e.target.value)}
-                    className="rounded-xl h-11" placeholder="Cash, Bank transfer, Cheque…" />
-                </Field>
-              </div>
-
-              {Number(f.advanceAmount) > 0 && db.lockers.filter(l => l.active !== false).length === 0 && (
-                <p className="text-xs text-amber-600 -mt-1">
-                  No lockers yet — create one on the Locker page first before recording this advance.
-                </p>
-              )}
-              {Number(f.advanceAmount) > 0 && (
-                <div className="grid md:grid-cols-2 gap-3">
-                  <Field label="Deposited to Locker *" {...markOf("advanceLockerId")}>
-                    <Select value={f.advanceLockerId} onValueChange={addNew("locker", v => {
-                      const db0 = loadDb();
-                      const l = db0.lockers.find(x => x.id === v);
-                      const lc = ccy(l?.currency);
-                      // Dollars land as they are. Any other currency starts from the
-                      // Settings rate — still typed over with what actually landed.
-                      const rate = l && lc !== "USD" ? tableRate(db0.settings.currencyRates, "USD", lc) : undefined;
-                      setF(prev => ({
-                        ...prev, advanceLockerId: v,
-                        advanceLockerAmount: l && lc === "USD" ? String(prev.advanceAmount)
-                          : rate && Number(prev.advanceAmount) > 0 ? String(roundCcy(Number(prev.advanceAmount) * rate, lc)) : "",
-                      }));
-                    })}>
-                      <SelectTrigger className="rounded-xl h-11"><SelectValue placeholder="Choose a locker" /></SelectTrigger>
-                      <SelectContent>
-                        {db.lockers.filter(l => l.active !== false).map(l => <SelectItem key={l.id} value={l.id}>{l.name} ({ccy(l.currency)})</SelectItem>)}
-                      <AddNewItem kind="locker" /></SelectContent>
-                    </Select>
-                  </Field>
-                  {f.advanceLockerId && (
-                    <Field label={`Amount Deposited (${ccySymbol(advLockerCcy).trim()})`} {...markOf("advanceLockerAmount")}>
-                      <Input type="number" min={0} step="0.01" value={f.advanceLockerAmount}
-                        onChange={e => set("advanceLockerAmount", e.target.value)}
-                        className="rounded-xl h-11" />
-                      {advLockerCcy !== "USD" && advRate && Number(f.advanceAmount) > 0 && (
-                        <p className="text-[11px] text-muted-foreground">
-                          {fmtCcy(Number(f.advanceAmount), "USD")} at {rateText("USD", advLockerCcy, advRate)} is {fmtCcy(roundCcy(Number(f.advanceAmount) * advRate, advLockerCcy), advLockerCcy)} — enter what actually landed.
-                        </p>
-                      )}
-                    </Field>
-                  )}
+                  <div className="flex gap-2 shrink-0">
+                    <Button type="button" variant="outline" size="sm" className="rounded-lg" onClick={() => setAdvOpen(true)}>Change</Button>
+                    <Button type="button" variant="ghost" size="sm" className="rounded-lg text-muted-foreground"
+                      onClick={() => setF(prev => ({ ...prev, advanceAmount: 0, advanceNote: "", advanceLockerId: "", advanceLockerAmount: "", advanceMethod: "", advanceRate: 0, advanceDate: "" }))}>Remove</Button>
+                  </div>
+                </div>
+              ) : (
+                <div className="flex flex-wrap items-center gap-3">
+                  <Button type="button" variant="outline" className="rounded-xl gap-1.5" disabled={!advClientId} onClick={() => setAdvOpen(true)}>
+                    <Plus className="h-4 w-4" />Add advance
+                  </Button>
+                  {!advClientId && <span className="text-xs text-muted-foreground">Choose the client first</span>}
                 </div>
               )}
+              <ReceiveFromClient open={advOpen} onOpenChange={setAdvOpen} clientId={advClientId || undefined} forNewOrder
+                initial={Number(f.advanceAmount) > 0 ? { amount: Number(f.advanceAmount), method: f.advanceMethod || undefined, remark: f.advanceNote, lockerId: f.advanceLockerId, rate: f.advanceRate || undefined, date: f.advanceDate || undefined } : undefined}
+                onSave={async v => {
+                  if (grandTotal > 0 && v.amountUsd > grandTotal + 0.005) { toast.error(`The advance can't be more than the order — ${fmtCcy(grandTotal, "USD")}`); return false; }
+                  setF(prev => ({ ...prev, advanceAmount: v.amountUsd, advanceNote: v.remark, advanceMethod: v.method, advanceLockerId: v.lockerId,
+                    advanceLockerAmount: String(v.depositAmount), advanceRate: v.exchangeRate ?? 0, advanceDate: v.date }));
+                  return true;
+                }} />
 
               {/* Balance summary — always 2×2 on mobile. Only once there is a value:
                   on an empty form "Balance Due ✓ Cleared" said a $0 order was paid. */}

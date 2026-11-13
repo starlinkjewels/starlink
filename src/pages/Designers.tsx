@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
-import { Plus, PenTool, Pencil, Power, Trash2, Wallet, Eye, FolderOpen, CheckCircle2, IndianRupee } from "lucide-react";
+import { Plus, PenTool, Pencil, Power, Trash2, Wallet, Eye, FolderOpen, CheckCircle2, IndianRupee, KeyRound } from "lucide-react";
 import { updateDbAs, loadDb, type Designer } from "@/lib/db";
 import { recordsReady, STILL_LOADING } from "@/lib/actionHints";
 import { useDb } from "@/hooks/useDb";
@@ -16,6 +16,8 @@ import { DataTable, CellMain, CellTag, CellAmount, type DataColumn } from "@/com
 import { type MoreAction } from "@/components/MoreMenu";
 import { DesignerCreateDialog } from "@/components/create/DesignerCreateDialog";
 import { PayDesignerSheet } from "@/components/PayDesignerSheet";
+import { DesignerLoginSheet } from "@/components/designers/DesignerLoginSheet";
+import { designerLogin } from "@/lib/designers";
 
 /**
  * Designers — the CAD designers we give work to: our own (in-house, on salary)
@@ -37,6 +39,8 @@ export function DesignersPage() {
   const [adding, setAdding] = useState(false);
   const [editing, setEditing] = useState<Designer | null>(null);
   const [paying, setPaying] = useState<Designer | null>(null);
+  // Their own login (admins) — components/designers/DesignerLoginSheet.tsx.
+  const [loginFor, setLoginFor] = useState<Designer | null>(null);
 
   const month = new Date().toISOString().slice(0, 7);
   const all = db.designers ?? [];
@@ -73,6 +77,9 @@ export function DesignersPage() {
     { label: "View", icon: Eye, onSelect: () => navigate(`/designers/${x.id}`) },
     { label: "Edit", icon: Pencil, disabled: !mayEdit, hint: mayEdit ? undefined : "Your access does not include changing designers", onSelect: () => setEditing(x) },
     { label: "Pay", icon: Wallet, show: x.kind === "freelance", disabled: !mayPay, hint: mayPay ? "From an account" : "You can't record payments", onSelect: () => setPaying(x) },
+    { label: designerLogin(db, x.id) ? "Login" : "Give login", icon: KeyRound, show: isAdmin,
+      hint: (() => { const l = designerLogin(db, x.id); return l ? `${l.status === "inactive" ? "Switched off · " : ""}${l.email}` : "Their own sign-in — only their designs"; })(),
+      onSelect: () => setLoginFor(x) },
     { label: x.active === false ? "Switch on" : "Switch off", icon: Power, disabled: !mayEdit, hint: x.active === false ? "Can be given designs again" : "Kept with their history; not offered for new designs", onSelect: () => toggleActive(x) },
     { label: "Delete", icon: Trash2, danger: true, disabled: !mayDelete || !!designerDeleteWhy(db, x), hint: !mayDelete ? "Your access does not include deleting designers" : designerDeleteWhy(db, x), onSelect: () => void remove(x) },
   ];
@@ -133,6 +140,7 @@ export function DesignersPage() {
       {mayAdd && <DesignerCreateDialog open={adding} onOpenChange={setAdding} onCreated={id => navigate(`/designers/${id}`)} />}
       {mayEdit && editing && <DesignerCreateDialog open onOpenChange={o => { if (!o) setEditing(null); }} designer={editing} />}
       {paying && <PayDesignerSheet designerId={paying.id} onClose={() => setPaying(null)} />}
+      {isAdmin && <DesignerLoginSheet designer={loginFor} open={!!loginFor} onOpenChange={v => { if (!v) setLoginFor(null); }} />}
     </div>
   );
 }

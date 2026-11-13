@@ -1,5 +1,5 @@
-import { useEffect, useReducer } from "react";
-import { loadDb, type DB } from "@/lib/db";
+import { useEffect, useReducer, useRef } from "react";
+import { dbChanges, loadDb, type DB } from "@/lib/db";
 
 /**
  * Live view of the store. Re-renders the component whenever the data changes
@@ -10,9 +10,14 @@ import { loadDb, type DB } from "@/lib/db";
  */
 export function useDb(): DB {
   const [, bump] = useReducer((n: number) => n + 1, 0);
+  // The change it was drawn with: data that lands between the first draw and the
+  // listener below (a small session — a designer's — can load all of it then) is not missed.
+  const drawnAt = useRef(dbChanges());
+  drawnAt.current = dbChanges();
   useEffect(() => {
     const onChange = () => bump();
     window.addEventListener("starlink-db-updated", onChange);
+    if (dbChanges() !== drawnAt.current) bump();
     return () => window.removeEventListener("starlink-db-updated", onChange);
   }, []);
   return loadDb();
@@ -28,9 +33,12 @@ export function useDb(): DB {
  */
 export function useDbVersion(): number {
   const [v, bump] = useReducer((n: number) => n + 1, 0);
+  const drawnAt = useRef(dbChanges());
+  drawnAt.current = dbChanges();
   useEffect(() => {
     const onChange = () => bump();
     window.addEventListener("starlink-db-updated", onChange);
+    if (dbChanges() !== drawnAt.current) bump();
     return () => window.removeEventListener("starlink-db-updated", onChange);
   }, []);
   return v;

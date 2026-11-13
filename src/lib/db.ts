@@ -35,7 +35,9 @@ import { describeChanges, summarise, undoBlocker, type ActivityEntry, type Activ
 import { moduleForPath } from "./modules";
 import { reachOf, limitsOf, compileGrants, grantsNow, type AccessDoc, type GrantWindow } from "./permissions";
 
-export type Role = "admin" | "employee" | "client";
+/** "designer": a CAD designer's own login (Designers → Give login) — sees only the
+ *  design jobs given to them, on their own screens (pages/designer/), never staff's. */
+export type Role = "admin" | "employee" | "client" | "designer";
 
 export interface User {
   id: string;
@@ -49,6 +51,8 @@ export interface User {
   status: "active" | "inactive";
   department?: string;
   clientId?: string;
+  /** A designer's login: the Designer record it is (lib/designers.ts). Only an admin sets it. */
+  designerId?: string;
   /** The role an employee holds (StaffRole.id). Unset means Standard staff —
    *  exactly what every employee could do before roles. Ignored for admins. */
   roleId?: string;
@@ -3090,6 +3094,8 @@ interface IndexDoc {
   /** Limited to their own orders, clients and invoices — set only once every record carries
    *  its "who works on this" list (settings.ownScopeReady). Loading and the rules both read it. */
   own?: true;
+  /** A designer's login: which designer it is — their jobs are what the rules let them read. */
+  designerId?: string;
 }
 
 /**
@@ -3121,6 +3127,7 @@ function idxShape(v: IndexDoc): IndexDoc {
     ...(v.docs === true ? { docs: true as const } : {}),
     ...(v.g ? { g: v.g } : {}), ...(v.w?.length ? { w: v.w } : {}), ...(v.lim ? { lim: v.lim } : {}),
     ...(v.own === true ? { own: true as const } : {}),
+    ...(v.designerId ? { designerId: v.designerId } : {}),
   };
 }
 // Last-known Firestore state of the index (uid → serialised IndexDoc), for diffing.
@@ -3130,6 +3137,8 @@ let idxSeeded = false; // remoteIdx baseline taken from the users collection at 
 /** The index record for a user (stable key order — used for both write & diff). */
 function indexOf(u: User, roles: AccessDoc[] = cache.roles ?? [], settings: Settings = cache.settings): IndexDoc {
   const d: IndexDoc = { role: u.role, clientId: u.clientId ?? null, appId: u.id, status: u.status };
+  // A designer's login carries the designer it is — nothing else, never grants.
+  if (u.role === "designer") { if (u.designerId) d.designerId = u.designerId; return d; }
   // Last, and only when on — every other index document stays exactly as it was.
   if (u.role === "employee" && u.documentsAccess === true) d.docs = true;
   if (u.role === "employee") {
@@ -3218,7 +3227,11 @@ function markIntentionalRemovals(before: Partial<Record<ArrayCol, Set<string>>>)
   }
 }
 
+/** How many times the data has changed — a screen that starts listening checks it missed none (hooks/useDb.ts). */
+let changes = 0;
+export function dbChanges(): number { return changes; }
 function emit() {
+  changes++;
   if (typeof window !== "undefined") window.dispatchEvent(new Event("starlink-db-updated"));
 }
 
@@ -3338,6 +3351,9 @@ function writeRefusal(changes: { col: string; id: string; before: Record<string,
 
 /** This session loads only its own orders, clients and invoices (Scope "full" with own). */
 let ownScope = false;
+/** A designer's session (Scope "designer"): it never saves anything itself — a design's
+ *  files and hand-in go through the server (functions designerWork), which checks them. */
+let designerScope = false;
 /** The money records this person may not read (lib/pure/writePolicy.ts READ_POLICY): never asked
  *  for, held empty — drawn as nothing, never trusted by a check ("does anything point at this?"). */
 let hiddenCols = new Set<string>();
@@ -3623,6 +3639,11 @@ async function persist() {
   // been awaited yet in this save, so the cache still equals `snap` and the
   // records put back are exactly this save's.
   if (logRaw.length) {
+    // A designer's device writes nothing to the database (the rules would refuse it too).
+    if (designerScope) {
+      refuseSave(logRaw, ["designer"], "Not saved — this login can only work on its designs.");
+      return;
+    }
     const until = closedTo(remote.settings);
     const touchesClose = logRaw.some(r => r.col === SETTINGS_COL);
     if (until || touchesClose) {
@@ -4148,6 +4169,8 @@ export function saveDb(db?: DB) {
  * counter — nobody needs a progress indicator for a heartbeat.
  */
 export async function touchPresence(userId: string): Promise<void> {
+  // A designer's login writes nothing to the database (and the rules would refuse it).
+  if (designerScope) return;
   const at = new Date().toISOString();
   const u = cache.users.find((x) => x.id === userId);
   if (!u) return;
@@ -4237,7 +4260,9 @@ export type Scope =
   | { kind: "full"; admin?: boolean; /** The person's own app id (User.id), when their index has it. */ appId?: string;
       /** Limited to their own orders, clients and invoices (index `own`, no "every order" open now). */ own?: boolean;
       /** An employee's grants right now (index `g` + windows open now) — which money records they may read. */ grants?: string[] }
-  | { kind: "client"; appId: string; clientId: string };
+  | { kind: "client"; appId: string; clientId: string }
+  /** A designer's login: their own profile, their designer record and their jobs — nothing else. */
+  | { kind: "designer"; appId: string; designerId: string };
 
 /**
  * Watch the signed-in user's own role-index doc and invoke `onRevoked` the
@@ -4322,6 +4347,8 @@ async function readScope(authUid: string): Promise<Scope | "missing" | null> {
 }
 function scopeOfIndex(d: IndexDoc): Scope {
   if (d.role === "client" && d.clientId) return { kind: "client", appId: d.appId, clientId: d.clientId };
+  // A designer is never staff: their own jobs only (an unlinked one, nothing at all).
+  if (d.role === "designer") return { kind: "designer", appId: d.appId, designerId: d.designerId ?? "" };
   if (d.role === "admin" && d.status === "active") return { kind: "full", admin: true, appId: d.appId || undefined };
   // Limited to their own work, unless a temporary "every order" grant is open right now.
   const now = Date.now();
@@ -4543,7 +4570,9 @@ let subGeneration = 0;
 function subscribeAll(scope: Scope): Promise<void> {
   const gen = ++subGeneration;
   const client = scope.kind === "client" ? scope : null;
-  messagesScopeIsFull = !client;
+  const designer = scope.kind === "designer" ? scope : null;
+  designerScope = !!designer;
+  messagesScopeIsFull = !client && !designer;
   clientAppId = client ? client.appId : null;
   ownScope = scope.kind === "full" && !!scope.own && !!scope.appId;
   hiddenCols = new Set(scope.kind === "full" && !scope.admin && scope.grants
@@ -4559,7 +4588,7 @@ function subscribeAll(scope: Scope): Promise<void> {
   loadedCols.clear();
   staleCols.clear();
   staleWindowOver = false;
-  lazyMode = !client;
+  lazyMode = !client && !designer;
   lazySpecs.clear();
   lazyAttached.clear();
   lazyAttach = null;
@@ -4579,6 +4608,15 @@ function subscribeAll(scope: Scope): Promise<void> {
     // Requested by the admin and nobody else. The rules would refuse it to
     // anyone else anyway; not asking at all means there is nothing to refuse.
     if (col === "adminRecords" && !amAdminScope) continue;
+    if (designer) {
+      // Their own profile, their designer record and the jobs given to them — the
+      // three things the rules let a designer read. Nothing else is asked for.
+      const c = collection(fsdb, col);
+      if (col === "users") specs.push({ col, q: query(c, where(documentId(), "==", designer.appId || "-")) });
+      else if (col === "designers") specs.push({ col, q: query(c, where(documentId(), "==", designer.designerId || "-")) });
+      else if (col === "cadJobs") specs.push({ col, q: query(c, where("designerId", "==", designer.designerId || "-")) });
+      continue;
+    }
     if (client) {
       // Staff-only collections are never loaded for a client.
       if (
@@ -4771,7 +4809,7 @@ function subscribeAll(scope: Scope): Promise<void> {
 
     // The server's totals, read-only, for staff — never written from here.
     const attachSummaries = () => {
-      if (client) return;
+      if (client || designer) return;
       unsubscribers.push(onSnapshot(collection(fsdb, "summaries"), LISTEN, serverFirst("summaries", (snap) => {
         summaryMap = new Map(snap.docs.map(d => [d.id, d.data() as Record<string, unknown>]));
         summariesOn = true;
@@ -4879,6 +4917,8 @@ function subscribeAll(scope: Scope): Promise<void> {
       );
     }
 
+    // A designer never reads the business's settings — the defaults do for their screens.
+    if (designer) { first(SETTINGS_COL); return; }
     unsubscribers.push(
       onSnapshot(
         doc(fsdb, SETTINGS_COL, SETTINGS_DOC),

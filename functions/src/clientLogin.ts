@@ -48,8 +48,8 @@ export const setClientLogin = onCall<Req>(
     if (who?.role === "admin") {
       if (!owner) throw new HttpsError("permission-denied", "Only the main owner login can change an admin's login.");
       if (target === uid) throw new HttpsError("permission-denied", "Change your own password in My Profile.");
-    } else if (who?.role !== "client" && who?.role !== "employee") {
-      throw new HttpsError("permission-denied", "Only a client's, an employee's or (for the owner) an admin's login can be changed here.");
+    } else if (who?.role !== "client" && who?.role !== "employee" && who?.role !== "designer") {
+      throw new HttpsError("permission-denied", "Only a client's, an employee's, a designer's or (for the owner) an admin's login can be changed here.");
     }
     // An owner is recognised by email: giving anyone an owner's address would make them one.
     if (email && OWNER_EMAILS.diamondflow.includes(email)) throw new HttpsError("permission-denied", "That email belongs to an owner.");

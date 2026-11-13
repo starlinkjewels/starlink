@@ -1,4 +1,5 @@
 import { ListCombo } from "@/components/ListCombo";
+import { ReceiveFromClient } from "@/components/payments/ReceiveFromClient";
 import { CategoryCombo } from "@/components/CategoryCombo";
 import { materialUnit } from "@/lib/materials";
 import { choicesOf } from "@/lib/optionLists";
@@ -6,7 +7,7 @@ import { AddNewItem, useAddNew } from "@/components/create/QuickCreate";
 import { useCan } from "@/hooks/useCan";
 import { hasFeature } from "@/lib/permissions";
 import { useEffect, useLayoutEffect, useState, type ReactNode } from "react";
-import { useSearchParams } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import { useAuth } from "@/lib/auth";
 import {
   updateDb, loadDb, fmtMoney,
@@ -63,12 +64,12 @@ type Book = "daybook" | "received" | "supplier" | "factory" | "expense" | "locke
 type Task = "client" | "supplier" | "factory" | "expense" | "employee" | "locker" | "broker" | "brokerIn" | "refund" | "advance" | "advanceIn";
 
 const BOOKS = [
-  { key: "daybook", label: "Day book", icon: BookOpen },
+  { key: "daybook", label: "Day book", icon: BookOpen, hint: "One account, day by day — money in, money out, the balance after each" },
   { key: "received", label: "Received", icon: CreditCard },
   { key: "supplier", label: "Supplier payments", icon: Truck },
   { key: "factory", label: "Factory payments", icon: FactoryIcon },
   { key: "expense", label: "Expenses", icon: Receipt },
-  { key: "locker", label: "Account entries", icon: ListOrdered },
+  { key: "locker", label: "Account entries", icon: ListOrdered, hint: "Every entry on every account, with what it was — to find one and correct it" },
 ] as const;
 
 /** What a form's panel is given: whether it is open, and how to close it. */
@@ -162,7 +163,8 @@ export function PaymentsPage() {
           one row, on every screen. */}
       <PageHeader
         title="Payments"
-        subtitle="Every payment in or out"
+        // Each money page's job, in one line, and where the others are.
+        subtitle={<>Receive and pay here · the Day book is one account's cash book, day by day · every entry in every currency is in the <Link to="/income" className="text-primary hover:underline">Passbook</Link></>}
         primary={mayAdd ? { label: "Receive", icon: CreditCard, items: [
           { label: "From a client", icon: CreditCard, hint: "Against their invoices, or an advance", onSelect: () => setTask("client") },
           { label: "From a supplier", icon: Truck, hint: "A refund, or money back on returned goods", onSelect: () => openSupplier("receive") },
@@ -298,218 +300,7 @@ function MoveSummary({ label, value, tone, lockerId, change }: {
 /** The main button's look in a panel footer — full width beside Cancel on a phone. */
 const SAVE_BTN = "btn-hero rounded-xl h-10 flex-1 sm:flex-none sm:px-8";
 
-/* ── Receive from Client — mirrors ClientHistory.tsx's recordPayment ── */
-export function ReceiveFromClient({ open, onOpenChange, lockerId: fixedLocker, frame = sheetFrame }: SheetProps & EmbedProps) {
-  const { user } = useAuth();
-  const db = useDb();
-  const addNew = useAddNew();
-  const [clientId, setClientId] = useState("");
-  const [amount, setAmount] = useState("");
-  const [method, setMethod] = useState("Cash");
-  const [note, setNote] = useState("");
-  const [lockerPick, setLockerId] = useState("");
-  const lockerId = fixedLocker ?? lockerPick;
-  // 1 USD in the locker's currency. Cleared when the locker changes, so a rate
-  // typed for one currency is never saved against another.
-  const [exchangeRate, setExchangeRate] = useState<number | "">("");
-  // Money sent to settle ONE invoice should clear THAT invoice. Without this the
-  // payment went oldest-bill-first and the invoice the client just paid for could
-  // still read as pending.
-  const [invoiceId, setInvoiceId] = useState("");
-  const [saving, setSaving] = useState(false);
-  // Entries are often written up a day or two later, so the date is chosen
-  // rather than assumed to be today.
-  const [date, setDate] = useState(todayLocal());
-
-  const clients = db.clients.filter(c => c.status === "active" && worksOnClientId(db, user, c.id)).sort((a, b) => a.companyName.localeCompare(b.companyName));
-  const openInvoices = clientId
-    ? (db.invoices ?? [])
-        .filter(i => i.clientId === clientId)
-        .map(i => ({
-          inv: i,
-          bal: invoiceOrderIds(i)
-            .map(oid => db.orders.find(o => o.id === oid))
-            .filter((o): o is Order => !!o && o.status !== "Rejected")
-            .reduce((s, o) => s + balanceDue(o), 0),
-        }))
-        .sort((a, b) => +new Date(b.inv.createdAt) - +new Date(a.inv.createdAt))
-    : [];
-
-  // When the client has exactly ONE invoice still outstanding, a transfer from
-  // them is almost always for that invoice — preselect it so the money settles
-  // the bill they actually paid. With more than one open, nothing is guessed:
-  // the money is held as credit until somebody names the invoice.
-  const openUnpaid = openInvoices.filter(x => x.bal > 0);
-  useEffect(() => {
-    setInvoiceId(openUnpaid.length === 1 ? openUnpaid[0].inv.id : "");
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [clientId]);
-
-  const locker = db.lockers.find(l => l.id === lockerId);
-  const lockerCurrency = ccy(locker?.currency);
-  // A client always pays in USD (that's what the order is billed in) — any
-  // other locker (rupees, dirhams, euros…) needs converting for the deposit side.
-  const needsRate = !!locker && lockerCurrency !== "USD";
-  const rate = Number(exchangeRate);
-
-  const submit = async () => {
-    const c = db.clients.find(x => x.id === clientId);
-    if (!c) { toast.error("Choose a client"); return; }
-    const amt = parseFloat(amount);
-    if (!amt || amt <= 0) { toast.error("Enter a valid amount"); return; }
-    if (!lockerId) { toast.error("Choose which locker this was deposited into"); return; }
-    if (needsRate && (!rate || rate <= 0)) { toast.error("Enter the exchange rate before saving this payment"); return; }
-    // The rate is "1 USD = rate of the locker's currency".
-    const depositAmt = needsRate ? roundCcy(amt * rate, lockerCurrency) : amt;
-    setSaving(true);
-    try {
-      const noteText = note.trim() ? `${method} · ${note.trim()}` : method;
-      const now = stampFor(date);
-      // Recorded as a numbered receipt, so this payment can be looked up,
-      // corrected or cancelled later as one entry.
-      const receipt = await createReceipt({
-        clientId, amountUsd: amt, date: now, method,
-        remarks: note.trim() || undefined,
-        lockerId, lockerAmount: depositAmt,
-        lockerCurrency,
-        exchangeRate: needsRate ? rate : undefined,
-        invoiceId: invoiceId || undefined,
-        userId: user!.id,
-      });
-      updateDb(d => notifyClientPayment(d, clientId, amt, method, invoiceId || undefined, now));
-      toast.success(`Receipt ${receipt.receiptNo} — ${fmtMoney(amt)} received from ${c.companyName}`);
-      setClientId(""); setAmount(""); setNote(""); setLockerId(""); setExchangeRate(""); setInvoiceId(""); setDate(todayLocal());
-      onOpenChange(false);
-    } finally { setSaving(false); }
-  };
-
-  // What saving will do (settleClientAccount): with an invoice named, this
-  // money and any credit they already hold go onto that invoice up to what it
-  // still owes, and the rest is their credit; with none, it is all held as credit.
-  const amt0 = Number(amount) || 0;
-  const heldCredit = db.clients.find(x => x.id === clientId)?.creditBalance || 0;
-  const invoiceDue = invoiceId ? openInvoices.find(x => x.inv.id === invoiceId)?.bal ?? 0 : 0;
-  const onInvoice = invoiceId ? Math.round(Math.min(amt0 + heldCredit, invoiceDue) * 100) / 100 : 0;
-  const creditAfter = Math.round((amt0 + heldCredit - onInvoice) * 100) / 100;
-
-  // Unknown until there is a rate — never shown as if the dollars landed unconverted.
-  const depositPreview = !amount ? null : needsRate ? (rate > 0 ? roundCcy(Number(amount) * rate, lockerCurrency) : null) : Number(amount);
-
-  return frame({
-    open, onOpenChange, size: "md", icon: CreditCard,
-    title: "Receive payment",
-    description: "From a client, as a numbered receipt",
-    footer: (
-        <PanelFooter onCancel={() => onOpenChange(false)} summary={amount && lockerId ? (
-          <div className="grid grid-cols-3 gap-3">
-            <div className="min-w-0">
-              <p className="text-[10px] uppercase tracking-wider text-muted-foreground">Received</p>
-              <p className="font-medium text-foreground tabular-nums break-words">{fmtMoney(Number(amount))}</p>
-            </div>
-            <div className="min-w-0">
-              <p className="text-[10px] uppercase tracking-wider text-muted-foreground">{invoiceId ? "On the invoice" : "Held as credit"}</p>
-              <p className="font-semibold text-primary tabular-nums break-words">{fmtMoney(invoiceId ? onInvoice : amt0)}</p>
-              {(invoiceId ? creditAfter > 0.005 || heldCredit > 0.005 : heldCredit > 0.005) && (
-                <p className="text-[11px] text-muted-foreground tabular-nums">Credit after: {fmtMoney(creditAfter)}</p>
-              )}
-            </div>
-            {depositPreview != null && locker && (
-              <div className="min-w-0">
-                <p className="text-[10px] uppercase tracking-wider text-muted-foreground break-words">Deposited to {locker.name}</p>
-                <p className="font-semibold text-foreground tabular-nums break-words">{fmtCcy(depositPreview, lockerCurrency)}</p>
-              </div>
-            )}
-          </div>
-        ) : undefined}>
-          <AsyncButton onClick={submit} disabled={saving} className={SAVE_BTN}>{saving ? "Saving…" : "Record Payment Received"}</AsyncButton>
-        </PanelFooter>
-    ),
-    children: (
-    <div className="space-y-3">
-      {/* Two columns from a small tablet up; one on a phone, where the panel is
-          the whole screen. */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-        <div>
-          <Label className="text-xs">Client</Label>
-          <Select value={clientId} onValueChange={addNew("client", setClientId)}>
-            <SelectTrigger className="h-10 rounded-xl mt-1"><SelectValue placeholder="Choose client" /></SelectTrigger>
-            <SelectContent>{clients.map(c => <SelectItem key={c.id} value={c.id}>{c.companyName}</SelectItem>)}<AddNewItem kind="client" /></SelectContent>
-          </Select>
-        </div>
-
-        {clientId && openInvoices.length > 0 && (
-          <div>
-            <Label className="text-xs">Against {invoiceId ? <span className="text-success">(auto-selected)</span> : ""}</Label>
-            <Select value={invoiceId || "fifo"} onValueChange={v => setInvoiceId(v === "fifo" ? "" : v)}>
-              <SelectTrigger className="h-10 rounded-xl mt-1"><SelectValue /></SelectTrigger>
-              <SelectContent>
-                {/* No invoice named means the money is simply held on the
-                    client's account. It used to be spread over their oldest
-                    bills, which moved payments they had already been shown. */}
-                <SelectItem value="fifo">No invoice — hold as credit</SelectItem>
-                {openInvoices.map(({ inv, bal }) => (
-                  <SelectItem key={inv.id} value={inv.id}>
-                    Invoice {inv.number} — {bal > 0 ? `${fmtMoney(bal)} pending` : "settled"}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-        )}
-
-        <div>
-          <Label className="text-xs">Date</Label>
-          <Input type="date" min={openMin()} value={date} onChange={e => setDate(e.target.value)} className="rounded-xl h-10 mt-1" />
-        </div>
-        <div>
-          <Label className="text-xs">Amount Received ($)</Label>
-          <div className="relative mt-1">
-            <DollarSign className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-            <Input type="number" min={0} step="0.01" value={amount} onChange={e => setAmount(e.target.value)} className="pl-9 h-10 rounded-xl" />
-          </div>
-        </div>
-
-        <div>
-          <Label className="text-xs">Method</Label>
-          <ListCombo list="paymentMethods" value={method} onChange={setMethod} optional={false} className="h-10 rounded-xl mt-1" ariaLabel="Method" />
-        </div>
-
-        {!fixedLocker && (
-          <div>
-            <Label className="text-xs">Deposited to Locker *</Label>
-            <Select value={lockerId} onValueChange={addNew("locker", v => { setLockerId(v); setExchangeRate(""); })}>
-              <SelectTrigger className="h-10 rounded-xl mt-1"><SelectValue placeholder="Choose locker" /></SelectTrigger>
-              <SelectContent>{db.lockers.filter(l => l.active !== false).map(l => <SelectItem key={l.id} value={l.id}>{l.name} ({ccy(l.currency)})</SelectItem>)}<AddNewItem kind="locker" /></SelectContent>
-            </Select>
-          </div>
-        )}
-
-        <div>
-          <Label className="text-xs">Remark / ref</Label>
-          <Input value={note} onChange={e => setNote(e.target.value)} className="rounded-xl h-10 mt-1" placeholder="optional" />
-        </div>
-
-        {needsRate && (
-          <div className="sm:col-span-2 p-3 rounded-xl bg-secondary">
-            <RateInput id="rcv-rate" from="USD" to={lockerCurrency} value={exchangeRate} onChange={setExchangeRate}
-              amount={Number(amount) || undefined} at={date} />
-            <p className="text-xs text-muted-foreground mt-1">This locker holds {lockerCurrency} — enter the USD rate.</p>
-          </div>
-        )}
-      </div>
-
-      {clientId && openInvoices.length > 0 && (
-        <p className="text-[11px] text-muted-foreground">
-          {/* What settleClientAccount does: the named invoice, the rest as credit. */}
-          {invoiceId
-            ? "Settles that invoice; anything over is held as credit."
-            : "Held as credit — pick an invoice to settle one."}
-        </p>
-      )}
-    </div>
-    ),
-  });
-}
+/* ── Receive from a client: the one shared panel (components/payments/ReceiveFromClient.tsx) ── */
 
 /* ── Pay Supplier — mirrors SupplierHistory.tsx's recordPayment ── */
 type SupplierDir = "pay" | "receive";
