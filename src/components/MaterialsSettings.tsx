@@ -77,7 +77,7 @@ export function MaterialEditor({ material, onClose, onSaved }: {
 
   return (
     <Dialog open onOpenChange={v => !v && onClose()}>
-      <DialogContent className="max-w-2xl rounded-2xl">
+      <DialogContent panel className="max-w-2xl rounded-2xl">
         <DialogHeader>
           <DialogTitle className="font-display text-2xl">{material ? `Edit ${material.name}` : "New material"}</DialogTitle>
           <DialogDescription className="text-xs">Anything beyond gold and diamonds that goes into a piece. It then works like them everywhere — bought, held in stock, issued to a factory, used at Final Approval, costed.</DialogDescription>

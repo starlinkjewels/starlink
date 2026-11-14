@@ -443,7 +443,7 @@ export function EmployeesPage() {
 export function CompaniesDialog({ u, onClose }: { u: User; onClose: () => void }) {
   return (
     <Dialog open onOpenChange={v => !v && onClose()}>
-      <DialogContent className="max-w-md rounded-2xl">
+      <DialogContent panel className="max-w-md rounded-2xl">
         <DialogHeader>
           <DialogTitle className="font-display text-xl">Companies — {u.name}</DialogTitle>
           <DialogDescription className="text-xs">Each tick is saved at once.</DialogDescription>
@@ -490,7 +490,7 @@ export function GiveLoginDialog({ u, onClose }: { u: User; onClose: () => void }
   };
   return (
     <Dialog open onOpenChange={v => !v && onClose()}>
-      <DialogContent className="max-w-sm rounded-2xl">
+      <DialogContent panel className="max-w-sm rounded-2xl">
         <DialogHeader><DialogTitle className="font-display text-xl">Give {u.name} a login</DialogTitle></DialogHeader>
         <div className="space-y-3">
           <div><Label className="text-xs">Email (login ID)</Label><Input type="email" value={email} onChange={x => setEmail(x.target.value)} className="rounded-xl mt-1" autoComplete="off" /></div>

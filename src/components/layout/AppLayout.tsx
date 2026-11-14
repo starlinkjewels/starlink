@@ -175,7 +175,7 @@ const PAGE_TITLES: Record<string, string> = {
   "/ai":       "Starlink AI",
   "/expenses": "Expenses",
   "/messages": "Messages",
-  "/notifications": "Notifications",
+  "/notifications": "Alerts",
   "/reports": "Reports",
   "/targets": "Targets",
   "/settings": "Settings",

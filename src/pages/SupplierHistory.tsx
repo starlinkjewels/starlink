@@ -167,7 +167,7 @@ function SupplierHistoryPageBody() {
   // ── Record purchase ──
   const [showExport, setShowExport] = useState(false);
   const [showPurchaseForm, setShowPurchaseForm] = useState(false);
-  // Record Purchase opens New purchase (components/BuyMaterialForm), this supplier already chosen —
+  // New purchase opens the purchase form (components/BuyMaterialForm), this supplier already chosen —
   // one purchase form everywhere: the same fields, broker, discount, date and "for an order".
 
   // ── Record payment ──
@@ -839,7 +839,7 @@ function SupplierHistoryPageBody() {
         back={{ label: "Back to Suppliers", to: "/suppliers" }}
         title={supplier.name}
         subtitle={contactLine}
-        primary={mayPurchase ? { label: "Record Purchase", icon: Plus, onClick: () => setShowPurchaseForm(true) } : null}
+        primary={mayPurchase ? { label: "New purchase", icon: Plus, onClick: () => setShowPurchaseForm(true) } : null}
         secondary={mayPay ? { label: "Pay", icon: CreditCard, onClick: openPay } : null}
         menu={[
           // Set once, when moving from an old system — so out of sight until then.

@@ -182,7 +182,7 @@ export function NotificationsPage() {
       {/* Marking them read is the one button; clearing them all can't be
           undone, so it waits in the ⋯. The total is the table's own count. */}
       <PageHeader
-        title="Notifications"
+        title="Alerts"
         subtitle={unread > 0 ? `${unread} unread` : "All read"}
         secondary={unread > 0 ? { label: "Mark all read", icon: MailOpen, onClick: markAll } : null}
         menu={[

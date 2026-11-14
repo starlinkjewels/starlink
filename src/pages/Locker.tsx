@@ -564,7 +564,7 @@ export function LockerPage() {
       <LockerEntrySheet open={entryOpen} onOpenChange={setEntryOpen} lockerId={selected?.active === false ? undefined : selected?.id} />
 
       <Dialog open={!!editId} onOpenChange={open => !open && setEditId(null)}>
-        <DialogContent className="max-w-2xl rounded-2xl">
+        <DialogContent panel className="max-w-2xl rounded-2xl">
           <DialogHeader><DialogTitle className="font-display text-2xl">Edit Locker</DialogTitle></DialogHeader>
           <div className="dlg-cols mt-2">
             <div>

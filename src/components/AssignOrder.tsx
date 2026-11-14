@@ -171,7 +171,7 @@ export function AssignOrdersDialog({ orders, onClose }: { orders: Order[]; onClo
 
   return (
     <Dialog open onOpenChange={v => !v && onClose()}>
-      <DialogContent className="max-w-xl rounded-2xl">
+      <DialogContent panel className="max-w-xl rounded-2xl">
         <DialogHeader>
           <DialogTitle className="font-display text-2xl flex items-center gap-2"><Users className="h-5 w-5 text-primary" /> Assign {orders.length} order{orders.length !== 1 ? "s" : ""}</DialogTitle>
         </DialogHeader>

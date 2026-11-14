@@ -152,7 +152,7 @@ export function ReturnDialog({ orders, invoice, start, onClose }: {
 
   return (
     <Dialog open onOpenChange={v => !v && onClose()}>
-      <DialogContent className="max-w-6xl rounded-2xl">
+      <DialogContent panel className="max-w-6xl rounded-2xl">
         <DialogHeader>
           <DialogTitle className="font-display text-2xl flex items-center gap-2"><Undo2 className="h-5 w-5 text-primary" /> Return from {client?.companyName ?? "client"}</DialogTitle>
           <DialogDescription className="text-xs">
@@ -323,7 +323,7 @@ export function ReceiveReturnDialog({ order, ret, onClose }: { order: Order; ret
   };
   return (
     <Dialog open onOpenChange={v => !v && onClose()}>
-      <DialogContent className="max-w-lg rounded-2xl">
+      <DialogContent panel className="max-w-lg rounded-2xl">
         <DialogHeader>
           <DialogTitle className="font-display text-xl flex items-center gap-2"><PackageCheck className="h-5 w-5 text-primary" /> Received — {order.orderNumber}</DialogTitle>
           <DialogDescription className="text-xs">{ret.qty} piece{ret.qty !== 1 ? "s" : ""} back on {ret.creditNoteNo}. They go into Ready Stock with the order's photos and weights.</DialogDescription>

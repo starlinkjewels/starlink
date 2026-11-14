@@ -57,7 +57,7 @@ export function FactoryPoolTransferDialog({ factoryId, onClose }: { factoryId: s
 
   return (
     <Dialog open onOpenChange={v => !v && onClose()}>
-      <DialogContent className="max-w-2xl rounded-2xl">
+      <DialogContent panel className="max-w-2xl rounded-2xl">
         <DialogHeader>
           <DialogTitle className="font-display text-2xl flex items-center gap-2"><ArrowRightLeft className="h-5 w-5 text-primary" /> Move at {factory?.name ?? "the factory"}</DialogTitle>
           <DialogDescription className="text-xs">One company&rsquo;s share of the material this factory holds becomes another company&rsquo;s — for when one company&rsquo;s orders use what the other delivered. Nothing leaves the factory and no stock moves.</DialogDescription>

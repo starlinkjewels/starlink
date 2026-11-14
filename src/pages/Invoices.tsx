@@ -680,7 +680,7 @@ export function InvoicesPage() {
 
       {/* ── Invoice detail modal — orders + order-wise payment ── */}
       <Dialog open={!!detailInv} onOpenChange={o => { if (!o) { setDetailInvId(null); setPayOrderId(null); } }}>
-        <DialogContent className="max-w-4xl rounded-2xl">
+        <DialogContent panel className="max-w-4xl rounded-2xl">
           {detailInv && (() => {
             const { orders, amount, adv, bal, gift, dueAt, late } = invLive(detailInv);
             const client = db.clients.find(c => c.id === detailInv.clientId);
