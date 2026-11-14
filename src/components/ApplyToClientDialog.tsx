@@ -54,7 +54,7 @@ function ApplyDialog({ txnId, onClose }: { txnId: string; onClose: () => void })
 
   return (
     <Dialog open onOpenChange={o => { if (!o) onClose(); }}>
-      <DialogContent className="max-w-2xl rounded-2xl">
+      <DialogContent panel className="max-w-2xl rounded-2xl">
         <DialogHeader><DialogTitle className="font-display text-xl">Apply to a client&rsquo;s bill</DialogTitle></DialogHeader>
         {txn && (() => {
           // Read the same way applyIncomeToClient reads it, so this preview

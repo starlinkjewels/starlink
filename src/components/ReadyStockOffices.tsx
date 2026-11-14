@@ -69,7 +69,7 @@ export function MoveOfficeDialog({ items, onClose, onDone }: { items: ReadyStock
 
   return (
     <Dialog open onOpenChange={o => { if (!o) onClose(); }}>
-      <DialogContent className="max-w-lg rounded-2xl">
+      <DialogContent panel className="max-w-lg rounded-2xl">
         <DialogHeader><DialogTitle className="font-display text-2xl">Move to another office</DialogTitle></DialogHeader>
         <div className="space-y-4">
           <div className="rounded-xl border border-border/60 divide-y divide-border/50 max-h-60 overflow-y-auto">
@@ -188,7 +188,7 @@ export function OfficesDialog({ onClose }: { onClose: () => void }) {
   };
   return (
     <Dialog open onOpenChange={o => { if (!o) onClose(); }}>
-      <DialogContent className="max-w-lg rounded-2xl">
+      <DialogContent panel className="max-w-lg rounded-2xl">
         <DialogHeader><DialogTitle className="font-display text-2xl">Our offices</DialogTitle></DialogHeader>
         <p className="text-sm text-muted-foreground -mt-2">Where Ready Stock is kept. Each is a tab on the Ready Stock page, in this order.</p>
         <div className="rounded-xl border border-border/60 divide-y divide-border/50">

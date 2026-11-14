@@ -234,7 +234,7 @@ export function EditPurchaseDialog({ purchase, onClose, onSave, lockQuantity, lo
 
   return (
     <Dialog open={!!purchase} onOpenChange={o => { if (!o) onClose(); }}>
-      <DialogContent className="max-w-3xl rounded-2xl">
+      <DialogContent panel className="max-w-3xl rounded-2xl">
         <DialogHeader>
           <DialogTitle className="font-display text-xl">Correct this purchase</DialogTitle>
         </DialogHeader>

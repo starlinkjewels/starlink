@@ -615,7 +615,7 @@ export function ManageAccessDialog({ u, onClose }: { u: User; onClose: () => voi
   };
   return (
     <Dialog open onOpenChange={v => !v && onClose()}>
-      <DialogContent className="max-w-6xl rounded-2xl">
+      <DialogContent panel className="max-w-6xl rounded-2xl">
         <DialogHeader>
           <DialogTitle className="font-display text-2xl flex items-center gap-2"><ShieldCheck className="h-5 w-5 text-primary" /> Access — {u.name}</DialogTitle>
           <DialogDescription className="text-xs">Tick exactly what this person may see and do — a template fills it in one click. Give temporary access that ends by itself. Saved changes apply at once.</DialogDescription>
@@ -780,7 +780,7 @@ export function AccessReportDialog({ onClose, onManage }: { onClose: () => void;
   const HEAD = ["Person", "Whose work", "Sections", "Takes or pays money", "Removes records", "Cancels / deletes orders", "Costs", "Salaries", "Balances", "Limits", "Temporary now"];
   return (
     <Dialog open onOpenChange={v => !v && onClose()}>
-      <DialogContent className="max-w-6xl rounded-2xl">
+      <DialogContent panel className="max-w-6xl rounded-2xl">
         <DialogHeader>
           <DialogTitle className="font-display text-2xl flex items-center gap-2"><ShieldCheck className="h-5 w-5 text-primary" /> Who can do what</DialogTitle>
           <DialogDescription className="text-xs">Every employee with a login, as their access stands right now (temporary access included). Admins can do everything. Tap a person to change their access.</DialogDescription>

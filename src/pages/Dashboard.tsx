@@ -2,7 +2,8 @@ import { ClientPortal } from "@/components/home/ClientPortal";
 import { stageLabel } from "@/lib/stages";
 import { expensesInUsd, inrOn } from "@/lib/orderCost";
 import { SectionTitle } from "@/components/SectionTitle";
-import { PageHeader } from "@/components/PageHeader";
+import { PageHeader, TabBar } from "@/components/PageHeader";
+import { usePageTab } from "@/hooks/usePageTab";
 import { StudioHome } from "@/components/home/StudioHome";
 import { HomeAnalysis } from "@/components/home/HomeAnalysis";
 import { TargetCard } from "@/pages/Targets";
@@ -67,6 +68,8 @@ export function Dashboard() {
   const db = useDb();
   const orders = useMemo(() => currentUserOrders(db, user!), [db, user]);
   const studio = useStudio();
+  // Staff: the day's work and the wider figures, one at a time (hooks/usePageTab) — the page was too long.
+  const [dashTab, setDashTab] = usePageTab("dashboard", ["today", "figures"] as const, "today");
 
   const [stockLevels, setStockLevels] = useState<StockLevels | null>(null);
   // Stock levels are staff-only; a client's dashboard does not ask for them.
@@ -257,13 +260,7 @@ export function Dashboard() {
             isClient={user!.role === "client"} goldGrams={goldReserveGrams} />
           {user!.role === "admin" && <TargetCard />}
           {user!.role === "admin" && <TopMovesCard />}
-          {user!.role !== "client" && <HomeAnalysis db={db} orders={orders} role={homeRole === "admin" ? "admin" : "employee"} profit={has("fig.profit")} />}
-          {user!.role !== "client" && (
-            <div className="border-b border-border/70 pb-2 pt-4">
-              <h2 className="text-lg font-semibold tracking-tight text-foreground">More figures</h2>
-              <p className="text-xs text-muted-foreground">Gift cards, certificates, stock and accounts.</p>
-            </div>
-          )}
+          {user!.role !== "client" && dashTab === "today" && <HomeAnalysis db={db} orders={orders} role={homeRole === "admin" ? "admin" : "employee"} profit={has("fig.profit")} />}
         </>
       ) : (
         <>
@@ -283,6 +280,15 @@ export function Dashboard() {
       {/* A client's own account: what is waiting on them, their statement, how to pay, "I've paid". */}
       {user!.role === "client" && <ClientPortal />}
 
+      {/* Staff: Today (the work, charts, recent orders) · More figures (gift cards, certificates, stock, money). */}
+      {user!.role !== "client" && (
+        <TabBar label="Dashboard" value={dashTab} onChange={setDashTab} tabs={[
+          { key: "today", label: "Today", icon: Package },
+          { key: "figures", label: "More figures", icon: Wallet },
+        ]} />
+      )}
+
+      {(user!.role === "client" || dashTab === "figures") && <>
       {/* Gift Cards — all-time totals (staff). Issued = Redeemed + Pending + Expired. */}
       {user!.role !== "client" && gc.count > 0 && (
         <div>
@@ -434,6 +440,9 @@ export function Dashboard() {
         </div>
       )}
 
+      </>}
+
+      {(user!.role === "client" || dashTab === "today") && <>
       {business && !studio && (
         <div className="grid lg:grid-cols-3 gap-4">
           <div className="card-luxe p-5 lg:col-span-2">
@@ -515,6 +524,7 @@ export function Dashboard() {
           })}
         </div>
       </div>
+      </>}
     </div>
   );
 }

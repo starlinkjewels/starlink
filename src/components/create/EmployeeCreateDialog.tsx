@@ -260,7 +260,7 @@ export function EmployeeCreateDialog({ open, onOpenChange, onCreated }: {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
         {/* One height on a computer for every step, so Next stays where it is. */}
-        <DialogContent className="max-w-4xl rounded-2xl sm:h-[min(90dvh,46rem)]">
+        <DialogContent panel className="max-w-4xl rounded-2xl sm:h-[min(90dvh,46rem)]">
           <DialogHeader>
             <DialogTitle className="font-display text-2xl">Create Employee</DialogTitle>
             <DialogDescription className="text-xs">{STEP[cur].hint}</DialogDescription>

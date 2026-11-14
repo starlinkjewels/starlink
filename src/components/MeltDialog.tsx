@@ -105,7 +105,7 @@ export function MeltDialog({ order, onClose }: { order: Order; onClose: () => vo
 
   return (
     <Dialog open onOpenChange={v => !v && onClose()}>
-      <DialogContent className="max-w-5xl rounded-2xl">
+      <DialogContent panel className="max-w-5xl rounded-2xl">
         <DialogHeader>
           <DialogTitle className="font-display text-2xl flex items-center gap-2"><Flame className="h-5 w-5 text-destructive" /> Melt {order.orderNumber}</DialogTitle>
           {!plan.blocked && <DialogDescription className="text-xs">The piece will no longer exist and the order closes. The metal and stones come back; the factory's labour stays owed.</DialogDescription>}

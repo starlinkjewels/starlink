@@ -155,6 +155,8 @@ export function ReadyStockPage() {
     .filter(inOffice)
     .filter(i => !terms.length || terms.some(t =>
       i.name.toLowerCase().includes(t) || (i.sku || "").toLowerCase().includes(t)
+      // What its card and tag show: its tag number, or the "ID ABC123" from the end of its id.
+      || (i.tagNo || "").toLowerCase() === t || i.id.slice(-6).toLowerCase() === t.replace(/^id\s+/, "")
       || (cfDefs.length > 0 && searchWords(cfDefs, cfOf(i)).toLowerCase().includes(t))))
     .filter(i => avail === "all" ? true : avail === "available" ? i.quantity > 0 : i.quantity === 0)
     .filter(i => !ageSel || pieceAge(i) >= (ageSel === "old" ? OLD_DAYS : SLOW_DAYS))

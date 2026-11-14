@@ -72,7 +72,7 @@ export function StockTransferDialog({ onClose }: { onClose: () => void }) {
 
   return (
     <Dialog open onOpenChange={v => !v && onClose()}>
-      <DialogContent className="max-w-2xl rounded-2xl">
+      <DialogContent panel className="max-w-2xl rounded-2xl">
         <DialogHeader>
           <DialogTitle className="font-display text-2xl flex items-center gap-2"><ArrowRightLeft className="h-5 w-5 text-primary" /> Move stock between companies</DialogTitle>
           <DialogDescription className="text-xs">It leaves one company&rsquo;s stock and enters the other&rsquo;s, at what it cost the first — so each company&rsquo;s stock and costing stay right.</DialogDescription>

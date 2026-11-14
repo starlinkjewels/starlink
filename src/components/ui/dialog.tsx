@@ -65,6 +65,9 @@ DialogOverlay.displayName = DialogPrimitive.Overlay.displayName;
 
 /** Phones: a sheet up from the bottom, full width, clear of the home bar. */
 const SHEET = "max-sm:inset-x-0 max-sm:left-0 max-sm:top-auto max-sm:bottom-0 max-sm:translate-x-0 max-sm:translate-y-0 max-sm:w-full max-sm:max-w-none max-sm:max-h-[92dvh] max-sm:rounded-t-[1.75rem] max-sm:rounded-b-none max-sm:border-x-0 max-sm:border-b-0 max-sm:duration-300 max-sm:data-[state=open]:slide-in-from-bottom max-sm:data-[state=closed]:slide-out-to-bottom max-sm:data-[state=open]:zoom-in-100 max-sm:data-[state=closed]:zoom-out-100";
+/** A form's dialog as the app's side panel (ActionSheet): from the right, full height, on a computer;
+ *  on a phone it stays the sheet up from the bottom. Its fields, buttons and checks are its own. */
+const PANEL = "sm:left-auto sm:right-0 sm:top-0 sm:bottom-0 sm:translate-x-0 sm:translate-y-0 sm:h-[100dvh] sm:max-h-[100dvh] sm:rounded-none sm:rounded-l-none sm:border-y-0 sm:border-r-0 sm:shadow-xl sm:duration-300 sm:data-[state=open]:slide-in-from-right sm:data-[state=closed]:slide-out-to-right sm:data-[state=open]:zoom-in-100 sm:data-[state=closed]:zoom-out-100 sm:data-[state=open]:fade-in-100 sm:data-[state=closed]:fade-out-100";
 const MOTION = "duration-200 data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95";
 
 const nameOf = (t: unknown): string => (typeof t === "string" ? t : (t as { displayName?: string; name?: string } | null)?.displayName ?? (t as { name?: string } | null)?.name ?? "");
@@ -89,8 +92,13 @@ const CloseButton = ({ className = "" }: { className?: string }) => (
 
 const DialogContent = React.forwardRef<
   React.ElementRef<typeof DialogPrimitive.Content>,
-  React.ComponentPropsWithoutRef<typeof DialogPrimitive.Content>
->(({ className, children, ...props }, ref) => {
+  React.ComponentPropsWithoutRef<typeof DialogPrimitive.Content> & {
+    /** A form for a record: opens as the app's side panel (from the right), not in the middle. */
+    panel?: boolean;
+  }
+>(({ className, children, panel, ...props }, ref) => {
+  // A panel is as wide as the form says (max-w-…), else the side panel's own width.
+  const panelW = panel && !/(^|\s)(sm:|md:|lg:)?max-w-/.test(className ?? "") ? "sm:max-w-[36rem]" : "";
   // Never a form filled from the saved copy — see Dialog above.
   const held = !useDataFresh();
   const hasForm = React.useContext(HeldFormContext);
@@ -116,12 +124,12 @@ const DialogContent = React.forwardRef<
           ref={ref}
           className={cn(
             "ui-dialog ui-dialog-framed fixed left-[50%] top-[50%] z-50 flex flex-col w-full max-w-lg translate-x-[-50%] translate-y-[-50%] border bg-background shadow-2xl sm:rounded-2xl max-h-[min(90dvh,60rem)] overflow-hidden",
-            MOTION, outer, "p-0", SHEET,
+            MOTION, panelW, outer, "p-0", SHEET, panel && PANEL,
           )}
           {...props}
         >
           <div aria-hidden className="sm:hidden pointer-events-none absolute z-30 left-1/2 top-2 h-1.5 w-10 -translate-x-1/2 rounded-full bg-foreground/15" />
-          {header && <div className="ui-dialog-head shrink-0 px-6 pt-6 pb-4 pr-16 max-sm:pt-7">{header}</div>}
+          {header && <div className={cn("ui-dialog-head shrink-0 px-6 pt-6 pb-4 pr-16 max-sm:pt-7", panel && "sm:border-b sm:border-border/60")}>{header}</div>}
           {parts.length > 0 && (
             <div className={cn(
               "ui-dialog-body flex-1 min-h-0 overflow-y-auto overscroll-contain px-6",
@@ -133,7 +141,7 @@ const DialogContent = React.forwardRef<
               {parts}
             </div>
           )}
-          {footer && <div className="ui-dialog-foot shrink-0 px-6 py-4 max-sm:pb-[calc(1rem+env(safe-area-inset-bottom))]">{footer}</div>}
+          {footer && <div className={cn("ui-dialog-foot shrink-0 px-6 py-4 max-sm:pb-[calc(1rem+env(safe-area-inset-bottom))]", panel && "sm:border-t sm:border-border/60 sm:bg-secondary/30")}>{footer}</div>}
           <CloseButton className="absolute right-4 top-4 z-30 max-sm:top-5" />
         </DialogPrimitive.Content>
       </DialogPortal>
@@ -147,6 +155,7 @@ const DialogContent = React.forwardRef<
       className={cn(
         "ui-dialog fixed left-[50%] top-[50%] z-50 grid w-full max-w-lg translate-x-[-50%] translate-y-[-50%] gap-4 border bg-background p-6 shadow-lg duration-200 data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95 sm:rounded-lg max-h-[90dvh] overflow-y-auto overscroll-contain",
         className,
+        panelW, panel && PANEL,
         // Phones: a sheet up from the bottom, full width, clear of the home bar.
         "max-sm:inset-x-0 max-sm:left-0 max-sm:top-auto max-sm:bottom-0 max-sm:translate-x-0 max-sm:translate-y-0 max-sm:w-full max-sm:max-w-none max-sm:max-h-[92dvh] max-sm:rounded-t-[1.75rem] max-sm:rounded-b-none max-sm:border-x-0 max-sm:border-b-0 max-sm:pb-[calc(1.5rem+env(safe-area-inset-bottom))] max-sm:duration-300 max-sm:data-[state=open]:slide-in-from-bottom max-sm:data-[state=closed]:slide-out-to-bottom max-sm:data-[state=open]:zoom-in-100 max-sm:data-[state=closed]:zoom-out-100",
       )}

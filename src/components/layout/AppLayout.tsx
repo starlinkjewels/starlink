@@ -176,7 +176,7 @@ const PAGE_TITLES: Record<string, string> = {
   "/ai":       "Assistant",
   "/expenses": "Expenses",
   "/messages": "Messages",
-  "/notifications": "Notifications",
+  "/notifications": "Alerts",
   "/reports": "Reports",
   "/targets": "Targets",
   "/settings": "Settings",

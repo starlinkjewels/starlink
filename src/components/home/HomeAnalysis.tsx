@@ -1,3 +1,4 @@
+import { DataTable } from "@/components/DataTable";
 import { hasSwitch } from "@/lib/access";
 // The new look's Home, part two: the business's analysis, in a proper order —
 // Sales & profit · Money · Production · Team — under ONE period control that
@@ -313,26 +314,19 @@ function Analysis({ db, orders, role, profit }: { db: DB; orders: Order[]; role:
         </ChartCard>
         {admin && hasSwitch("fig.costs") && a.factories.length > 0 && (
           <ChartCard title="Factories" sub="Pieces finished in this period, fine gold in them, labour and open jobs">
-            <div className="overflow-x-auto -mx-1">
-              <table className="w-full min-w-[640px] text-sm tabular-nums">
-                <thead><tr className="text-xs text-muted-foreground">
-                  {["Factory", "Pieces", "Fine gold", "Labour", "Labour unpaid", "Open jobs", "Avg days"].map((h, i) => <th key={h} className={`px-2 pb-2 font-medium ${i ? "text-right" : "text-left"}`}>{h}</th>)}
-                </tr></thead>
-                <tbody className="divide-y divide-border/60">
-                  {a.factories.map(f => (
-                    <tr key={f.id} className="hover:bg-secondary/50">
-                      <td className="px-2 py-2.5"><Link to={`/factories/${f.id}`} className="font-medium text-foreground hover:underline">{f.name}</Link></td>
-                      <td className="px-2 py-2.5 text-right">{f.pieces}</td>
-                      <td className="px-2 py-2.5 text-right">{num(f.fineGoldG)} g</td>
-                      <td className="px-2 py-2.5 text-right">{inr(f.labourInr, true)}</td>
-                      <td className={`px-2 py-2.5 text-right ${f.labourPendingInr > 0.5 ? "text-destructive font-medium" : ""}`}>{inr(f.labourPendingInr, true)}</td>
-                      <td className="px-2 py-2.5 text-right">{f.openJobs}</td>
-                      <td className="px-2 py-2.5 text-right">{f.avgDays == null ? "—" : num(f.avgDays)}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+            {/* The app's one table — cards on a phone (it was a 640px-wide table to slide sideways); each opens its factory. */}
+            <DataTable id="home-factories" noun="factory" plural="factories" rows={a.factories} rowKey={f => f.id} details={false} controls="none"
+              rowHref={f => `/factories/${f.id}`} defaultSort={{ key: "pieces", dir: "desc" }}
+              columns={[
+                { key: "name", header: "Factory", always: true, sortValue: f => f.name, cell: f => <span className="font-medium text-foreground">{f.name}</span> },
+                { key: "pieces", header: "Pieces", align: "right", kind: "number", sortValue: f => f.pieces, cell: f => <span className="tabular-nums">{f.pieces}</span> },
+                { key: "fine", header: "Fine gold", align: "right", kind: "number", sortValue: f => f.fineGoldG, cell: f => <span className="tabular-nums">{num(f.fineGoldG)} g</span> },
+                { key: "labour", header: "Labour", align: "right", kind: "number", sortValue: f => f.labourInr, cell: f => <span className="tabular-nums">{inr(f.labourInr, true)}</span> },
+                { key: "unpaid", header: "Labour unpaid", align: "right", kind: "number", sortValue: f => f.labourPendingInr,
+                  cell: f => <span className={`tabular-nums ${f.labourPendingInr > 0.5 ? "text-destructive font-medium" : ""}`}>{inr(f.labourPendingInr, true)}</span> },
+                { key: "open", header: "Open jobs", align: "right", kind: "number", sortValue: f => f.openJobs, cell: f => <span className="tabular-nums">{f.openJobs}</span> },
+                { key: "days", header: "Avg days", align: "right", kind: "number", sortValue: f => f.avgDays ?? -1, cell: f => <span className="tabular-nums">{f.avgDays == null ? "—" : num(f.avgDays)}</span> },
+              ]} />
           </ChartCard>
         )}
       </Section>

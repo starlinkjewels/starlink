@@ -111,7 +111,7 @@ export function BulkDispatchDialog({ orders, onClose, onDone }: {
 
   return (
     <Dialog open onOpenChange={v => { if (!v && !saving) onClose(); }}>
-      <DialogContent className="max-w-3xl rounded-2xl">
+      <DialogContent panel className="max-w-3xl rounded-2xl">
         <DialogHeader>
           <DialogTitle className="font-display text-xl flex items-center gap-2">
             <Truck className="h-5 w-5 text-blue-500" /> Dispatch {orders.length} order{orders.length !== 1 ? "s" : ""}
@@ -279,7 +279,7 @@ export function BulkDeliverDialog({ orders, onClose, onDone }: {
 
   return (
     <Dialog open onOpenChange={v => { if (!v && !saving) onClose(); }}>
-      <DialogContent className="max-w-3xl rounded-2xl">
+      <DialogContent panel className="max-w-3xl rounded-2xl">
         <DialogHeader>
           <DialogTitle className="font-display text-xl flex items-center gap-2">
             <PackageCheck className="h-5 w-5 text-success" /> Mark {orders.length} order{orders.length !== 1 ? "s" : ""} delivered
