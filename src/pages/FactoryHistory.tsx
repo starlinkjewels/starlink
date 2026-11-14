@@ -1,3 +1,4 @@
+import { GOLD_KARATS } from "@/lib/pure/basics";
 import { LotPicker, lotStockText } from "@/components/LotFields";
 import { lotBalances, lotLabel, lotParts } from "@/lib/diamondLots";
 import { bagNoOf } from "@/lib/diamondBags";
@@ -70,7 +71,8 @@ import { openMin } from "@/lib/openMin";
 /** An action on an issuance card: a light text button, icon and word. */
 const ISSUE_ACTION = "inline-flex items-center gap-1.5 h-9 px-2.5 rounded-lg text-sm font-medium text-primary hover:bg-primary/[0.07] transition-colors";
 
-const GOLD_PURITIES = ["9K", "14K", "18K", "22K", "24K"];
+// The one karat list (lib/pure/basics.ts GOLD_KARATS) — every gold dropdown offers the same.
+const GOLD_PURITIES = GOLD_KARATS;
 
 type IssuanceAction = "piece" | "charge" | "pay" | "return" | "close" | null;
 

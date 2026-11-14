@@ -33,8 +33,8 @@ import { closedWhy } from "./yearLock";
 const r3 = (n: number) => Math.round(n * 1000) / 1000;
 const EPS = 0.0005;
 
-/** The karats gold is bought and kept in — the same list the purchase form offers. */
-export const GOLD_KARATS = ["9K", "10K", "14K", "18K", "22K", "24K"];
+/** The karats gold is bought and kept in — the one list (lib/pure/basics.ts). */
+export { GOLD_KARATS } from "./pure/basics";
 
 /** Fine (24K) grams in gold of a purity bucket ("22K" → × 0.916). */
 export const goldFine = (grams: number, purity: string) => toPureGold(grams, purity);

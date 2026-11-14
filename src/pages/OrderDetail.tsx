@@ -1,3 +1,4 @@
+import { GOLD_KARATS } from "@/lib/pure/basics";
 import { CustomFieldsView } from "@/components/CustomFields";
 import { keptForOrder } from "@/lib/orderStock";
 import { ReceiveFromClient, type ReceiveValues } from "@/components/payments/ReceiveFromClient";
@@ -127,7 +128,8 @@ import { zoomable } from "@/components/ImageViewer";
 import { RateInput } from "@/components/CurrencyFields";
 import { openMin } from "@/lib/openMin";
 
-const GOLD_PURITIES = ["9K", "14K", "18K", "22K", "24K"];
+// The one karat list (lib/pure/basics.ts GOLD_KARATS) — every gold dropdown offers the same.
+const GOLD_PURITIES = GOLD_KARATS;
 
 
 /**

@@ -1,3 +1,4 @@
+import { GOLD_KARATS } from "@/lib/pure/basics";
 import { LotPicker } from "@/components/LotFields";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
@@ -17,7 +18,8 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 
-const GOLD_PURITIES = ["9K", "10K", "14K", "18K", "22K", "24K"];
+// The one karat list (lib/pure/basics.ts GOLD_KARATS) — every gold dropdown offers the same.
+const GOLD_PURITIES = GOLD_KARATS;
 
 /** What an issue asked besides its weight and grade, as typed in the edit forms. */
 export interface IssueExtraDraft { pcs: string; rate: string }

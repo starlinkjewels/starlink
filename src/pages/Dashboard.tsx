@@ -183,9 +183,15 @@ export function Dashboard() {
   const myProfit = myRevenue - myExpenseUsd.usd;
 
   // Admin: certificate stats
-  const certOrders = db.orders.filter(o => o.certificate === true && !o.deletedAt);
+  // A cancelled order bills no certificate. Each order's fee is its own (editable), so the tile
+  // says "$X × N" only when every fee is the same — else the average (it used to say "$50 × N" always).
+  const certOrders = db.orders.filter(o => o.certificate === true && !o.deletedAt && o.status !== "Rejected");
   const certCount  = certOrders.length;
   const certIncome = certOrders.reduce((s, o) => s + (o.certificateFee || 0), 0);
+  const certFees = certOrders.map(o => o.certificateFee || 0);
+  const certSub = !certCount ? "None yet"
+    : certFees.every(f => f === certFees[0]) ? `${fmtMoney(certFees[0])} × ${certCount}`
+      : `${certCount} orders · ${fmtMoney(Math.round(certIncome / certCount * 100) / 100)} average`;
 
   // Admin: total expenses across all staff, per-employee breakdown
   const allExpenses = db.expenses ?? [];
@@ -316,7 +322,7 @@ export function Dashboard() {
           <SectionTitle className="mb-4" icon={BadgeCheck} title="Certificate Summary" />
           <div className="grid grid-cols-2 gap-3">
             <Kpi label="Certificates" value={certCount} sub={`order${certCount !== 1 ? "s" : ""} issued`} />
-            <Kpi label="Certificate income" value={fmtMoney(certIncome)} tone="in" sub={`$50 × ${certCount}`} />
+            <Kpi label="Certificate income" value={fmtMoney(certIncome)} tone="in" sub={certSub} />
           </div>
         </motion.div>
       )}

@@ -34,7 +34,8 @@ import { confirmBox } from "@/lib/confirm";
 import { companyIdOfClient, companyOf } from "@/lib/companies";
 import { officeLabel, officeOf, officeRank, otherLots } from "@/lib/offices";
 import { limitsOf } from "@/lib/permissions";
-import { pieceTimeline, stepQty, whoOf, type TimelineEntry } from "@/lib/readyStockHistory";
+import { pieceTimeline, whoOf, type TimelineEntry } from "@/lib/readyStockHistory";
+import { QtyAdjustSheet } from "@/components/QtyAdjustSheet";
 import { readyStockDeleteBlocker, readyStockOutLabel } from "@/lib/readyStockGuards";
 import { builtFrom, orderPicturesPlan, piecePhotosBehind, takeOrderPictures } from "@/lib/readyStockPhotos";
 import { needsAccess } from "@/lib/actionHints";
@@ -111,6 +112,8 @@ function PieceBody({ item }: { item: ReadyStockItem }) {
   const mayExport = useMayExport();
   const multiCo = useMultiCo();
   const nav = useNavigate();
+  // − / + asks why first (components/QtyAdjustSheet): −1, +1 or none open.
+  const [qtyDelta, setQtyDelta] = useState<number | null>(null);
   const isAdmin = user?.role === "admin"; // cost + profit/loss are admin-only
   const canManage = isAdmin || user?.role === "employee"; // clients get the shop view
   const canEdit = canManage && can("readyStock", "edit");
@@ -180,7 +183,7 @@ function PieceBody({ item }: { item: ReadyStockItem }) {
   const timeline = canManage ? pieceTimeline(db, item).filter(e => isAdmin || e.kind !== "cost").reverse() : [];
 
   // ── Actions — the same checks and confirms as on the Ready Stock list ──
-  const adjustQty = (delta: number) => updateDb(d => stepQty(d, item.id, delta, whoOf(user)));
+  const adjustQty = (delta: number) => setQtyDelta(delta);
   // A lot an order, a return or a build points at is never deleted — it is
   // emptied instead (lib/readyStockGuards.ts). Checked again as it runs.
   const del = async () => {
@@ -218,9 +221,9 @@ function PieceBody({ item }: { item: ReadyStockItem }) {
 
   const stepper = (
     <div className="flex items-center gap-1.5">
-      <button onClick={() => adjustQty(-1)} disabled={item.quantity === 0} aria-label="One less" className="h-8 w-8 rounded-lg border border-border bg-white grid place-items-center hover:bg-secondary disabled:opacity-30 transition-colors"><Minus className="h-3.5 w-3.5" /></button>
+      <button onClick={() => adjustQty(-1)} disabled={item.quantity === 0} aria-label="One less" title="One less (asks why)" className="h-8 w-8 rounded-lg border border-border bg-white grid place-items-center hover:bg-secondary disabled:opacity-30 transition-colors"><Minus className="h-3.5 w-3.5" /></button>
       <span className="text-base font-semibold w-8 text-center tabular-nums">{item.quantity}</span>
-      <button onClick={() => adjustQty(1)} aria-label="One more" className="h-8 w-8 rounded-lg border border-border bg-white grid place-items-center hover:bg-secondary transition-colors"><Plus className="h-3.5 w-3.5" /></button>
+      <button onClick={() => adjustQty(1)} aria-label="One more" title="One more (asks why)" className="h-8 w-8 rounded-lg border border-border bg-white grid place-items-center hover:bg-secondary transition-colors"><Plus className="h-3.5 w-3.5" /></button>
     </div>
   );
 
@@ -282,6 +285,8 @@ function PieceBody({ item }: { item: ReadyStockItem }) {
 
   return (
     <div className="max-w-6xl mx-auto space-y-5 min-w-0">
+      <QtyAdjustSheet item={qtyDelta != null ? item : null} delta={qtyDelta ?? 0} onClose={() => setQtyDelta(null)}
+        sellHref={mayOrder ? sellHref : undefined} />
       {/* ── Header: what it is, where it is, what can be done. The ⋯ is named
           for the piece, as on its card in the list. ── */}
       <PageHeader

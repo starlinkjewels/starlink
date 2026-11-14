@@ -36,7 +36,8 @@ import { ExportMenu, FilterChips, FiltersButton, StatStrip, rangeText, useNarrow
 import { MoveOfficeDialog, OfficesDialog, OfficeChip } from "@/components/ReadyStockOffices";
 import { ReadyStockItemDialog } from "@/components/ReadyStockItemDialog";
 import { officeLabel, officeOf, officeRank, officeTabs, otherLots, readyStockOffices } from "@/lib/offices";
-import { pieceTimeline, stepQty, whoOf } from "@/lib/readyStockHistory";
+import { pieceTimeline } from "@/lib/readyStockHistory";
+import { QtyAdjustSheet } from "@/components/QtyAdjustSheet";
 import { useUrlState } from "@/hooks/useUrlState";
 import { useStickyFilter } from "@/hooks/useStickyFilter";
 import { selHas, selList, selOn, selText } from "@/lib/filterSel";
@@ -216,10 +217,10 @@ export function ReadyStockPage() {
   };
   const openEdit = (item: ReadyStockItem) => setDlg({ item });
 
-  // The − / + stepper — each change goes on the piece's history.
-  const adjustQty = (item: ReadyStockItem, delta: number) => {
-    updateDb(d => stepQty(d, item.id, delta, whoOf(user)));
-  };
+  // The − / + stepper: a count changed by hand asks why first (components/QtyAdjustSheet) —
+  // kept on the piece's history with its reason, and undoable. Never one tap.
+  const [qtyFor, setQtyFor] = useState<{ id: string; delta: number } | null>(null);
+  const adjustQty = (item: ReadyStockItem, delta: number) => setQtyFor({ id: item.id, delta });
 
   /** A click on a grid card opens the piece's own page; Ctrl/⌘-click, in a new tab. */
   const pieceHref = (item: ReadyStockItem) => `/ready-stock/${item.id}`;
@@ -355,9 +356,9 @@ export function ReadyStockPage() {
 
   const qtyStepper = (item: ReadyStockItem, small = false) => (
     <div className={`flex items-center gap-1.5 ${small ? "justify-end mt-1" : ""}`}>
-      <button onClick={() => adjustQty(item, -1)} disabled={item.quantity === 0} aria-label="One less" className={`${small ? "h-6 w-6" : "h-7 w-7"} rounded-lg border border-border grid place-items-center hover:bg-secondary disabled:opacity-30 transition-colors`}><Minus className="h-3 w-3" /></button>
+      <button onClick={() => adjustQty(item, -1)} disabled={item.quantity === 0} aria-label={`One less — ${item.name}`} title="One less (asks why)" className={`${small ? "h-7 w-7" : "h-8 w-8"} rounded-lg border border-border grid place-items-center hover:bg-secondary disabled:opacity-30 transition-colors`}><Minus className="h-3 w-3" /></button>
       <span className="text-sm font-semibold w-6 text-center tabular-nums">{item.quantity}</span>
-      <button onClick={() => adjustQty(item, 1)} aria-label="One more" className={`${small ? "h-6 w-6" : "h-7 w-7"} rounded-lg border border-border grid place-items-center hover:bg-secondary transition-colors`}><Plus className="h-3 w-3" /></button>
+      <button onClick={() => adjustQty(item, 1)} aria-label={`One more — ${item.name}`} title="One more (asks why)" className={`${small ? "h-7 w-7" : "h-8 w-8"} rounded-lg border border-border grid place-items-center hover:bg-secondary transition-colors`}><Plus className="h-3 w-3" /></button>
     </div>
   );
   const stockPill = (item: ReadyStockItem) => (
@@ -484,6 +485,8 @@ export function ReadyStockPage() {
   return (
     <div className="max-w-7xl mx-auto space-y-5">
       {rightClick.menu}
+      <QtyAdjustSheet item={qtyFor ? db.readyStock.find(x => x.id === qtyFor.id) ?? null : null} delta={qtyFor?.delta ?? 0} onClose={() => setQtyFor(null)}
+        sellHref={qtyFor && mayOrder ? `/orders/new?readyStock=${encodeURIComponent(qtyFor.id)}` : undefined} />
       <PageHeader
         title="Ready Stock"
         subtitle={canManage ? "Finished pieces, by office" : "Finished pieces to buy"}

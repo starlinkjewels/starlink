@@ -1726,25 +1726,26 @@ export function ReportSections({ embedded = false, show, period, clientId, scope
           {filtered.length > 0 && (
             <div className="card-luxe p-4 sm:p-5">
               <SectionTitle className="mb-3" title="My Orders" />
-              <div className="space-y-2">
-                {filtered.slice(0,20).map(o => {
-                  const d = dispatchDays(o);
-                  return (
-                    <div key={o.id} className="flex items-center justify-between gap-2 p-3 rounded-xl bg-secondary/40">
-                      <div className="min-w-0">
-                        <p className="font-semibold text-brand-dark text-sm leading-tight">{o.orderNumber}</p>
-                        <p className="text-[11px] text-muted-foreground mt-0.5 truncate">{o.jewelleryType} · {fmtDate(o.createdAt)}</p>
-                      </div>
-                      <div className="flex flex-col items-end gap-1 shrink-0">
-                        <StatusBadge status={o.status} />
-                        {d !== null && (
-                          <span className="text-[10px] text-muted-foreground">{d}d dispatch</span>
-                        )}
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
+              {/* Every one of their orders — it used to stop at the first 20 without saying so.
+                  The shared table: paged, searchable, newest first, each opens the order. */}
+              <DataTable
+                id="reports-my-orders"
+                noun="order"
+                rows={filtered}
+                rowKey={o => o.id}
+                rowHref={mayOpen("orders") ? o => `/orders/${o.id}` : undefined}
+                details={false}
+                defaultSort={{ key: "date", dir: "desc" }}
+                searchText={o => `${o.orderNumber} ${o.designNumber ?? ""} ${o.jewelleryType} ${o.status}`}
+                columns={[
+                  { key: "no", header: "Order #", always: true, sortValue: o => o.orderNumber, cell: o => <span className="font-semibold text-brand-dark whitespace-nowrap">{o.orderNumber}</span> },
+                  { key: "type", header: "Type", sortValue: o => o.jewelleryType, cell: o => <span className="whitespace-nowrap">{o.jewelleryType}</span> },
+                  { key: "status", header: "Status", sortValue: o => o.status, cell: o => <StatusBadge status={o.status} /> },
+                  { key: "dispatch", header: "Dispatched in", align: "right", kind: "number", sortValue: o => dispatchDays(o) ?? -1,
+                    cell: o => { const d = dispatchDays(o); return d !== null ? <span className="tabular-nums whitespace-nowrap">{d} days</span> : <span className="text-muted-foreground text-xs">—</span>; } },
+                  { key: "date", header: "Date", align: "right", kind: "date", sortValue: o => +new Date(o.createdAt), cell: o => <CellDate>{fmtDate(o.createdAt)}</CellDate> },
+                ]}
+              />
             </div>
           )}
         </>

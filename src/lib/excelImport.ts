@@ -14,6 +14,7 @@
 //     stock (no supplier, no dues; the loose ones into their bags, at the rate
 //     given), a piece as Add to Ready Stock with its history line — under one
 //     import record, so…
+import { GOLD_KARATS } from "@/lib/pure/basics";
 import { cleanValue, fieldsFor, writeValues, KIND_LABEL, type CfTarget, type CfValues } from "./customFields";
 //   • …Undo (undoImport) removes everything that file brought in, in one step —
 //     except a record used since (an order on the client, a bill from the
@@ -207,7 +208,7 @@ function baseDefs(db: DB): SheetDef[] {
         { key: "sku", header: "Design # / SKU", help: "Your code for it — the same code twice is skipped", aliases: ["design no", "design number", "sku", "code", "style no", "style"] },
         { key: "jewelleryType", header: "Type", help: `blank = ${listOf("jewelleryTypes", db.settings)[0] ?? "Ring"}`, list: listOf("jewelleryTypes", db.settings), aliases: ["jewellery type", "jewelry type", "category"] },
         { key: "metal", header: "Metal", help: `blank = ${listOf("metals", db.settings)[0] ?? "Yellow Gold"}`, list: listOf("metals", db.settings) },
-        { key: "karat", header: "Karat", help: "14K, 18K… — blank = 22K (metals with karats)", list: ["9K", "10K", "14K", "18K", "22K", "24K"], aliases: ["kt", "purity"] },
+        { key: "karat", header: "Karat", help: "14K, 18K… — blank = 22K (metals with karats)", list: GOLD_KARATS, aliases: ["kt", "purity"] },
         { key: "gross", header: "Gross weight (g)", help: "", aliases: ["gross weight", "gross wt", "gross", "gw"] },
         { key: "net", header: "Net weight (g)", help: "", aliases: ["net weight", "net wt", "net", "nw"] },
         { key: "dia", header: "Diamond weight (ct)", help: "", aliases: ["diamond weight", "diamond wt", "dia wt", "diamond ct", "diamonds"] },

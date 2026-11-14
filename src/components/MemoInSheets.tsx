@@ -1,6 +1,7 @@
 // Memo IN — a dealer's goods with us on approval: the side panels. Take goods in,
 // send them back, or keep them (the Buy form opens filled in from the slip).
 // The books: lib/memos.ts — a memo in never touches our stock.
+import { GOLD_KARATS } from "@/lib/pure/basics";
 import { useEffect, useState } from "react";
 import { BadgeCheck, Coins, FileInput, Gem, Layers, Package, Plus, Trash2, Undo2, BadgeDollarSign, type LucideIcon } from "lucide-react";
 import { toast } from "sonner";
@@ -47,7 +48,8 @@ const IN_KINDS: { kind: SupplierSaleKind; label: string; icon: LucideIcon }[] = 
   { kind: "material", label: "Gems / other", icon: Layers },
   { kind: "gold", label: "Gold", icon: Coins },
 ];
-const GOLD_PURITIES = ["9K", "10K", "14K", "18K", "22K", "24K"];
+// The one karat list (lib/pure/basics.ts GOLD_KARATS) — every gold dropdown offers the same.
+const GOLD_PURITIES = GOLD_KARATS;
 
 /** Take a dealer's (or a broker's) goods in on memo. Our stock is untouched — the slip is the record. */
 export function MemoInSheet({ open, onOpenChange, party: fixed }: { open: boolean; onOpenChange: (v: boolean) => void; party?: MemoParty }) {

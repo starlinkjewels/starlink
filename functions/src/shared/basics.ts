@@ -9,6 +9,9 @@ export const KARAT_PURITY: Record<number, number> = {
   9: 0.375, 10: 0.417, 14: 0.585, 18: 0.75, 22: 0.916, 24: 1,
 };
 
+/** Every gold karat the purity maths knows, lowest first — the one list every gold dropdown offers. */
+export const GOLD_KARATS: string[] = Object.keys(KARAT_PURITY).map(Number).sort((a, b) => a - b).map(k => `${k}K`);
+
 /** Grams of a given karat → grams of pure (24KT) gold. Unknown karat → treat as pure. */
 export function toPureGold(grams: number, karat: string | number): number {
   const n = typeof karat === "number" ? karat : parseInt(String(karat), 10);
