@@ -1,4 +1,5 @@
-import { useState, type ReactNode } from "react";
+import { ensureTagNo, tagShown } from "@/lib/readyStockTag";
+import { useEffect, useState, type ReactNode } from "react";
 import { CustomFieldsView } from "@/components/CustomFields";
 import { ProductVideo } from "@/components/ProductVideo";
 import { OrderThumb } from "@/components/OrderThumb";
@@ -114,6 +115,9 @@ function PieceBody({ item }: { item: ReadyStockItem }) {
   const nav = useNavigate();
   // − / + asks why first (components/QtyAdjustSheet): −1, +1 or none open.
   const [qtyDelta, setQtyDelta] = useState<number | null>(null);
+  // Its tag number, given as its tag window opens — so Print itself is instant (lib/readyStockTag.ts).
+  const [bandOpenAt, setBandOpenAt] = useState(0);
+  useEffect(() => { if (bandOpenAt && !item.tagNo) ensureTagNo(item.id).catch(() => { /* printed with its SKU then */ }); }, [bandOpenAt, item.id, item.tagNo]);
   const isAdmin = user?.role === "admin"; // cost + profit/loss are admin-only
   const canManage = isAdmin || user?.role === "employee"; // clients get the shop view
   const canEdit = canManage && can("readyStock", "edit");
@@ -212,7 +216,7 @@ function PieceBody({ item }: { item: ReadyStockItem }) {
     { label: "Use the order's photos", icon: Images, hint: editWhy ?? (buildOrder ? `The photos on order ${buildOrder.orderNumber} now` : undefined),
       disabled: !canEdit || !photosBehind, onSelect: takeOrderPhotos, show: !!buildOrder },
     { label: "Share / PDF", icon: Share2, hint: mayExport ? "Photos, CAD, gold, diamonds, price" : needsAccess("readyStock", "export"), disabled: !mayExport, onSelect: () => setSharing(true) },
-    { label: "Print band", icon: Tag, hint: mayExport ? undefined : needsAccess("readyStock", "export"), disabled: !mayExport, onSelect: () => setBandOpen(true), show: db.settings.barcodeBandEnabled !== false },
+    { label: "Print band", icon: Tag, hint: mayExport ? undefined : needsAccess("readyStock", "export"), disabled: !mayExport, onSelect: () => { setBandOpen(true); setBandOpenAt(Date.now()); }, show: db.settings.barcodeBandEnabled !== false },
     // The main button when it can be sold; here, greyed with why, when it can't.
     { label: "Sell this piece", icon: ShoppingBag, hint: !mayOrder ? needsAccess("orders", "add") : item.quantity > 0 ? "A new order with this piece" : "Sold out — nothing left to sell",
       disabled: !mayOrder || item.quantity <= 0, onSelect: () => nav(sellHref), show: !(mayOrder && item.quantity > 0) },
@@ -269,7 +273,7 @@ function PieceBody({ item }: { item: ReadyStockItem }) {
           <div className="h-10 w-10 rounded-lg bg-white ring-1 ring-border/60 overflow-hidden grid place-items-center shrink-0">
             {l.images?.[0] ? <img src={l.images[0]} alt="" loading="lazy" {...zoomable(l.images[0], l.images)} className="w-full h-full object-contain cursor-zoom-in" /> : <Gem className="h-4 w-4 text-muted-foreground/40" />}
           </div>
-          <CellMain title={l.name} sub={`ID ${l.id.slice(-6).toUpperCase()} · ${l.splitFrom ? "split off" : "the first lot"}`} />
+          <CellMain title={l.name} sub={`${tagShown(l)} · ${l.splitFrom ? "split off" : "the first lot"}`} />
         </div>
       ) },
     { key: "office", header: "Office", sortValue: l => `${String(officeRank(db.settings, officeOf(l))).padStart(5, "0")} ${officeOf(l)}`, cell: l => <OfficeChip office={officeOf(l)} /> },
@@ -513,6 +517,7 @@ function PieceBody({ item }: { item: ReadyStockItem }) {
         presets={labelPresets(db.settings)}
         showPrice={db.settings.barcodeBandShowPrice !== false}
         onGenerate={(preset, mode, copies) => generateStockBand(item, db.settings, { style: preset.style, width: preset.widthMm, height: preset.heightMm, mode, copies })}
+        // Its own tag number, given as the window opens (lib/readyStockTag.ts).
       />
     </div>
   );

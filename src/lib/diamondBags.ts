@@ -12,6 +12,7 @@
 //
 // Each bag's document id comes from its lot, so the same lot can never end up
 // with two bags, whoever adds stock to it at the same moment.
+import { barcodeDataUrl } from "./band";
 import { showPrintPage } from "./printView";
 import { updateDb, type DB, type DiamondBag, type Purchase, type StockMovement } from "./db";
 import { purchaseBucket } from "./materials";
@@ -117,7 +118,8 @@ export function printBagLabels(items: { no: string; key: string; ct?: number; pc
     const size = [s.mm, s.size].filter(Boolean).join(" · ");
     const grade = [s.color, s.clarity].filter(Boolean).join(" · ");
     const holds = [it.ct != null ? `${it.ct} ct` : "", it.pcs != null ? `${it.pcs} pcs` : ""].filter(Boolean).join(" · ");
-    return `<div class="lbl"><div class="no">${esc(it.no)}</div><div class="shape">${esc([s.shape, s.type].filter(Boolean).join(" · "))}</div>`
+    // Its barcode (the bag number) — a scan opens the bag (components/ScanModal).
+    return `<div class="lbl"><img class="bc" src="${barcodeDataUrl(it.no)}" alt=""><div class="no">${esc(it.no)}</div><div class="shape">${esc([s.shape, s.type].filter(Boolean).join(" · "))}</div>`
       + `${size ? `<div class="ln">${esc(size)}</div>` : ""}${grade ? `<div class="ln">${esc(grade)}</div>` : ""}`
       + `${holds ? `<div class="holds">${esc(holds)}</div>` : ""}${company ? `<div class="co">${esc(company)}</div>` : ""}</div>`;
   }).join("");
@@ -128,7 +130,8 @@ export function printBagLabels(items: { no: string; key: string; ct?: number; pc
     body { font-family: Arial, Helvetica, sans-serif; margin: 0; color: #111; }
     .grid { display: flex; flex-wrap: wrap; gap: 3mm; }
     .lbl { width: 50mm; height: 30mm; box-sizing: border-box; border: 0.3mm dashed #888; border-radius: 2mm; padding: 2mm 2.5mm; overflow: hidden; break-inside: avoid; }
-    .no { font-size: 13pt; font-weight: 700; letter-spacing: 0.3pt; }
+    .bc { display: block; width: 100%; height: 6mm; object-fit: fill; }
+    .no { font-size: 12pt; font-weight: 700; letter-spacing: 0.3pt; }
     .shape { font-size: 10pt; font-weight: 700; margin-top: 0.5mm; }
     .ln { font-size: 9pt; }
     .holds { font-size: 8pt; color: #333; margin-top: 0.5mm; }
@@ -136,6 +139,38 @@ export function printBagLabels(items: { no: string; key: string; ct?: number; pc
   </style></head><body><div class="grid">${cards}</div>
   </body></html>`);
   showPrintPage(html, { title: "Bag labels" });
+  return true;
+}
+
+/**
+ * Print a label for each certified stone: its stock number with its barcode (a scan opens the
+ * stone — components/ScanModal), then what it is — shape and carat, colour · clarity, the lab
+ * and report number. 50 × 30 mm, as many to a page as fit. Never its cost.
+ */
+export function printStoneLabels(stones: { stockNumber?: string; certificateNumber?: string; certificateLab?: string; shape: string; carat: number; color?: string; clarity?: string }[], company?: string): boolean {
+  const list = stones.filter(s => s.stockNumber || s.certificateNumber);
+  if (!list.length) return false;
+  const cards = list.map(s => {
+    const code = s.stockNumber || s.certificateNumber!;
+    const grade = [s.color, s.clarity].filter(Boolean).join(" · ");
+    const report = [s.certificateLab, s.certificateNumber].filter(Boolean).join(" ");
+    return `<div class="lbl"><img class="bc" src="${barcodeDataUrl(code)}" alt=""><div class="no">${esc(code)}</div>`
+      + `<div class="shape">${esc(`${s.shape} ${s.carat} ct`)}</div>${grade ? `<div class="ln">${esc(grade)}</div>` : ""}`
+      + `${report ? `<div class="ln">${esc(report)}</div>` : ""}${company ? `<div class="co">${esc(company)}</div>` : ""}</div>`;
+  }).join("");
+  const html = (`<!doctype html><html><head><meta charset="utf-8"><title>Stone labels</title><style>
+    @page { margin: 8mm; }
+    body { font-family: Arial, Helvetica, sans-serif; margin: 0; color: #111; }
+    .grid { display: flex; flex-wrap: wrap; gap: 3mm; }
+    .lbl { width: 50mm; height: 30mm; box-sizing: border-box; border: 0.3mm dashed #888; border-radius: 2mm; padding: 2mm 2.5mm; overflow: hidden; break-inside: avoid; }
+    .bc { display: block; width: 100%; height: 6mm; object-fit: fill; }
+    .no { font-size: 12pt; font-weight: 700; letter-spacing: 0.3pt; }
+    .shape { font-size: 10pt; font-weight: 700; margin-top: 0.5mm; }
+    .ln { font-size: 8.5pt; }
+    .co { font-size: 7pt; color: #666; }
+  </style></head><body><div class="grid">${cards}</div>
+  </body></html>`);
+  showPrintPage(html, { title: "Stone labels" });
   return true;
 }
 

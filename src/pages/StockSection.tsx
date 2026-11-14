@@ -6,7 +6,7 @@ import { SectionTitle } from "@/components/SectionTitle";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { CompanyFilter, CompanyPicker, CompanyBadge, useMultiCo } from "@/components/CompanyFields";
-import { companyOf, coField, companyById } from "@/lib/companies";
+import { companyOf, coField, companyById, brandFor } from "@/lib/companies";
 import { useCan, useHas } from "@/hooks/useCan";
 import { keepCols } from "@/lib/figureFilters";
 import { fmtCcy, rateText } from "@/lib/currency";
@@ -30,7 +30,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Pencil, Trash2, ExternalLink, Lock, FileText, FileSpreadsheet, BadgeCheck, Gem, Wallet, Layers, History } from "lucide-react";
+import { Pencil, Trash2, ExternalLink, Lock, FileText, FileSpreadsheet, BadgeCheck, Gem, Wallet, Layers, History, Tag, Printer } from "lucide-react";
 import { isOtherMaterial, materialDef, materialUnit, purchaseQty, KIND_LABEL, type MaterialKey } from "@/lib/materials";
 import { toast } from "sonner";
 import { confirmBox } from "@/lib/confirm";
@@ -38,7 +38,7 @@ import { PageHeader, TabBar } from "@/components/PageHeader";
 import { usePageTab } from "@/hooks/usePageTab";
 import { lotShape } from "@/lib/diamondLots";
 import { keptForOrder } from "@/lib/orderStock";
-import { bagMoveLabel, bagNoOf } from "@/lib/diamondBags";
+import { bagMoveLabel, bagNoOf, printStoneLabels } from "@/lib/diamondBags";
 import { StockLotsTable } from "@/components/StockLotsTable";
 import { ListSelect, CertGradeFields } from "@/components/LotFields";
 import { StatStrip, type TableFilter } from "@/components/TableToolbar";
@@ -443,6 +443,7 @@ function MaterialSection({ material }: { material: MaterialKey }) {
 /* ── Certified Diamonds — packet grid, edit, delete ── */
 
 function CertifiedSection() {
+  const hasG = useHas();
   // Rates, costs and value at cost: only with fig.costs — an admin always.
   const showCosts = useHas()("fig.costs");
   const navigate = useNavigate();
@@ -879,7 +880,18 @@ function CertifiedSection() {
     const sale = p.status === "sold" ? (db.diamondSales ?? []).find(s => s.packetId === p.id) : undefined;
     const supSale = p.status === "sold" && !sale ? (db.supplierSales ?? []).find(x => x.lines.some(l => l.packetId === p.id)) : undefined;
     const inStock = p.status === "in_stock";
+    const kept = keptForOrder(p);
     return [
+      // Straight from the stone (no going to Buy & Assign and finding it again): Sell opens Sell a diamond with it chosen.
+      { label: "Sell", icon: Tag, show: inStock, disabled: !!kept || !hasG("buyAssign.sell"),
+        hint: kept ? `Kept for ${orderNoOf(kept) ?? "an order"} — release it first` : hasG("buyAssign.sell") ? "To a client or any buyer — no order" : "Your access does not include selling stock",
+        onSelect: () => navigate(`/buy-assign?sell=packet&id=${encodeURIComponent(p.id)}`) },
+      { label: "Send on memo", icon: Tag, show: inStock, disabled: !!kept || !hasG("stock.memo"),
+        hint: kept ? `Kept for ${orderNoOf(kept) ?? "an order"} — release it first` : hasG("stock.memo") ? "On approval to a client or dealer" : "Your access does not include memos",
+        onSelect: () => navigate(`/memo?out=packet&id=${encodeURIComponent(p.id)}`) },
+      // Its label, with a barcode a scan opens it by (lib/diamondBags.ts).
+      { label: "Print label", icon: Printer, show: !!(p.stockNumber || p.certificateNumber),
+        hint: "Stock number, barcode, shape, carat, grade, report", onSelect: () => { printStoneLabels([p], brandFor(db.settings, companyOf(p)).companyName || undefined); } },
       { label: "View order", icon: ExternalLink, show: !!p.orderId, disabled: !can("orders"),
         hint: can("orders") ? `${inStock ? "Reserved for" : p.status === "used" ? "Used in" : "Issued to"} ${orderNoOf(p.orderId) ?? "the order"}` : needsAccess("orders", "view"),
         onSelect: () => navigate(`/orders/${p.orderId}`) },
@@ -916,8 +928,12 @@ function CertifiedSection() {
   // Several ticked: a stone matching any of them ("__none" = not recorded).
   const want = (w: string, have?: string) => !selOn(w) || selList(w).some(x => (x === "__none" ? !(have || "").trim() : (have || "").trim() === x));
   const bands = SIZE_BANDS.filter(b => selList(fSize).includes(b.key));
+  // A link (a scan of its label, the app's search) arrives with ?q=DP-0007 — the list opens on that stone.
+  const [certQ, setCertQ] = useState(() => sp.get("q") ?? "");
+  const certTerms = certQ.trim().toLowerCase();
   const certShown = allInStockPackets.filter(p => want(fShape, p.shape) && want(fColor, p.color) && want(fClarity, p.clarity)
-    && want(fLab, p.certificateLab) && (!bands.length || bands.some(band => p.carat >= band.min && p.carat < band.max)));
+    && want(fLab, p.certificateLab) && (!bands.length || bands.some(band => p.carat >= band.min && p.carat < band.max))
+    && (!certTerms || packetSearch(p).toLowerCase().includes(certTerms)));
   const certFiltered = [fShape, fColor, fClarity, fLab, fSize].some(selOn);
   const certFilters: TableFilter[] = [
     { kind: "select", label: "Shape", multi: true, value: fShape, onChange: setFShape, options: certOpts(p => p.shape), allLabel: "All shapes" },
@@ -972,8 +988,7 @@ function CertifiedSection() {
           columns={showCosts ? inStockColumns : inStockColumns.filter(c => c.key !== "rate" && c.key !== "cost")}
           rowKey={p => p.id}
           defaultSort={{ key: "bought", dir: "desc" }}
-          searchText={packetSearch}
-          searchPlaceholder="Search stock #, shape, or certificate…"
+          search={{ value: certQ, onChange: setCertQ, placeholder: "Search stock #, shape, or certificate…" }}
           exportName="Stock-Certified_Diamonds-In_Stock"
           totals={{ diamond: list => `${sumCarat(list)} ct` }}
           details={p => packetDetails(p, "stock")}

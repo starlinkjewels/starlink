@@ -1,9 +1,10 @@
+import { SortBagsSheet } from "@/components/SortBagsSheet";
 import { useEffect, useMemo, useState } from "react";
 import { CustomFieldInputs, CustomFieldsView } from "@/components/CustomFields";
 import { customProblem, fieldsFor, valuesOf, writeValues, type CfValues } from "@/lib/customFields";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { toast } from "sonner";
-import { ArrowRightLeft, Gem, Hash, Layers, Package, Pencil, Printer, Wallet } from "lucide-react";
+import { ArrowRightLeft, Gem, Hash, Layers, Package, Pencil, Printer, Tag, Wallet } from "lucide-react";
 import { useDb } from "@/hooks/useDb";
 import { useAuth } from "@/lib/auth";
 import { useCan, useHas } from "@/hooks/useCan";
@@ -56,7 +57,10 @@ export function BagPanel({ keys, label, companyId, start = "view", onClose }: {
   const can = useCan();
   const mayEdit = can("stock", "edit");
   // Value at cost: only with fig.costs — an admin always.
-  const showCosts = useHas()("fig.costs");
+  const mayGrant = useHas();
+  const showCosts = mayGrant("fig.costs");
+  const navigate = useNavigate();
+  const [sorting, setSorting] = useState(false);
   const multiCo = hasCompanies(db.settings);
   // The bag open now: the one given, or the one picked from a line of several.
   const [bag, setBag] = useState<string | null>(null);
@@ -259,6 +263,11 @@ export function BagPanel({ keys, label, companyId, start = "view", onClose }: {
       <Button variant="outline" onClick={() => print([bag])} disabled={!no} className="rounded-xl h-10"><Printer className="h-4 w-4 mr-1.5" />Label</Button>
       {cfDefs.length > 0 && <Button variant="outline" onClick={openDetails} disabled={!mayEdit} title={editHint} className="rounded-xl h-10"><Pencil className="h-4 w-4 mr-1.5" />Details</Button>}
       <Button variant="outline" onClick={() => setMode("recount")} disabled={!mayEdit || ct <= 0} title={editHint} className="rounded-xl h-10"><Hash className="h-4 w-4 mr-1.5" />Recount</Button>
+      {/* Straight from the bag — the sale opens with this lot chosen (Buy & Assign → Sell diamonds). */}
+      {mayGrant("stock.memo") && <Button variant="outline" onClick={() => { onClose(); navigate(`/memo?out=lot&lot=${encodeURIComponent(bag)}`); }} disabled={ct <= 0} className="rounded-xl h-10">On memo</Button>}
+      {mayGrant("buyAssign.sell") && <Button variant="outline" onClick={() => { onClose(); navigate(`/buy-assign?sell=lot&lot=${encodeURIComponent(bag)}`); }} disabled={ct <= 0} className="rounded-xl h-10"><Tag className="h-4 w-4 mr-1.5" />Sell</Button>}
+      {/* One parcel into several lots at once, the rest kept or written off as sorting loss (components/SortBagsSheet). */}
+      <Button variant="outline" onClick={() => setSorting(true)} disabled={!mayEdit || ct <= 0} title={editHint} className="rounded-xl h-10"><Layers className="h-4 w-4 mr-1.5" />Sort into bags</Button>
       <Button onClick={() => setMode("move")} disabled={!mayEdit || ct <= 0} title={editHint} className="btn-hero rounded-xl h-10"><ArrowRightLeft className="h-4 w-4 mr-1.5" />Move to another bag</Button>
     </div>
   ) : (
@@ -269,6 +278,8 @@ export function BagPanel({ keys, label, companyId, start = "view", onClose }: {
   );
 
   return (
+    <>
+    {sorting && bag && <SortBagsSheet bag={bag} companyId={srcCo} onClose={() => setSorting(false)} />}
     <ActionSheet open={!!keys} onOpenChange={o => { if (!o) onClose(); }} title={title} description={description} icon={Package} size="lg" footer={footer}>
       {mode === "move" && bag ? (
         <div className="space-y-4">
@@ -401,5 +412,6 @@ export function BagPanel({ keys, label, companyId, start = "view", onClose }: {
         </div>
       )}
     </ActionSheet>
+    </>
   );
 }

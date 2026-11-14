@@ -553,12 +553,13 @@ export function AppLayout() {
           {/* Spacer */}
           <div className="flex-1 hidden md:block" />
 
-          {/* Barcode scan — mobile only; opens the camera to scan a tag and jump
-              straight to that order / stock item. */}
+          {/* Scan a tag, a bag label or a stone's label — the camera on a phone, a USB scanner (or typing)
+              on a computer — and act on what it finds (components/ScanModal, lib/scanResolve.ts). */}
           <button
             onClick={() => setScanOpen(true)}
             aria-label="Scan barcode"
-            className="md:hidden relative h-9 w-9 rounded-xl hover:bg-secondary flex items-center justify-center transition-colors shrink-0">
+            title="Scan a tag, bag or stone"
+            className="relative h-9 w-9 rounded-xl hover:bg-secondary flex items-center justify-center transition-colors shrink-0">
             <ScanLine className="h-[18px] w-[18px]" />
           </button>
 

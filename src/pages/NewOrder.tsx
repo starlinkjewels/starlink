@@ -173,7 +173,8 @@ function NewOrderForm() {
     instructions: "",
     expectedDelivery: defaultDeliveryDate(), // 10 days out by default — staff can change it
     priority: "Normal",
-    designNumber: "",
+    // Order this design (a catalogue product page, ?design=…): its number, from the start.
+    designNumber: new URLSearchParams(window.location.search).get("design") ?? "",
     productSize: "",
     // "Yellow Gold" is yellow: the colour its name gives, until one is chosen by hand.
     productColor: namedColour(firstMetal),
