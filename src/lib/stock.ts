@@ -198,7 +198,8 @@ export async function decreaseStock(args: {
   purityOrQuality: string;
   quantity: number;
   type: "issuance_out" | "order_direct_use";
-  refType: "materialIssuance" | "order" | "purchase" | "diamondSale" | "supplierSale" | "transfer" | "bagMove" | "supplierLoan" | "memo";
+  /** "manual": a correction by hand — a stock count's shortfall (lib/stockCount.ts). */
+  refType: "materialIssuance" | "order" | "purchase" | "diamondSale" | "supplierSale" | "transfer" | "bagMove" | "supplierLoan" | "memo" | "manual";
   refId?: string;
   createdBy: string;
   note?: string;

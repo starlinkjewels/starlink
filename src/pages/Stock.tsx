@@ -14,7 +14,8 @@ import { loadDb, toPureGold } from "@/lib/db";
 import { useAuth } from "@/lib/auth";
 import { subscribeStockLevelsByCompany, recomputeStockFromHistory, type StockLevels } from "@/lib/stock";
 import { deriveStockBalances, factoryAccount, factoryFineGoldBalance, factoryOtherBalances, fmtMoneyInr } from "@/lib/manufacturing";
-import { Gem, Coins, BadgeCheck, RotateCcw, History, Layers, Link2, Plus, Boxes, type LucideIcon } from "lucide-react";
+import { Gem, Coins, BadgeCheck, RotateCcw, History, Layers, Link2, Plus, Boxes, ClipboardCheck, type LucideIcon } from "lucide-react";
+import { StockCountSheet } from "@/components/StockCountSheet";
 import { toast } from "sonner";
 import { materialDefs, KIND_LABEL, fmtQty } from "@/lib/materials";
 import { MaterialEditor } from "@/components/MaterialsSettings";
@@ -64,6 +65,7 @@ export function StockPage() {
   const [recomputing, setRecomputing] = useState(false);
   const [addingMaterial, setAddingMaterial] = useState(false);
   const [moving, setMoving] = useState(false);
+  const [counting, setCounting] = useState(false);
   const can = useCan();
   const mayAddStock = can("buyAssign", "add");
   const [opening, setOpening] = useState(false);
@@ -204,10 +206,13 @@ export function StockPage() {
           // Stock already on hand before the app — a one-time job, so it waits here.
           { label: "Opening stock", icon: Boxes, hint: "From before the app — no dues", onSelect: () => setOpening(true), show: mayAddStock },
           { label: "Move between companies", icon: ArrowRightLeft, hint: "From one company to another", onSelect: () => setMoving(true), show: multiCo && hasFeature(user, db.roles ?? [], "stock.companies") },
+          // Count what is really on the shelf, then post the differences with reasons (lib/stockCount.ts).
+          { label: "Stock count", icon: ClipboardCheck, hint: "Count, then post differences with reasons", onSelect: () => setCounting(true), show: user?.role === "admin" },
           { label: recomputing ? "Recomputing…" : "Recompute from history", icon: RotateCcw, hint: "Rebuild counters from movements", onSelect: recompute, disabled: recomputing, show: user?.role === "admin" },
         ]}
       />
       {moving && <StockTransferDialog onClose={() => setMoving(false)} />}
+      {counting && <StockCountSheet open onOpenChange={v => { if (!v) setCounting(false); }} />}
 
 
       <div className="grid gap-3 grid-cols-2 lg:grid-cols-3">

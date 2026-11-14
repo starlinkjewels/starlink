@@ -146,6 +146,19 @@ export function App() {
         try { m.dropStoredClientPasswords(); } catch (e) { console.warn("[app] client password clean-up skipped:", e); }
         const b = await import("./lib/backup");
         await b.autoBackup();
+        // Memos past their due day: the team is alerted once per due day (lib/memos.ts) —
+        // this device looks once a day.
+        const day = new Date().toDateString();
+        let seen = false;
+        try { seen = localStorage.getItem("memo-overdue-checked") === day; } catch { /* private window */ }
+        if (!seen) {
+          try {
+            await m.ensureCollections(["memos"]);
+            const [{ alertOverdueMemos }, { adminIds, notifyUsers }] = await Promise.all([import("./lib/memos"), import("./lib/notify")]);
+            m.updateDb(d => { alertOverdueMemos(d, (ids, title, body) => notifyUsers(d, [...ids, ...adminIds(d)], { title, body, type: "alert" })); });
+            try { localStorage.setItem("memo-overdue-checked", day); } catch { /* private window */ }
+          } catch (e) { console.warn("[app] memo overdue check skipped:", e); }
+        }
       }).catch(() => {});
       // And the off-site copy — the main admin's job only (the owner login, not
       // every admin), and never by opening Google's window: when its permission

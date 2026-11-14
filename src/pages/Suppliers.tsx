@@ -20,9 +20,10 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { Plus, Mail, Phone, MapPin, Search, Trash2, Truck, History, Hash, Rows3, LayoutGrid, Power, Pencil, Handshake } from "lucide-react";
+import { Plus, Mail, Phone, MapPin, Search, Trash2, Truck, History, Hash, Rows3, LayoutGrid, Power, Pencil, Handshake, CalendarClock } from "lucide-react";
 import { DataTable, CellMain, CellTag, CellAmount, type DataColumn } from "@/components/DataTable";
 import { PageHeader, TabBar, ViewSwitch } from "@/components/PageHeader";
+import { SuppliersToPay } from "@/components/SuppliersToPay";
 import { BrokersPanel } from "@/components/BrokersPanel";
 import { toast } from "sonner";
 import { usePagination } from "@/hooks/usePagination";
@@ -71,10 +72,13 @@ export function SuppliersPage() {
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState<Supplier | null>(null);
   // Suppliers, or the brokers (dalals) who bring purchases — remembered on this device.
-  const [tab, setTab] = useState<"suppliers" | "brokers">(() => {
-    try { return localStorage.getItem("suppliers-tab") === "brokers" ? "brokers" : "suppliers"; } catch { return "suppliers"; }
+  // Suppliers, the bills to pay (lib/supplierDue.ts), or the brokers — remembered on this device.
+  const [tabPick, setTab] = useState<"suppliers" | "topay" | "brokers">(() => {
+    try { const t = localStorage.getItem("suppliers-tab"); return t === "brokers" || t === "topay" ? t : "suppliers"; } catch { return "suppliers"; }
   });
-  const pickTab = (t: "suppliers" | "brokers") => { setTab(t); try { localStorage.setItem("suppliers-tab", t); } catch { /* ignore */ } };
+  // "To pay" is what we owe: only for those who may see it.
+  const tab = tabPick === "topay" && !showOwed ? "suppliers" : tabPick;
+  const pickTab = (t: "suppliers" | "topay" | "brokers") => { setTab(t); try { localStorage.setItem("suppliers-tab", t); } catch { /* ignore */ } };
   const [newBroker, setNewBroker] = useState(false);
   const navigate = useNavigate();
 
@@ -230,8 +234,11 @@ export function SuppliersPage() {
 
       <TabBar label="Suppliers and brokers" value={tab} onChange={pickTab} tabs={[
         { key: "suppliers", label: "Suppliers", icon: Truck, count: db.suppliers.length },
+        ...(showOwed ? [{ key: "topay" as const, label: "To pay", icon: CalendarClock }] : []),
         { key: "brokers", label: "Brokers", icon: Handshake, count: (db.brokers ?? []).length },
       ]} />
+
+      {tab === "topay" && <SuppliersToPay mayPay={can("payments", "add")} />}
 
       {tab === "brokers" && <BrokersPanel mayAdd={mayAdd} mayEdit={mayEdit} mayDelete={mayDelete} creating={newBroker} onCreating={setNewBroker} />}
 

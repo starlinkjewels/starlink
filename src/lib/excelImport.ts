@@ -155,6 +155,8 @@ function baseDefs(db: DB): SheetDef[] {
         { key: "opening", header: "Opening balance (₹)", help: "Owed when you started with the app — blank or 0 if none", example: "250000", aliases: ["opening balance", "opening", "balance"] },
         { key: "openingDir", header: "Opening is", help: "We owe them / They owe us — blank = We owe them", list: ["We owe them", "They owe us"], aliases: ["opening direction", "dr cr", "direction"] },
         { key: "openingDate", header: "Opening as of", help: "A date — e.g. 2026-04-01", aliases: ["opening date", "as of"] },
+        // Days we have to pay their bill (lib/supplierDue.ts) — as on New supplier.
+        { key: "creditDays", header: "Credit days", help: "Days we have to pay their bill — blank = none", example: "30", aliases: ["credit days", "credit period", "payment terms", "terms", "days"] },
       ],
     },
     {
@@ -528,6 +530,9 @@ function checkRow(kind: ImportKind, row: number, v: Record<string, string>, ctx:
     }
     const op = opening("credit", /owe us|debit|dr|receivable|they owe/, "Opening");
     if (typeof op === "string") return err(name, op);
+    const creditDays = numOf("creditDays", "Credit days", { int: true });
+    if (typeof creditDays === "string") return err(name, creditDays);
+    if (creditDays != null && creditDays > 365) return err(name, "Credit days: 365 at most");
     const mine = `Same supplier as row ${row} above`;
     ctx.supName.set(nameKey(name), mine);
     if (gst.length >= 10) ctx.supGst.set(gst, mine);
@@ -537,6 +542,7 @@ function checkRow(kind: ImportKind, row: number, v: Record<string, string>, ctx:
         kind: "suppliers", v: {
           name, contactPerson: g("contactPerson"), phone: g("phone"), email, gstin: g("gstin").toUpperCase(), address: g("address"),
           ...(op.bal ? { openingBalance: op.bal, openingDir: op.dir, ...(op.date ? { openingDate: op.date } : {}) } : {}),
+          ...(creditDays != null ? { creditDays } : {}),
         },
       },
     };

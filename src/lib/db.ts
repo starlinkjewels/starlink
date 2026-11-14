@@ -1524,6 +1524,8 @@ export interface Supplier {
    *  the first line of their gold account (lib/supplierGold.ts). Set once. */
   openingGoldFine?: number;
   openingGoldDate?: string;
+  /** Days we have to pay their bill (lib/supplierDue.ts): each bill is due its date + these. Unset = no due days. */
+  creditDays?: number;
 }
 
 /**
@@ -1977,6 +1979,10 @@ export interface Memo {
   createdAt: string;
   /** Set while it is being cancelled (lib/memos.ts) — so two screens never both do it. */
   deletingAt?: string;
+  /** Each change of its due day (lib/memos.ts setMemoDue), oldest first. */
+  dueChanges?: { from?: string; to?: string; at: string; byName: string }[];
+  /** The due day the team was last alerted about it being overdue — once per due day. */
+  overdueAlertedFor?: string;
 }
 
 export type SupplierSaleKind = "diamond" | "certified" | "gold" | "material" | "piece";
@@ -2486,6 +2492,8 @@ export type AdminRecord =
   | { id: string; kind: "commissionOrder"; orderId: string; set: import("./commission").OrderCommissionSet }
   /** One import from Excel (lib/excelImport.ts): the file, what it brought in, its undo. id "imp_…". */
   | { id: string; kind: "import"; batch: import("./excelImport").ImportBatch }
+  /** A physical stock count (lib/stockCount.ts): what was counted, then the differences posted. id "sc_…". */
+  | { id: string; kind: "stockCount"; count: import("./stockCount").StockCount }
   /** One record's admin-only custom-field values (lib/customFields.ts). id "cfa_<target>_<recordId>". */
   | { id: string; kind: "customValues"; target: import("./customFields").CfTarget; recId: string; values: import("./customFields").CfValues };
 

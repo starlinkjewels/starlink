@@ -257,11 +257,34 @@ service cloud.firestore {
       allow create: if ((isStaff() && ownOk(request.resource.data)) || (isClientRole() && request.resource.data.clientId == myClientId()))
         && (!('shopify' in request.resource.data) || isAdmin())
         && (!('etsy' in request.resource.data) || isAdmin());
-      allow update: if ((isStaff() && ownOk(resource.data)) || (isClientRole() && resource.data.clientId == myClientId()))
-        && (request.resource.data.get('shopify', null) == resource.data.get('shopify', null) || isAdmin())
-        && (request.resource.data.get('etsy', null) == resource.data.get('etsy', null) || isAdmin());
+      // Staff as before. A client may change only what their own screens change (an allow-list, as
+      // Firebase recommends — any other field, the price or payments included, is refused):
+      // their answer on the CAD design and a gift card of theirs (clientOrderUpdateOk).
+      allow update: if (isStaff() && ownOk(resource.data)
+          && (request.resource.data.get('shopify', null) == resource.data.get('shopify', null) || isAdmin())
+          && (request.resource.data.get('etsy', null) == resource.data.get('etsy', null) || isAdmin()))
+        || (isClientRole() && resource.data.clientId == myClientId() && clientOrderUpdateOk());
       // An order is never deleted one by one — "Delete" marks it deleted (lib/orderAdmin.ts); only an admin removes one.
-      allow delete: if isAdmin() || (isClientRole() && resource.data.clientId == myClientId());
+      allow delete: if isAdmin();
+    }
+
+    // What a client's update to their own order may touch (src/lib/cadApproval.ts, OrderDetail's gift card):
+    //  · cadReviews — their Approve / Ask for changes;
+    //  · giftCardId / giftCardRedeemed — a card of theirs, live, for no more than it is worth;
+    //  · shippingCharge / advances / timeline — only ADDED where an old order lacks them (the app fills them in).
+    function clientOrderUpdateOk() {
+      let d = request.resource.data.diff(resource.data);
+      let after = request.resource.data;
+      return d.changedKeys().hasOnly(['cadReviews', 'giftCardId', 'giftCardRedeemed'])
+        && d.removedKeys().hasOnly(['giftCardId', 'giftCardRedeemed'])
+        && d.addedKeys().hasOnly(['cadReviews', 'giftCardId', 'giftCardRedeemed', 'shippingCharge', 'advances', 'timeline'])
+        && after.clientId == resource.data.clientId
+        && (!('giftCardRedeemed' in after) || (after.giftCardRedeemed is number && after.giftCardRedeemed >= 0))
+        && (!('giftCardId' in after) || clientCardOk(after.giftCardId, after.get('giftCardRedeemed', 0)));
+    }
+    function clientCardOk(cardId, redeemed) {
+      let card = get(/databases/$(database)/documents/giftCards/$(cardId)).data;
+      return card.clientId == myClientId() && card.get('revoked', false) != true && redeemed <= card.amount;
     }
 
     // Invoices — staff manage; a client may read only their own.

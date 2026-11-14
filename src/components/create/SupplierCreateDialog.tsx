@@ -38,6 +38,8 @@ export function SupplierCreateDialog({ open, onOpenChange, onCreated }: {
       updateDb(d => {
         if (!d.suppliers) d.suppliers = [];
         d.suppliers.unshift({ ...f, name: f.name!.trim(), id, active: true, createdAt: new Date().toISOString() } as Supplier);
+        const made = d.suppliers.find(x => x.id === id);
+        if (made && made.creditDays == null) delete made.creditDays;
         writeValues(d, "suppliers", id, cf, user, user?.id);
       });
       toast.success("Supplier added");
@@ -93,6 +95,12 @@ export function SupplierCreateDialog({ open, onOpenChange, onCreated }: {
           creditLabel="We owe supplier (Credit)"
           hint="Owed either way when you started using the app (₹)."
         />
+        <div className="col-span-2">
+          <Label htmlFor="sup-new-days" className="text-xs">Credit days</Label>
+          <Input id="sup-new-days" type="number" inputMode="numeric" min={0} max={365} step={1} className="rounded-xl mt-1 w-40" placeholder="None"
+            value={f.creditDays ?? ""} onChange={e => setF({ ...f, creditDays: e.target.value.trim() === "" ? undefined : Math.max(0, Math.min(365, Math.round(Number(e.target.value) || 0))) })} />
+          <p className="text-[11px] text-muted-foreground mt-1">Days we have to pay their bill — each bill is due its date + these. Blank = no due days.</p>
+        </div>
       </div>
       <CustomFieldInputs target="suppliers" values={cf} onChange={setCf} className="mt-4" />
     </ActionSheet>

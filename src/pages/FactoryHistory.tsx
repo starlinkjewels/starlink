@@ -47,8 +47,10 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import {
   Wallet, Plus, CreditCard, CheckCircle2, Coins, Gem,
   Download, FileText, FileSpreadsheet, Undo2, AlertCircle, Truck, ArrowDownCircle, ArrowUpCircle, ArrowRightLeft, Archive,
-  Pencil, Trash2, ExternalLink, Lock, RotateCcw, Package, BookOpen,
+  Pencil, Trash2, ExternalLink, Lock, RotateCcw, Package, BookOpen, Factory as FactoryIcon,
 } from "lucide-react";
+import { atFactoryNow } from "@/lib/factoryWip";
+import { FactoryAtNow } from "@/components/FactoryAtNow";
 import { toast } from "sonner";
 import { downloadCsv, downloadLedgerPdf, downloadLedgerPdfMulti, fmtInrPlain } from "@/lib/ledgerExport";
 import { ExportDialog, inDateRange } from "@/components/ExportDialog";
@@ -147,7 +149,9 @@ function FactoryHistoryPageBody() {
   // The account as a statement (one line per voucher, the balance carried down —
   // as the factory's own books), or order by order, or the material issued — one
   // list at a time (hooks/usePageTab.ts), so a long ledger never hides the issues under it.
-  const [ledgerView, setLedgerView] = usePageTab("factory", ["statement", "orders", "issues"] as const, "statement");
+  const [ledgerView, setLedgerView] = usePageTab("factory", ["statement", "now", "orders", "issues"] as const, "statement");
+  // What it is making now — not back yet (lib/factoryWip.ts).
+  const atNow = atFactoryNow(db, id!);
   const statement = buildFactoryStatement({
     issuances, orders: db.orders, advances, factoryId: id!, opening: firstCo ? factory : undefined,
     materialLabel: k => ({ name: materialName(db.settings, k), unit: materialUnit(db.settings, k) }),
@@ -1227,6 +1231,7 @@ function FactoryHistoryPageBody() {
       {/* Statement (as the factory keeps it) or order by order — the same records. */}
       <TabBar label="Factory" value={ledgerView} onChange={setLedgerView} tabs={[
         { key: "statement", label: "Statement", icon: BookOpen, count: statement.lines.length },
+        { key: "now", label: "At the factory now", icon: FactoryIcon, count: atNow.length },
         { key: "orders", label: "By order", icon: Package, count: orderRows.length },
         { key: "issues", label: "Material issued", icon: ArrowUpCircle, count: issuances.length },
       ]} />
@@ -1236,6 +1241,7 @@ function FactoryHistoryPageBody() {
           materialLabel={k => ({ name: materialName(db.settings, k), unit: materialUnit(db.settings, k) })}
           order={k => (db.settings.materials ?? []).findIndex(m => m.id === k)} />
       )}
+      {ledgerView === "now" && <FactoryAtNow factoryId={id!} rows={atNow} />}
       {ledgerView === "orders" && <FactoryOrderLedger
         rows={orderRows}
         factoryName={factory.name}

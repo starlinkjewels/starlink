@@ -86,6 +86,77 @@ export function memoOpenValue(memo: Memo): number {
 export function memoValue(memo: Memo): number {
   return r2(memo.lines.reduce((t, l) => t + l.amount, 0));
 }
+/* ── Due day: changed, alerted, reminded ─────────────────────────────────── */
+
+/** Why a memo's due day can't be changed to `day` (YYYY-MM-DD, "" = no due day); null when it can. */
+export function memoDueBlocker(memo: Memo, day: string): string | null {
+  if (memoState(memo) === "closed") return "This memo is closed — everything came back or was settled";
+  if (day && day < memo.at.slice(0, 10)) return memo.dir === "in" ? "The due day is before the day they came" : "The due day is before the day it went out";
+  return null;
+}
+
+/**
+ * Give a memo a new due day (the party asked for more time, or it was set wrong) — or none.
+ * Kept in the memo's own history (dueChanges); the overdue alert comes again for the new day.
+ */
+export function setMemoDue(memoId: string, day: string, who: Who): void {
+  assertFresh();
+  const m0 = (loadDb().memos ?? []).find(m => m.id === memoId);
+  if (!m0) throw new Error("That memo is no longer on record");
+  const why = memoDueBlocker(m0, day);
+  if (why) throw new Error(why);
+  updateDb(d => {
+    const m = (d.memos ?? []).find(x => x.id === memoId);
+    if (!m) return;
+    // The due day is a day: written as noon of it (stampFor), as the memo forms write it.
+    const to = day ? new Date(`${day}T12:00:00`).toISOString() : undefined;
+    if ((m.dueAt ?? "").slice(0, 10) === (to ?? "").slice(0, 10)) return;
+    m.dueChanges = [...(m.dueChanges ?? []), { ...(m.dueAt ? { from: m.dueAt } : {}), ...(to ? { to } : {}), at: new Date().toISOString(), byName: who.name }];
+    if (to) m.dueAt = to; else delete m.dueAt;
+    delete m.overdueAlertedFor;
+  });
+}
+
+/**
+ * Alert the team about memos past their due day — once per due day each (overdueAlertedFor):
+ * whoever made it and the admins. Run once a day by the first admin session (App). Call inside
+ * updateDb; returns how many were alerted.
+ */
+export function alertOverdueMemos(d: DB, notify: (ids: (string | undefined)[], title: string, body: string) => void, now = Date.now()): number {
+  let n = 0;
+  for (const m of d.memos ?? []) {
+    if (!m.dueAt || m.overdueAlertedFor === m.dueAt || memoState(m) === "closed") continue;
+    const late = memoAge(m, now).overdue;
+    if (late < 1) continue;
+    const who = memoPartyName(d, m.party);
+    notify([m.createdBy], `Memo ${m.no} is overdue`,
+      `${m.dir === "in" ? `${who}'s goods with us` : `With ${who}`} — due back ${new Date(m.dueAt).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })}, ${late} day${late === 1 ? "" : "s"} over. ${m.dir === "out" ? "Send them a reminder from Memo, or change the due day." : "Return or keep them, or change the due day."}`);
+    m.overdueAlertedFor = m.dueAt;
+    n++;
+  }
+  return n;
+}
+
+/** The party's phone, for a reminder on WhatsApp. */
+export function memoPartyPhone(db: Pick<DB, "clients" | "suppliers" | "brokers">, p: MemoParty): string | undefined {
+  const raw = p.kind === "client" ? db.clients.find(c => c.id === p.id)?.phone
+    : p.kind === "supplier" ? db.suppliers.find(s => s.id === p.id)?.phone
+      : (db.brokers ?? []).find(b => b.id === p.id)?.phone;
+  return raw?.trim() || undefined;
+}
+
+/** The reminder sent to whoever holds our goods on a memo out. */
+export function memoReminderText(memo: Memo, company: string): string {
+  const open = memo.lines.filter(l => lineOpen(memo, l) > 1e-6);
+  const fmt = (iso: string) => new Date(iso).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" });
+  const late = memoAge(memo).overdue;
+  return [
+    `Reminder from ${company}: memo ${memo.no} of ${fmt(memo.at)}${memo.dueAt ? `, due back ${fmt(memo.dueAt)}${late > 0 ? ` (${late} day${late === 1 ? "" : "s"} ago)` : ""}` : ""}.`,
+    `Still with you: ${open.map(l => l.label).join("; ")}.`,
+    "Please return them, or tell us what you keep. Thank you.",
+  ].join("\n");
+}
+
 /** Memos out that still hold goods — one party's when given. */
 export function openMemos(db: Pick<DB, "memos">, party?: MemoParty): Memo[] {
   return (db.memos ?? []).filter(m => m.dir === "out" && memoState(m) !== "closed" && (!party || (m.party.kind === party.kind && m.party.id === party.id)));

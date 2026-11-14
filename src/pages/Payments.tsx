@@ -7,7 +7,8 @@ import { AddNewItem, useAddNew } from "@/components/create/QuickCreate";
 import { useCan } from "@/hooks/useCan";
 import { hasFeature } from "@/lib/permissions";
 import { useEffect, useLayoutEffect, useState, type ReactNode } from "react";
-import { Link, useSearchParams } from "react-router-dom";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
+import { useHas } from "@/hooks/useCan";
 import { useAuth } from "@/lib/auth";
 import {
   updateDb, loadDb, fmtMoney,
@@ -105,6 +106,8 @@ async function confirmOverdraw(lockers: Locker[], transactions: LockerTransactio
  * those four already-working flows. Every path requires a Locker.
  */
 export function PaymentsPage() {
+  const navigate = useNavigate();
+  const has = useHas();
   const db = useDb();
   const can = useCan();
   const mayAdd = can("payments", "add");
@@ -174,6 +177,9 @@ export function PaymentsPage() {
         ] } : null}
         secondary={mayAdd ? { label: "Pay", icon: Wallet, items: [
           { label: "Pay a supplier", icon: Truck, hint: "A bill, or an advance", onSelect: () => openSupplier("pay") },
+          // The supplier bills due this week or late (Suppliers → To pay, lib/supplierDue.ts).
+          { label: "Bills due this week", icon: Truck, hint: "Suppliers → To pay: late and due in 7 days", show: has("fig.payables"),
+            onSelect: () => { try { localStorage.setItem("suppliers-tab", "topay"); } catch { /* private window */ } navigate("/suppliers"); } },
           { label: "Pay a factory", icon: FactoryIcon, hint: "Making charges, or an advance", onSelect: () => setTask("factory") },
           { label: "Pay through broker", icon: Handshake, hint: "One payment — he pays the suppliers", onSelect: () => setTask("broker") },
           { label: "Pay an employee", icon: Users, hint: "Salary or a bonus — an advance can be cut from it", onSelect: () => setTask("employee") },
