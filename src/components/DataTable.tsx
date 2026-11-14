@@ -594,7 +594,7 @@ export function DataTable<T>({
     if (viewExtra && v.page) viewExtra.set(v.page);
   };
   const viewsOn = useViewsOn() && full;
-  useDefaultView(id, viewsOn, applyView);
+  useDefaultView(id, viewsOn, applyView, captureView);
   const pinTop = pinnedAt === "top" && cur === 1 ? pinnedRows ?? [] : [];
   const pinBottom = pinnedAt === "bottom" && cur === pages && !(!search && q) ? pinnedRows ?? [] : [];
   const listed: Entry[] = [...pinTop.map(r => ({ kind: "row" as const, r })), ...pageEntries, ...pinBottom.map(r => ({ kind: "row" as const, r }))];
