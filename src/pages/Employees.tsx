@@ -10,7 +10,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { RolesPanel, EmployeeAccessControls, setAdminRole } from "@/components/RolesAccess";
 import { AccessSummary, ManageAccessDialog, AccessReportDialog } from "@/components/AccessManager";
 import { DataTable, CellMain, CellTag, type DataColumn } from "@/components/DataTable";
-import { MoreMenu, type MoreAction } from "@/components/MoreMenu";
+import { MoreMenu, useRightClickMenu, type MoreAction } from "@/components/MoreMenu";
+import { chatAction } from "@/lib/whatsapp";
 import { PageHeader, TabBar, ViewSwitch } from "@/components/PageHeader";
 import { FilterChips, FiltersButton, StatStrip, type TableFilter } from "@/components/TableToolbar";
 import { hasCompanies } from "@/lib/companies";
@@ -174,6 +175,8 @@ export function EmployeesPage() {
    * be demoted. Access and admin are for someone who signs in. Deactivate and
    * Delete stay in the menu greyed, saying why, rather than vanishing.
    */
+  // Right-click on a card: its ⋯, where the mouse is (components/MoreMenu).
+  const rightClick = useRightClickMenu();
   const actionsFor = (u: User, withView: boolean): MoreAction[] => {
     const pending = pendingCount(u.id);
     const owner = isAdminEmail(u.email);
@@ -182,6 +185,7 @@ export function EmployeesPage() {
     const offBlock = owner ? "An owner can't be deactivated" : u.role === "admin" ? "Remove admin first" : undefined;
     return [
       { label: "View", icon: Eye, onSelect: () => navigate(`/employees/${u.id}`), show: withView },
+      chatAction(u.name, u.phone),
       { label: "Edit details", icon: Pencil, hint: "Name, phone, department, login, opening salary", onSelect: () => setEditingId(u.id) },
       { label: "Tasks", icon: ListTodo, hint: pending > 0 ? `${pending} pending` : undefined, onSelect: () => setTasksPanelUser(u.id) },
       { label: "Manage access", icon: ShieldCheck, hint: rolesLive ? "What they may see and do" : "After the security update",
@@ -280,6 +284,7 @@ export function EmployeesPage() {
 
   return (
     <div className="max-w-7xl mx-auto space-y-5">
+      {rightClick.menu}
       {/* The team's counts are the tiles' — not repeated under the title. */}
       <PageHeader
         title="Employees"
@@ -365,7 +370,7 @@ export function EmployeesPage() {
           const clients = clientCount(u.id);
           const initials = u.name.split(" ").map(w => w[0]).join("").slice(0, 2).toUpperCase();
           return (
-            <div key={u.id} onClick={openCard(u)} className="card-luxe card-hover p-4 sm:p-5 flex flex-col min-w-0 cursor-pointer">
+            <div key={u.id} onClick={openCard(u)} onContextMenu={rightClick.bind(() => actionsFor(u, true), u.name, `/employees/${u.id}`)} className="card-luxe card-hover p-4 sm:p-5 flex flex-col min-w-0 cursor-pointer">
               {/* Who: avatar, name, how they sign in — and the one menu. */}
               <div className="flex items-start gap-3">
                 <UserAvatar photo={u.photo} name={u.name} initials={initials ? 2 : 1} className={`h-11 w-11 rounded-xl font-semibold text-sm shadow-sm ${u.status === "active" ? "" : "opacity-50 grayscale"}`} />

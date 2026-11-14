@@ -1,6 +1,6 @@
 import { ShopifyTag } from "@/components/ShopifyTag";
 import { pieceLine } from "@/lib/orderText";
-import { MoreMenu, type MoreAction } from "@/components/MoreMenu";
+import { MoreMenu, useRightClickMenu, type MoreAction } from "@/components/MoreMenu";
 import { useMemo, useState } from "react";
 import { metalLabel } from "@/lib/metals";
 import { Link, useNavigate } from "react-router-dom";
@@ -88,6 +88,8 @@ export function OrderBoard({ orders, actions, tracks }: { orders: Order[]; actio
   const can = useCan();
   const nav = useNavigate();
   const [dragId, setDragId] = useState<string | null>(null);
+  // Right-click on a card: its ⋯, where the mouse is (components/MoreMenu).
+  const rightClick = useRightClickMenu();
   const [overCol, setOverCol] = useState<string | null>(null);
   const [dispatchFor, setDispatchFor] = useState<Order | null>(null);
   const [deliverFor, setDeliverFor] = useState<Order | null>(null);
@@ -187,6 +189,7 @@ export function OrderBoard({ orders, actions, tracks }: { orders: Order[]; actio
 
   return (
     <div className="space-y-2">
+      {rightClick.menu}
       <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-[11px] text-muted-foreground px-1">
         <span>Drag a card to another stage to move it — or use “Move to…” on a phone.</span>
         <span className="inline-flex items-center gap-1"><Truck className="h-3 w-3" /> Dispatch &amp; Delivered open their form</span>
@@ -253,6 +256,7 @@ export function OrderBoard({ orders, actions, tracks }: { orders: Order[]; actio
                       draggable={!locked}
                       onDragStart={e => { e.dataTransfer.setData("text/plain", o.id); e.dataTransfer.effectAllowed = "move"; setDragId(o.id); }}
                       onDragEnd={() => { setDragId(null); setOverCol(null); }}
+                      onContextMenu={actions ? rightClick.bind(() => actions(o), o.orderNumber, `/orders/${o.id}`) : undefined}
                       className={`rounded-xl bg-white border border-border/70 p-2.5 shadow-sm transition-shadow ${locked ? "" : "cursor-grab active:cursor-grabbing hover:shadow-md"} ${dragId === o.id ? "opacity-50" : ""}`}>
                       <div className="flex gap-2.5">
                         <div className="h-11 w-11 rounded-lg overflow-hidden bg-secondary/60 shrink-0 grid place-items-center">

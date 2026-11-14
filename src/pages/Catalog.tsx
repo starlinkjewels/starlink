@@ -37,7 +37,7 @@ import {
 import { useUrlState } from "@/hooks/useUrlState";
 import { useBackToClose } from "@/hooks/useBackNav";
 import { useNavigate, useSearchParams } from "react-router-dom";
-import { MoreMenu, type MoreAction } from "@/components/MoreMenu";
+import { MoreMenu, useRightClickMenu, type MoreAction } from "@/components/MoreMenu";
 import { PageHeader } from "@/components/PageHeader";
 import { ActionSheet } from "@/components/ActionSheet";
 import { Input } from "@/components/ui/input";
@@ -435,11 +435,15 @@ function ItemCard({
   // a tap opens the design's product page (the picture itself: ⋯ → View picture).
   const info = useCardInfo(item);
   const navigate = useNavigate();
+  // Right-click on a card: its ⋯, where the mouse is (components/MoreMenu).
+  const rightClick = useRightClickMenu();
   return (
     <motion.div
+      onContextMenu={menu && !picking ? rightClick.bind(() => menu, item.name) : undefined}
       whileTap={{ scale: 0.97 }}
       className={`relative rounded-2xl overflow-hidden border bg-white shadow-sm flex flex-col ${picked ? "border-primary ring-2 ring-primary" : "border-border/60"}`}
     >
+      {rightClick.menu}
       {/* Thumbnail */}
       <button
         onClick={picking ? onPick : info?.open ? () => navigate(`/catalog/design/${encodeURIComponent(info.key)}`) : onOpen}
@@ -1655,6 +1659,8 @@ export function CatalogPage() {
 
   // Staff: what can be done to one item — each greyed with the reason when
   // this person's access doesn't reach it.
+  // Right-click on a card: its ⋯, where the mouse is (components/MoreMenu).
+  const rightClick = useRightClickMenu();
   const itemMenu = (item: CatalogItem): MoreAction[] => [
     // A design's card opens its product page; the picture itself is here.
     { label: "View picture", icon: ImageIcon, show: !!(item.design?.key && cardInfos[item.design.key]?.open), onSelect: () => setLightbox({ items: [item], idx: 0 }) },
@@ -1787,7 +1793,8 @@ export function CatalogPage() {
             const coverUrl = folder.bannerUrl ?? (folderThumbs[folder.id]?.thumb || folderThumbs[folder.id]?.data);
             const isRenaming = renamingId === folder.id;
             return (
-              <motion.div key={folder.id} whileTap={{ scale: 0.97 }} className="relative">
+              <motion.div key={folder.id} whileTap={{ scale: 0.97 }} className="relative"
+                onContextMenu={isStaff && !isRenaming && !picking ? rightClick.bind(() => folderMenu(folder), folder.name) : undefined}>
                 <button
                   onClick={() => {
                     if (picking) setPickedFolders((prev) => flip(prev, folder.id));
@@ -1999,6 +2006,7 @@ export function CatalogPage() {
   return (
     <CardInfoContext.Provider value={cardInfos}>
     <div className="max-w-7xl mx-auto space-y-5">
+      {rightClick.menu}
       {/* Header: where you are, the way up, and what can be done here. The two
           uploads stay in view (icons only on a phone); New Folder is the main button. */}
       <PageHeader
@@ -2302,7 +2310,8 @@ export function CatalogPage() {
                 const coverUrl = folder.bannerUrl ?? (folderThumbs[folder.id]?.thumb || folderThumbs[folder.id]?.data);
                 const isRenaming = renamingId === folder.id;
                 return (
-                  <motion.div key={folder.id} whileTap={{ scale: 0.97 }} className="relative">
+                  <motion.div key={folder.id} whileTap={{ scale: 0.97 }} className="relative"
+                onContextMenu={isStaff && !isRenaming && !picking ? rightClick.bind(() => folderMenu(folder), folder.name) : undefined}>
                     <button
                       onClick={() => {
                         if (picking) setPickedFolders((prev) => flip(prev, folder.id));

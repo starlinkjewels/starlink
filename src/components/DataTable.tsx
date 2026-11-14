@@ -1,11 +1,11 @@
 import { Fragment, useEffect, useMemo, useRef, useState, type MouseEvent, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
-import { ArrowDown, ArrowUp, ArrowUpDown, Check, ChevronDown, FileSpreadsheet, Inbox, Search, SearchX, ChevronLeft, ChevronRight, Minus, Plus, X } from "lucide-react";
+import { ArrowDown, ArrowUp, ArrowUpDown, Check, ChevronDown, ChevronsUpDown, ExternalLink, FileSpreadsheet, ArrowUpRight, Inbox, Search, SearchX, ChevronLeft, ChevronRight, Minus, Plus, X } from "lucide-react";
 import { useStudio } from "@/lib/studio";
 import { useMayExport } from "@/hooks/useCan";
 import { useEntryState } from "@/hooks/useBackNav";
 import { useNavigate } from "react-router-dom";
 import { downloadCsv } from "@/lib/ledgerExport";
-import { MoreMenu, type MoreAction } from "@/components/MoreMenu";
+import { ContextMenuAt, MoreMenu, wantsOwnMenu, type MoreAction } from "@/components/MoreMenu";
 import { ExportMenu, FilterChips, FiltersButton, ViewMenu, activeFilterCount, useNarrow, type Density, type TableExport, type TableFilter } from "@/components/TableToolbar";
 import { FloatingScrollbar, useWideScroll } from "@/components/WideScroll";
 import { SavedViewsButton, applyFilters, captureFilters, prefsFromView, prefsPart, useDefaultView, useViewsOn, type PageExtra } from "@/components/SavedViews";
@@ -507,6 +507,36 @@ export function DataTable<T>({
     } else if (onRowClick) onRowClick(r);
     else if (canOpen(r)) toggleOpen(rowKey(r));
   };
+  // A right-click on a row or card: our own menu where the mouse is — Open (as a click does),
+  // a new tab for a row that is a page, its details, then its ⋯ actions (components/MoreMenu
+  // ContextMenuAt). The browser's own menu stays over a link or a box, with text selected, on a phone.
+  const [ctx, setCtx] = useState<{ x: number; y: number; r: T } | null>(null);
+  const openRow = (r: T) => {
+    if (pageable && canClickRow && !canClickRow(r)) { if (canOpen(r)) toggleOpen(rowKey(r)); return; }
+    if (rowHref) navigate(rowHref(r));
+    else if (onRowClick) onRowClick(r);
+    else if (canOpen(r)) toggleOpen(rowKey(r));
+  };
+  const ctxActions = (r: T): MoreAction[] => {
+    const k = rowKey(r);
+    const acts = rowActions ? rowActions(r) : [];
+    const opensPage = pageable && (canClickRow ? canClickRow(r) : true);
+    // Its ⋯ already opens it ("View") — no second Open above it.
+    const hasView = acts.some(a => a.show !== false && /^(View|Open)(\s|$)/.test(a.label));
+    return [
+      ...(opensPage && !hasView ? [{ label: "Open", icon: ArrowUpRight, onSelect: () => openRow(r) }] : []),
+      ...(opensPage && rowHref ? [{ label: "Open in a new tab", icon: ExternalLink, onSelect: () => { window.open(rowHref(r), "_blank", "noopener"); } }] : []),
+      ...(canOpen(r) ? [{ label: open.has(k) ? "Hide details" : "All details", icon: ChevronsUpDown, onSelect: () => toggleOpen(k) }] : []),
+      ...acts,
+    ];
+  };
+  const rowMenu = (r: T, pin: boolean) => (e: MouseEvent) => {
+    if (pin || !wantsOwnMenu(e)) return;
+    if (!ctxActions(r).some(a => a.show !== false)) return;
+    e.preventDefault();
+    onRowActionsOpen?.(r);
+    setCtx({ x: e.clientX, y: e.clientY, r });
+  };
   // A table wider than its box scrolls sideways; what a row is (its first
   // column, and its tick) and what can be done to it (⋯) stay in view.
   const firstKey = shown[0]?.key;
@@ -658,6 +688,7 @@ export function DataTable<T>({
         </div>
       )}
       {summary}
+      <ContextMenuAt at={ctx} actions={ctx ? ctxActions(ctx.r) : []} onClose={() => setCtx(null)} />
 
       {cardMode ? (
         <div className="space-y-2">
@@ -684,7 +715,7 @@ export function DataTable<T>({
                 const meta = filled.filter(c => c !== trail && c.card !== "figure").slice(0, pin ? 8 : 4);
                 const tap = !pin && (opensPage || opens);
                 return (
-                  <div key={k} className={`dt-row-slim ${on ? "bg-primary/[0.04]" : ""} ${pin ? "bg-secondary/30 italic" : ""} ${rowClassName?.(r) ?? ""}`}>
+                  <div key={k} onContextMenu={rowMenu(r, pin)} className={`dt-row-slim ${on ? "bg-primary/[0.04]" : ""} ${pin ? "bg-secondary/30 italic" : ""} ${rowClassName?.(r) ?? ""}`}>
                     <div onClick={tap ? rowClick(r) : undefined} className={`flex items-start gap-3 px-3.5 py-3 ${tap ? "cursor-pointer active:bg-secondary/50 transition-colors" : ""}`}>
                       {ticking && !pin && <span className="pt-0.5"><Tick state={on ? "on" : "off"} onClick={() => toggleRow(k)} label={on ? "Untick this row" : "Tick this row"} /></span>}
                       <div className="min-w-0 flex-1">
@@ -741,7 +772,7 @@ export function DataTable<T>({
             const fig = pin ? undefined : filled.find(c => c.card === "figure");
             const pairs = (pin ? filled : filled.filter(c => c.card !== "figure").slice(0, 4));
             return (
-              <div key={k} className={`dt-card rounded-xl border bg-white overflow-hidden ${on ? "border-primary/40 bg-primary/[0.03]" : "border-border/60"} ${pin ? "bg-secondary/25 italic" : ""} ${rowClassName?.(r) ?? ""}`}>
+              <div key={k} onContextMenu={rowMenu(r, pin)} className={`dt-card rounded-xl border bg-white overflow-hidden ${on ? "border-primary/40 bg-primary/[0.03]" : "border-border/60"} ${pin ? "bg-secondary/25 italic" : ""} ${rowClassName?.(r) ?? ""}`}>
                 <div onClick={!pin && (opensPage || opens) ? rowClick(r) : undefined}
                   className={`px-3.5 py-3 ${!pin && (opensPage || opens) ? "cursor-pointer active:bg-secondary/40 transition-colors" : ""}`}>
                   <div className="flex items-start gap-2.5">
@@ -860,7 +891,7 @@ export function DataTable<T>({
               const opensPage = !pin && pageable && (canClickRow ? canClickRow(r) : true);
               return (
                 <Fragment key={k}>
-                <tr onClick={!pin && (opensPage || opens) ? rowClick(r) : undefined}
+                <tr onClick={!pin && (opensPage || opens) ? rowClick(r) : undefined} onContextMenu={rowMenu(r, pin)}
                   className={`dt-row group transition-colors ${pin ? "dt-pin bg-secondary/25 italic" : on ? "dt-on bg-primary/[0.05]" : "hover:bg-secondary/30"} ${!pin && (opensPage || opens) ? "cursor-pointer" : ""} ${isOpen ? "dt-open bg-secondary/30" : ""} ${rowClassName?.(r) ?? ""}`}>
                   {ticking && <td className={`w-10 px-3 ${PAD[dense]} ${padCls} ${stick} left-0`}>{!pin && <Tick state={on ? "on" : "off"} onClick={() => toggleRow(k)} label={on ? "Untick this row" : "Tick this row"} />}</td>}
                   {shown.map(c => (

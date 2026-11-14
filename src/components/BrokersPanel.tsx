@@ -10,6 +10,7 @@ import { fmtMoneyInr } from "@/lib/manufacturing";
 import { confirmBox } from "@/lib/confirm";
 import { DataTable, CellMain, CellTag, CellAmount, type DataColumn } from "@/components/DataTable";
 import type { MoreAction } from "@/components/MoreMenu";
+import { chatAction } from "@/lib/whatsapp";
 import { filled, type Detail } from "@/components/rowDetails";
 import { BrokerCreateDialog } from "@/components/create/BrokerCreateDialog";
 import { PayBrokerSheet } from "@/components/PayBrokerSheet";
@@ -63,6 +64,7 @@ export function BrokersPanel({ mayAdd, mayEdit, mayDelete, creating, onCreating 
     const delWhy = ready ? brokerDeleteWhy(db, b) : "Still loading";
     return [
       { label: "Open broker", icon: ExternalLink, hint: "Bills, suppliers and money", onSelect: () => navigate(`/suppliers/brokers/${b.id}`) },
+      chatAction(b.name, b.phone),
       { label: "Pay through broker", icon: Wallet, hint: acc(b).toPay > 0.5 ? `${fmtMoneyInr(acc(b).toPay)} to settle` : "Nothing to settle now", onSelect: () => setPaying(b), disabled: !mayPay, ...(mayPay ? {} : { hint: "Your access does not include payments" }) },
       { label: "Edit details", icon: Pencil, onSelect: () => setEditing(b), disabled: !mayEdit, hint: mayEdit ? "Name, phone, usual %" : ADMIN_ONLY },
       { label: b.active === false ? "Switch on" : "Switch off", icon: Power, onSelect: () => toggle(b), disabled: !mayEdit, hint: mayEdit ? "Kept on past bills either way" : ADMIN_ONLY },

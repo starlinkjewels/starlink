@@ -8,7 +8,7 @@ import {
 import { PageHeader, ViewSwitch } from "@/components/PageHeader";
 import { ActionSheet } from "@/components/ActionSheet";
 import { DataTable, type DataColumn } from "@/components/DataTable";
-import { MoreMenu, type MoreAction } from "@/components/MoreMenu";
+import { MoreMenu, useRightClickMenu, type MoreAction } from "@/components/MoreMenu";
 import { SectionTitle } from "@/components/SectionTitle";
 import { zoomable } from "@/components/ImageViewer";
 import { Button } from "@/components/ui/button";
@@ -213,6 +213,8 @@ export function DocumentsPage() {
     } catch (e) { fail(e, "Couldn't move it to the Trash"); }
   };
 
+  // Right-click on a card: its ⋯, where the mouse is (components/MoreMenu).
+  const rightClick = useRightClickMenu();
   const folderMenu = (f: DocFolder): MoreAction[] => [
     { label: "Open", icon: FolderOpen, onSelect: () => openFolder(f.id) },
     { label: "Rename", icon: Pencil, onSelect: () => setNaming({ mode: "folder", f }) },
@@ -253,7 +255,7 @@ export function DocumentsPage() {
         {subfolders.map(f => {
           const n = counts.get(f.id) ?? 0;
           return (
-            <div key={f.id} className="relative min-w-0">
+            <div key={f.id} className="relative min-w-0" onContextMenu={rightClick.bind(() => folderMenu(f), f.name)}>
               <button type="button" onClick={() => openFolder(f.id)}
                 className="w-full flex flex-col rounded-2xl border border-border/60 bg-white shadow-sm overflow-hidden text-left hover:border-primary/40 active:border-primary/40">
                 <div className="aspect-video w-full bg-gradient-to-br from-amber-50 to-amber-100 grid place-items-center relative">
@@ -301,7 +303,7 @@ export function DocumentsPage() {
   const docGrid = (
     <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 xl:grid-cols-5 gap-3">
       {docs.map(it => (
-        <div key={it.id} className="relative min-w-0">
+        <div key={it.id} className="relative min-w-0" onContextMenu={rightClick.bind(() => itemMenu(it), it.name)}>
           <button type="button" onClick={() => openItem(it)}
             className="w-full flex flex-col rounded-2xl border border-border/60 bg-white shadow-sm overflow-hidden text-left hover:border-primary/40 active:border-primary/40">
             <div className="aspect-[4/3] w-full bg-secondary/40 grid place-items-center overflow-hidden relative">
@@ -329,6 +331,7 @@ export function DocumentsPage() {
 
   return (
     <div className="max-w-7xl mx-auto space-y-5 relative min-h-[60vh]" {...dnd}>
+      {rightClick.menu}
       <input ref={fileRef} type="file" multiple className="hidden"
         onChange={e => { const fs = [...(e.target.files ?? [])]; e.currentTarget.value = ""; doUpload(fs); }} />
 
