@@ -2,7 +2,7 @@ import { CustomFieldsView } from "@/components/CustomFields";
 import { keptForOrder } from "@/lib/orderStock";
 import { ReceiveFromClient, type ReceiveValues } from "@/components/payments/ReceiveFromClient";
 import { receiptShareActions } from "@/lib/receiptShare";
-import { ourFinishedNet } from "@/lib/pure/accounts";
+import { ourFinishedFine, ourFinishedNet } from "@/lib/pure/accounts";
 import { ShopifyOrderCard } from "@/components/order/ShopifyOrderCard";
 import { EtsyOrderCard } from "@/components/order/EtsyOrderCard";
 import { isShelfSale } from "@/lib/stockSale";
@@ -1658,6 +1658,8 @@ function OrderDetailPageBody() {
           // Found from the issues: now it is the order's factory too.
           if (!o.assignedFactoryId) o.assignedFactoryId = factoryId;
           let finish = finishRecordOf(d.materialIssuances, order.id);
+          // Never approved with a weight yet — a pool draw for the order may already have made the record.
+          const firstApproval = !finish || finish.finishedNetWeight == null;
           if (!finish) {
             finish = {
               id: uid("mi_"), factoryId, orderId: order.id, material: "gold", ...coField(workCo), purityOrQuality: karat,
@@ -1681,6 +1683,14 @@ function OrderDetailPageBody() {
           finish.makingCharges = { amountInr: labourVal, payments: finish.makingCharges?.payments || [] };
           finish.status = "closed";
           finish.closedAt = new Date().toISOString(); // when it was closed — the year-closing lock reads it
+          // The agreed making wastage (Factory.wastagePct, lib/pure/accounts.ts): its % fixed at the piece's
+          // first approval — a correction keeps it, and an approval from before any % stays without one.
+          const pct = firstApproval ? d.factories.find(f => f.id === factoryId)?.wastagePct : finish.finishWastagePct;
+          const fineIn = hasNet ? ourFinishedFine(finish) : 0;
+          if (pct && pct > 0 && fineIn > 0) {
+            finish.finishWastagePct = pct;
+            finish.finishWastageFine = Math.round(fineIn * pct / 100 * 1000) / 1000;
+          } else { delete finish.finishWastagePct; delete finish.finishWastageFine; }
         }
         // Apply each diamond's disposition.
         for (const i of dias) {
@@ -2474,8 +2484,9 @@ function OrderDetailPageBody() {
         printBatchInvoice(orders, client, db.settings, existing.number, existing.createdAt.slice(0, 10), Object.fromEntries(orders.map(o => [o.id, mainDiamondShape(db, o.id) ?? ""])));
         return;
       }
-      // Single-order invoice → keep its snapshot current, then print.
-      if (existing.amount !== amount || existing.paid !== paid) {
+      // Single-order invoice → keep its snapshot current, then print. Staff only: a client may not
+      // write invoices (the database refuses it) — their copy prints from the live figures all the same.
+      if (user!.role !== "client" && (existing.amount !== amount || existing.paid !== paid)) {
         updateDb(d => { const i = d.invoices.find(x => x.id === existing.id); if (i) { i.amount = amount; i.paid = paid; } });
       }
       printInvoice(order, client, db.settings, existing.number, mainDiamondShape(db, order.id), false, existing.createdAt);
@@ -3837,7 +3848,10 @@ It goes back to being our own build, and ${item ? item.name : "its piece"} goes 
           if (applied <= 0 && cards.length === 0) return null;
           const card = order.giftCardId ? (db.giftCards ?? []).find(c => c.id === order.giftCardId) : cards[0];
           const giftPct = giftMaxRedeemPctFor(db, client);
-          const maxR = card ? maxGiftRedeem(order, card, db.orders, giftPct) : 0;
+          // A client applies no more than is still owed: past that the order would be overpaid and the excess
+          // move to their credit — staff's to do (the database lets a client change neither payments nor credit).
+          const maxR0 = card ? maxGiftRedeem(order, card, db.orders, giftPct) : 0;
+          const maxR = user!.role === "client" ? Math.max(0, Math.min(maxR0, Math.round(balanceDue(order) * 100) / 100)) : maxR0;
           return (
             <div className="rounded-xl border border-primary/30 bg-primary/5 p-3 flex items-center justify-between gap-3 flex-wrap">
               <div className="flex items-center gap-2 min-w-0">
@@ -5141,7 +5155,17 @@ The piece then takes ours — add them from stock or buy them, as for any order.
                     // The client's own gold (given the factory straight) is not taken from ours.
                     const theirs = Math.min(faEffNet, faClientGoldG);
                     const ours = Math.max(0, Math.round((faEffNet - theirs) * 1000) / 1000);
-                    return <p className="text-[11px] text-muted-foreground mt-1">= {fmtG(pureFromPurity(ours, Number(faGoldPurity)))}g fine (24KT) deducted from {faFactory?.name || "the factory"}{theirs > 0 ? ` — ${fmtG(theirs)} g of the piece is the client's own gold` : ""}</p>;
+                    const fineOurs = pureFromPurity(ours, Number(faGoldPurity));
+                    // The agreed making wastage (Factory.wastagePct): the % fixed at the first approval.
+                    const fr = finishRecord();
+                    const wPct = fr ? fr.finishWastagePct : faFactory?.wastagePct;
+                    const wFine = wPct && wPct > 0 ? Math.round(fineOurs * wPct / 100 * 1000) / 1000 : 0;
+                    return (
+                      <>
+                        <p className="text-[11px] text-muted-foreground mt-1">= {fmtG(fineOurs)}g fine (24KT) deducted from {faFactory?.name || "the factory"}{theirs > 0 ? ` — ${fmtG(theirs)} g of the piece is the client's own gold` : ""}</p>
+                        {wFine > 0 && <p className="text-[11px] text-muted-foreground">+ {fmtG(wFine)} g fine agreed wastage ({wPct}%) — {fmtG(Math.round((fineOurs + wFine) * 1000) / 1000)} g fine in all off their gold, and in the piece's cost</p>}
+                      </>
+                    );
                   })()}
                   {order.clientSupplied?.gold && (() => {
                     // The client gives the gold: what the piece takes from theirs.

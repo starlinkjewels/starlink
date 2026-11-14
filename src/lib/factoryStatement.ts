@@ -18,7 +18,7 @@
 // (lib/pure/accounts.ts: factoryFineGoldBalance, diamondFlow, factoryAccount),
 // so the last line's balances are the card's figures — and `check` says so.
 import type { FactoryPayment, MaterialIssuance, Order } from "./db";
-import { diamondFlow, factoryAccount, factoryFineGoldBalance, factoryOtherBalances, otherFlow, ourFinishedFine } from "./pure/accounts";
+import { diamondFlow, factoryAccount, factoryFineGoldBalance, factoryOtherBalances, otherFlow, ourFinishedFine, finishWastageFine } from "./pure/accounts";
 import { openingCreditAmt, openingDebitAmt, pureFromPurity, toPureGold } from "./pure/basics";
 import type { OpeningBalanceInfo } from "./db";
 import { groupPaymentsAsMade, labourLineText, factoryMetalLines } from "./manufacturing";
@@ -56,7 +56,9 @@ export interface StatementLine {
 }
 
 /** The fine gold a gold issue's finished piece took — of ours: gold the client gave the factory straight is not. */
-const finishedFine = (mi: MaterialIssuance) => ourFinishedFine(mi);
+// The fine gold a finished piece accounts for: what is in it, plus the agreed making wastage credited
+// for it (lib/pure/accounts.ts) — as the Factory Account card counts it.
+const finishedFine = (mi: MaterialIssuance) => r3(ourFinishedFine(mi) + finishWastageFine(mi));
 
 
 const r3 = (n: number) => Math.round(n * 1000) / 1000;
@@ -119,7 +121,7 @@ export function buildFactoryStatement(inp: StatementInput): { lines: StatementLi
   }
 
   // ── What the factory billed: one line per bill (its number), else per order ──
-  type Acc = { orderIds: Set<string>; date?: string; goldOut: number; diaUsed: number; diaRet: number; billed: number; voucher: string; facCt: number; ourCt: number; items: string[]; making?: string[];
+  type Acc = { orderIds: Set<string>; date?: string; goldOut: number; wasteOut?: number; diaUsed: number; diaRet: number; billed: number; voucher: string; facCt: number; ourCt: number; items: string[]; making?: string[];
     /** Other materials set in the pieces, and sent back — by material key. */
     oUsed: Record<string, number>; oRet: Record<string, number> };
   const bills = new Map<string, Acc>();
@@ -179,6 +181,7 @@ export function buildFactoryStatement(inp: StatementInput): { lines: StatementLi
     const facMetal = factoryMetalLines(mi.labour);
     if (facMetal.length) (acc.making ??= []).push(facMetal.map(m => `${m.metal} by factory ${m.grams.toFixed(3)} g × ₹${m.rate.toLocaleString("en-IN")}`).join(" + "));
     acc.goldOut += fine; acc.diaUsed += used; acc.diaRet += ret; acc.billed += charge;
+    if (mi.material === "gold") { const wf = finishWastageFine(mi); if (wf > 0) acc.wasteOut = r3((acc.wasteOut || 0) + wf); }
     if (oUsed) acc.oUsed[mi.material] = r3((acc.oUsed[mi.material] || 0) + oUsed);
     if (oRet) acc.oRet[mi.material] = r3((acc.oRet[mi.material] || 0) + oRet);
     acc.date = latest([acc.date, when]) ?? when;
@@ -191,7 +194,7 @@ export function buildFactoryStatement(inp: StatementInput): { lines: StatementLi
     const oUsedTxt = Object.entries(a.oUsed).map(([k, n]) => `${label(k).name} ${qty(k, n)}`);
     if (a.goldOut || a.diaUsed || a.billed || oUsedTxt.length) {
       raw.push({ ...blank, id: `${key}-bill`, kind: "bill", date: a.date ?? "", voucher: a.voucher, orderIds: [...a.orderIds],
-        particular: `Finished goods — ${a.items.join(", ")}${facNote}${oUsedTxt.length ? ` · set in: ${oUsedTxt.join(", ")}` : ""}${a.making?.length ? ` · making ${a.making.join("; ")}` : ""}`,
+        particular: `Finished goods — ${a.items.join(", ")}${facNote}${oUsedTxt.length ? ` · set in: ${oUsedTxt.join(", ")}` : ""}${a.making?.length ? ` · making ${a.making.join("; ")}` : ""}${a.wasteOut ? ` · gold incl. ${a.wasteOut.toFixed(3)} g fine agreed wastage` : ""}`,
         goldOut: r3(a.goldOut), diaOut: r3(a.diaUsed), billed: a.billed,
         other: Object.fromEntries(Object.entries(a.oUsed).map(([k, n]) => [k, -n])) });
     }

@@ -19,7 +19,7 @@ import { CompanyFilter, CompanyPicker, CompanyBadge, useMultiCo, useDefaultCompa
 import { FactoryPoolTransferDialog } from "@/components/FactoryPoolTransfer";
 import { companyOf, coField, workCompanyOf, companyById } from "@/lib/companies";
 import { bySettingsOrder, isOtherMaterial, materialName, materialUnit, type MaterialKey } from "@/lib/materials";
-import { otherFlow, factoryOtherBalances, factoryOtherGrades, ourFinishedFine } from "@/lib/pure/accounts";
+import { otherFlow, factoryOtherBalances, factoryOtherGrades, ourFinishedFine, finishWastageFine } from "@/lib/pure/accounts";
 import { useMemo, useState, type ReactNode } from "react";
 import { useParams, Link, useNavigate } from "react-router-dom";
 import { collectionLoaded, updateDb, uid, fmtDate, todayLocal, stampFor, DIAMOND_SHAPES, toPureGold, pureFromPurity, hasOpeningBalance, openingDebitAmt, openingCreditAmt, type MaterialIssuance, type LedgerDir, type Factory } from "@/lib/db";
@@ -47,10 +47,12 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import {
   Wallet, Plus, CreditCard, CheckCircle2, Coins, Gem,
   Download, FileText, FileSpreadsheet, Undo2, AlertCircle, Truck, ArrowDownCircle, ArrowUpCircle, ArrowRightLeft, Archive,
-  Pencil, Trash2, ExternalLink, Lock, RotateCcw, Package, BookOpen, Factory as FactoryIcon,
+  Pencil, Trash2, ExternalLink, Lock, RotateCcw, Package, BookOpen, Factory as FactoryIcon, Scale,
 } from "lucide-react";
 import { atFactoryNow } from "@/lib/factoryWip";
 import { FactoryAtNow } from "@/components/FactoryAtNow";
+import { FactoryGoldCheckSheet } from "@/components/FactoryGoldCheckSheet";
+import { goldCheckState } from "@/lib/factoryGoldCheck";
 import { toast } from "sonner";
 import { downloadCsv, downloadLedgerPdf, downloadLedgerPdfMulti, fmtInrPlain } from "@/lib/ledgerExport";
 import { ExportDialog, inDateRange } from "@/components/ExportDialog";
@@ -150,6 +152,9 @@ function FactoryHistoryPageBody() {
   // as the factory's own books), or order by order, or the material issued — one
   // list at a time (hooks/usePageTab.ts), so a long ledger never hides the issues under it.
   const [ledgerView, setLedgerView] = usePageTab("factory", ["statement", "now", "orders", "issues"] as const, "statement");
+  // Gold check (lib/factoryGoldCheck.ts): the panel, and the last one taken.
+  const [goldCheck, setGoldCheck] = useState(false);
+  const lastCheck = (factory.goldChecks ?? [])[(factory.goldChecks ?? []).length - 1];
   // What it is making now — not back yet (lib/factoryWip.ts).
   const atNow = atFactoryNow(db, id!);
   const statement = buildFactoryStatement({
@@ -761,6 +766,9 @@ function FactoryHistoryPageBody() {
         // Only our part: gold the client gave the factory straight was never ours there.
         const fine = ourFinishedFine(mi, "24K");
         rows.push({ ...zero(), id: mi.id + "-gout", date: mi.issuedAt, ref, particular: `Finished piece — net ${mi.finishedNetWeight}g${(mi.clientGoldNet ?? 0) > 0 ? ` (${mi.clientGoldNet}g the client's own)` : ""}`, crGold: fine });
+        // The agreed wastage credited on it at Final Approval (lib/factoryGoldCheck.ts) — off the factory's gold like the piece.
+        const wf = finishWastageFine(mi);
+        if (wf > 0) rows.push({ ...zero(), id: mi.id + "-gwaste", date: mi.issuedAt, ref, particular: `Agreed wastage ${mi.finishWastagePct ?? ""}${mi.finishWastagePct ? "% " : ""}on the piece's gold`, crGold: wf });
         // A two-tone piece comes back with a second metal in it. Silver gets its
         // own column because it is the common one; anything else (platinum, etc.)
         // shares the Other Metal column and is named in the row.
@@ -1132,8 +1140,11 @@ function FactoryHistoryPageBody() {
           { label: "Opening balance", icon: BookOpen, hint: "Not set — what was owed and held before the app", onSelect: openOpening, show: mayEdit && !openingSet },
           { label: "Move between companies", icon: ArrowRightLeft, hint: "Gold, diamonds or other material, company to company", onSelect: () => setMovingPool(true), show: multiCo && has("factories.companies") },
           { label: "Export ledger", icon: Download, hint: "Ledger or movement sheet", onSelect: () => setShowExport(true), show: mayExport && has("fig.costs") && has("fig.payables") },
+          // What they really hold against our book — the trade's gold reconciliation (lib/factoryGoldCheck.ts).
+          { label: "Gold check", icon: Scale, onSelect: () => setGoldCheck(true), disabled: !mayEdit,
+            hint: mayEdit ? (lastCheck ? `Last ${fmtDate(lastCheck.at)}${goldCheckState(lastCheck) === "flag" ? " — short above the limit" : ""}` : "Count their gold against the book") : "Your access does not include changing factories" },
           { label: "Edit details", icon: Pencil, onSelect: () => setEditingFactory(factory), disabled: !mayEdit,
-            hint: mayEdit ? "Name, contact, phone, address" : "Your access does not include changing factories" },
+            hint: mayEdit ? "Name, contact, address, labour rates, agreed wastage" : "Your access does not include changing factories" },
           { label: "Delete factory", icon: Trash2, danger: true, onSelect: deleteFactory, disabled: !mayDelete || !deleteGuard.ok,
             hint: !mayDelete ? "Your access does not include deleting factories" : deleteGuard.reason },
         ]}
@@ -1150,7 +1161,11 @@ function FactoryHistoryPageBody() {
                 tone: account.chargesPending > 0 ? "out" as const : "in" as const, icon: Coins,
                 sub: `Labour · ${fmtMoneyInr(account.chargesTotal)} billed${account.chargesOverpaid > 0 ? ` · ${fmtMoneyInr(account.chargesOverpaid)} paid ahead` : ""}` }]),
           ...(showCosts ? [{ label: "Paid", value: fmtMoneyInr(account.chargesPaid), tone: "in" as const, icon: CreditCard, sub: "Labour paid" }] : []),
-          { label: "Fine gold (24KT)", value: `${factoryFineGoldBalance(db.materialIssuances, id!, factory.openingFineGold, view).toLocaleString()} g`, icon: Coins, sub: "At the factory" },
+          { label: "Fine gold (24KT)", value: `${factoryFineGoldBalance(db.materialIssuances, id!, factory.openingFineGold, view).toLocaleString()} g`, icon: Coins,
+            // The agreed wastage and the last gold check ride under it (lib/factoryGoldCheck.ts).
+            sub: ["At the factory", factory.wastagePct ? `wastage ${factory.wastagePct}% agreed` : "",
+              lastCheck ? `checked ${fmtDate(lastCheck.at)}${goldCheckState(lastCheck) === "flag" ? ` — ${Math.abs(lastCheck.diff).toLocaleString()} g short` : ""}` : ""].filter(Boolean).join(" · "),
+            ...(lastCheck && goldCheckState(lastCheck) === "flag" ? { tone: "out" as const } : {}) },
           { label: "Diamond", value: `${account.diamondOutstanding > 0 ? "+" : ""}${account.diamondOutstanding.toLocaleString()} ct`, icon: Gem,
             tone: account.diamondOutstanding < 0 ? "out" : undefined, sub: "Net, given less used" },
           // Each other material (platinum, a gem, findings) — and, as stock keeps it, by its grade or lot.
@@ -1242,6 +1257,7 @@ function FactoryHistoryPageBody() {
           order={k => (db.settings.materials ?? []).findIndex(m => m.id === k)} />
       )}
       {ledgerView === "now" && <FactoryAtNow factoryId={id!} rows={atNow} />}
+      {goldCheck && <FactoryGoldCheckSheet factory={factory} onClose={() => setGoldCheck(false)} />}
       {ledgerView === "orders" && <FactoryOrderLedger
         rows={orderRows}
         factoryName={factory.name}

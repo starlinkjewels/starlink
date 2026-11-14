@@ -132,6 +132,14 @@ export function ourFinishedFine(i: Pick<MaterialIssuance, "finishedNetWeight" | 
   return k ? toPureGold(net, k) : 0;
 }
 
+/**
+ * The agreed making wastage credited to the factory for a finished piece, in fine grams — set at
+ * Final Approval from the factory's wastage % (MaterialIssuance.finishWastageFine). 0 without one.
+ */
+export function finishWastageFine(i: Pick<MaterialIssuance, "finishedNetWeight" | "finishWastageFine">): number {
+  return i.finishedNetWeight != null && i.finishWastageFine && i.finishWastageFine > 0 ? i.finishWastageFine : 0;
+}
+
 export function factoryFineGoldBalance(issuances: MaterialIssuance[], factoryId: string, openingFineGold = 0, companyId?: string): number {
   let inFine = 0, outFine = 0;
   // The opening fine gold was entered before there was more than one company — the first company's.
@@ -140,8 +148,9 @@ export function factoryFineGoldBalance(issuances: MaterialIssuance[], factoryId:
     if (i.factoryId !== factoryId || i.material !== "gold" || !ofCompany(i, companyId)) continue;
     if (i.source !== "factoryPool") inFine += toPureGold(i.quantityIssued, i.purityOrQuality);
     // Prefer the actual purity entered at Final Approval; fall back to karat. Only our part:
-    // gold the client gave the factory straight was never ours there.
-    if (i.finishedNetWeight != null) outFine += ourFinishedFine(i);
+    // gold the client gave the factory straight was never ours there. Plus the agreed making
+    // wastage credited to the factory for the piece (none unless a % was set).
+    if (i.finishedNetWeight != null) outFine += ourFinishedFine(i) + finishWastageFine(i);
   }
   // Fine gold physically at the factory at migration adds straight onto the balance.
   return Math.round((inFine - outFine + (openingFineGold || 0)) * 1000) / 1000;

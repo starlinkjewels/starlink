@@ -1,4 +1,4 @@
-import { ourFinishedFine, ourFinishedNet } from "./pure/accounts";
+import { finishWastageFine, ourFinishedFine, ourFinishedNet } from "./pure/accounts";
 import { orderUse } from "./clientMaterial";
 import { brokerageWePay, landedInr } from "./brokers";
 import { pctText, purchaseGstInr } from "./purchaseGst";
@@ -354,6 +354,12 @@ export function orderCost(db: DB, order: Order, depth = 0): OrderCost {
           ? `Gold we added — the client's gold was ${fine}g fine short × ${fmtRate(fg.rate, "g fine")} (${fg.basis})`
           : `${ourFinishedNet(mi)}g at ${purityTxt} = ${fine}g fine × ${fmtRate(fg.rate, "g fine")} (${fg.basis})${(mi.clientGoldNet ?? 0) > 0 ? ` — ${mi.clientGoldNet}g more was the client's own` : ""}`,
         amountInr: r2(fine * fg.rate), issuanceId: mi.id, rateInr: fg.rate, rateUnit: "g fine",
+      });
+      // The agreed making wastage the factory was credited for this piece (lib/pure/accounts.ts) — our gold, a cost.
+      const wf = finishWastageFine(mi);
+      if (wf > 0) bucket.push({
+        label: `Agreed making wastage${mi.finishWastagePct ? ` ${mi.finishWastagePct}%` : ""} = ${wf}g fine × ${fmtRate(fg.rate, "g fine")}`,
+        amountInr: r2(wf * fg.rate), issuanceId: mi.id, rateInr: fg.rate, rateUnit: "g fine",
       });
       continue;
     }
