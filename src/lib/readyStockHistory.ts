@@ -45,27 +45,36 @@ export function logItem(item: ReadyStockItem, e: Omit<ReadyStockEvent, "at"> & {
 }
 
 export const qtyText = (from: number, to: number) => `Quantity ${from} → ${to}`;
-const QTY_LINE = /^Quantity (\d+) → (\d+)$/;
 
 /**
- * The − / + stepper (inside updateDb). Clicks in a row by the same person read
- * as one change — "Quantity 3 → 6", not three lines; back where it started, no line.
+ * Why a piece's count changed by hand — the stock-adjustment reason every change needs (a sale,
+ * a return or a memo has its own flow and never comes through here).
  */
-export function stepQty(d: DB, itemId: string, delta: number, who: Who): void {
+export const QTY_REASONS = [
+  { key: "found", label: "Found / counted more" },
+  { key: "damaged", label: "Damaged" },
+  { key: "lost", label: "Lost / missing" },
+  { key: "count", label: "Count correction" },
+  { key: "other", label: "Other" },
+] as const;
+export type QtyReason = (typeof QTY_REASONS)[number]["key"] | "undo";
+
+/**
+ * Set a piece's count by hand, with its reason (inside updateDb) — "Quantity 3 → 2 — Damaged: note".
+ * The note is seen by whoever can see the piece: never a client's name or a cost.
+ * Returns the count it was, for Undo; null when nothing changed.
+ */
+export function setQtyWithReason(d: DB, itemId: string, to: number, reason: QtyReason, note: string, who: Who): number | null {
   const it = d.readyStock.find(x => x.id === itemId);
-  if (!it) return;
+  if (!it) return null;
   const was = it.quantity;
-  it.quantity = Math.max(0, it.quantity + delta);
-  if (it.quantity === was) return;
-  const last = it.history?.[it.history.length - 1];
-  const m = last && last.kind === "qty" && last.by === who.by && Date.now() - +new Date(last.at) < 2 * 60_000 ? QTY_LINE.exec(last.text) : null;
-  if (m && Number(m[2]) === was) {
-    const from = Number(m[1]);
-    it.history = it.history!.slice(0, -1);
-    if (from !== it.quantity) logItem(it, { ...who, kind: "qty", text: qtyText(from, it.quantity) });
-    return;
-  }
-  logItem(it, { ...who, kind: "qty", text: qtyText(was, it.quantity) });
+  const next = Math.max(0, Math.round(to));
+  if (next === was) return null;
+  it.quantity = next;
+  const why = reason === "undo" ? "Undone" : QTY_REASONS.find(r => r.key === reason)?.label ?? "Other";
+  const n = note.trim();
+  logItem(it, { ...who, kind: "qty", text: `${qtyText(was, next)} — ${why}${n ? `: ${n}` : ""}` });
+  return was;
 }
 
 /**

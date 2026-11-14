@@ -1,3 +1,4 @@
+import { GOLD_KARATS } from "@/lib/pure/basics";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { Boxes, Pencil, Trash2 } from "lucide-react";
@@ -20,7 +21,8 @@ import {
 } from "@/lib/openingStock";
 
 /** Gold purities, as the opening-stock form offers them. */
-const GOLD_PURITIES = ["9K", "10K", "14K", "18K", "22K", "24K"];
+// The one karat list (lib/pure/basics.ts GOLD_KARATS) — every gold dropdown offers the same.
+const GOLD_PURITIES = GOLD_KARATS;
 import { confirmBox } from "@/lib/confirm";
 import type { MoreAction } from "@/components/MoreMenu";
 import { ActionSheet } from "@/components/ActionSheet";

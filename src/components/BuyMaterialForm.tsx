@@ -1,3 +1,4 @@
+import { GOLD_KARATS } from "@/lib/pure/basics";
 import { AddNewItem, useAddNew } from "@/components/create/QuickCreate";
 import { CustomFieldInputs } from "@/components/CustomFields";
 import { customProblem, writeValues, type CfValues } from "@/lib/customFields";
@@ -50,7 +51,8 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { cleanGstPct, defaultPurchaseGstPct, gstFields, gstOn, pctText, usdWithGst } from "@/lib/purchaseGst";
 import { openMin } from "@/lib/openMin";
 
-const GOLD_PURITIES = ["9K", "10K", "14K", "18K", "22K", "24K"];
+// The one karat list (lib/pure/basics.ts GOLD_KARATS) — every gold dropdown offers the same.
+const GOLD_PURITIES = GOLD_KARATS;
 /** Gold, loose or certified diamonds, any other material (Settings → Materials),
  *  or ready jewellery — finished pieces bought ready-made, onto Ready Stock. */
 type BuyKind = "gold" | "loose" | "certified" | "other" | "ready";
@@ -67,7 +69,7 @@ const KIND_ORDER: BuyKind[] = ["gold", "loose", "certified", "other", "ready"];
  *  jewellery: a ready piece goes onto Ready Stock, not into an order or Stock. */
 const MATERIAL_KINDS: BuyKind[] = KIND_ORDER.filter(k => k !== "ready");
 /** A ready piece's karat — the same choices as a Ready Stock piece's. */
-const READY_KARATS = ["9K", "14K", "18K", "22K", "24K"];
+const READY_KARATS = GOLD_KARATS;
 
 /** A ready piece as Ready Stock asks for it (components/ReadyStockItemDialog):
  *  each piece's details, its selling price in $, and the office it is kept at. */

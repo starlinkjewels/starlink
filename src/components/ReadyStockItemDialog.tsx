@@ -1,3 +1,4 @@
+import { GOLD_KARATS } from "@/lib/pure/basics";
 import { ListCombo } from "@/components/ListCombo";
 import { CustomFieldInputs } from "@/components/CustomFields";
 import { customProblem, sameValues, fieldsFor, filledPairs, valuesOf, writeValues, type CfValues } from "@/lib/customFields";
@@ -27,7 +28,8 @@ import { coField, companyById, companyOf } from "@/lib/companies";
 import { officeLabel, officeOf, readyStockOffices } from "@/lib/offices";
 import { describeEdit, logItem, whoOf } from "@/lib/readyStockHistory";
 
-const GOLD_PURITIES = ["9K", "14K", "18K", "22K", "24K"];
+// The one karat list (lib/pure/basics.ts GOLD_KARATS) — every gold dropdown offers the same.
+const GOLD_PURITIES = GOLD_KARATS;
 
 
 type ItemForm = {

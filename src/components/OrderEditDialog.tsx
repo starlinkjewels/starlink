@@ -1,3 +1,4 @@
+import { GOLD_KARATS } from "@/lib/pure/basics";
 import { LooseLotFields } from "@/components/LotFields";
 import { CustomFieldInputs } from "@/components/CustomFields";
 import { customProblem, sameValues, valuesOf, writeValues, type CfValues } from "@/lib/customFields";
@@ -35,7 +36,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 
 // The same choices New Order offers; a value an older order carries that is not
 // among them stays pickable, so opening the panel never changes it by itself.
-const KARATS = ["9K", "10K", "14K", "18K", "22K", "24K"];
+// The one karat list (lib/pure/basics.ts GOLD_KARATS) — every gold dropdown offers the same.
+const KARATS = GOLD_KARATS;
 const PRIORITY = ["Normal", "High Priority", "Urgent"];
 const DIAMOND_ONLY = "Diamond Only";
 const NO_METAL = "None (Diamond only)";

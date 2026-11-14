@@ -1,3 +1,4 @@
+import { GOLD_KARATS } from "@/lib/pure/basics";
 import { AddNewItem, useAddNew } from "@/components/create/QuickCreate";
 import { keptForOrder } from "@/lib/orderStock";
 import { StatStrip } from "@/components/TableToolbar";
@@ -31,7 +32,8 @@ import { Field, Group, PanelActions, Segmented, Stat, Stats, UnitInput } from "@
 import { SellToSupplierSheet } from "@/components/SellToSupplierSheet";
 import { openMin } from "@/lib/openMin";
 
-const GOLD_PURITIES = ["9K", "10K", "14K", "18K", "22K", "24K"];
+// The one karat list (lib/pure/basics.ts GOLD_KARATS) — every gold dropdown offers the same.
+const GOLD_PURITIES = GOLD_KARATS;
 type Mode = "buy" | "assign" | "sell" | "sellSupplier" | "opening";
 /** Open and close one of the page's panels. */
 type PanelProps = { open: boolean; onOpenChange: (open: boolean) => void };
