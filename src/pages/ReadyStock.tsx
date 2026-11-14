@@ -1,3 +1,4 @@
+import { OLD_DAYS, SLOW_DAYS, ageBand, pieceAge } from "@/lib/stockAge";
 import { DataTable, CellTag, CellAmount, CellDate, type DataColumn } from "@/components/DataTable";
 import { PageViewsButton } from "@/components/SavedViews";
 import { customColumns } from "@/components/CustomFields";
@@ -101,6 +102,8 @@ export function ReadyStockPage() {
   // the kind of jewellery, the metal (gold of any colour, silver, platinum…), the
   // karat, the stones (natural, lab-grown, moissanite… or none) and a price range.
   const [typeSel, setTypeSel] = useStickyFilter("ready-stock.type", "all");
+  // Slow-moving (lib/stockAge.ts): pieces on the shelf 90+ or 180+ days.
+  const [ageSel, setAgeSel] = useStickyFilter<"" | "slow" | "old">("ready-stock.age", "");
   const [metalSel, setMetalSel] = useStickyFilter("ready-stock.metal", "all");
   const [karatSel, setKaratSel] = useStickyFilter("ready-stock.karat", "all");
   const [stoneSel, setStoneSel] = useStickyFilter("ready-stock.stone", "all");
@@ -151,6 +154,7 @@ export function ReadyStockPage() {
       i.name.toLowerCase().includes(t) || (i.sku || "").toLowerCase().includes(t)
       || (cfDefs.length > 0 && searchWords(cfDefs, cfOf(i)).toLowerCase().includes(t))))
     .filter(i => avail === "all" ? true : avail === "available" ? i.quantity > 0 : i.quantity === 0)
+    .filter(i => !ageSel || pieceAge(i) >= (ageSel === "old" ? OLD_DAYS : SLOW_DAYS))
     .filter(i => selHas(typeSel, i.jewelleryType) && selHas(metalSel, metalFamily(i.metal) || NONE)
       && selHas(karatSel, (i.productKarats ?? "").trim() || NONE) && selHas(stoneSel, stoneOf(i))
       && (lo == null || !(lo > 0) || i.price >= lo) && (hi == null || !(hi > 0) || i.price <= hi))
@@ -158,7 +162,7 @@ export function ReadyStockPage() {
     .sort((a, b) => officeRank(db.settings, officeOf(a)) - officeRank(db.settings, officeOf(b))
       || officeOf(a).localeCompare(officeOf(b))
       || +new Date(b.createdAt) - +new Date(a.createdAt));
-  const { paged, page, setPage, totalPages, total, start, end } = usePagination(items, PAGE_SIZE, "page", JSON.stringify([q, office, avail, typeSel, metalSel, karatSel, stoneSel, priceMin, priceMax, coSel]));
+  const { paged, page, setPage, totalPages, total, start, end } = usePagination(items, PAGE_SIZE, "page", JSON.stringify([q, office, avail, typeSel, metalSel, karatSel, stoneSel, priceMin, priceMax, coSel, ageSel]));
 
   // What the office (or all of them) holds: pieces in stock, and what they are worth.
   const scope = shelf.filter(inOffice);
@@ -302,6 +306,9 @@ export function ReadyStockPage() {
         cell: (i: ReadyStockItem) => costOf(i) != null ? <CellAmount tone={i.price - costOf(i)! >= 0 ? "in" : "out"}>{i.price - costOf(i)! >= 0 ? "+" : "−"}{fmtMoney(Math.abs(i.price - costOf(i)!))}</CellAmount> : <span className="text-muted-foreground/50">—</span> },
     ] : []),
     { key: "added", header: "Added", kind: "date", hidden: true, sortValue: i => i.createdAt, cell: i => <CellDate>{fmtDate(i.createdAt)}</CellDate> },
+    // How long it has sat (lib/stockAge.ts) — slow-moving pieces stand out.
+    ...(canManage ? [{ key: "age", header: "On the shelf", align: "right" as const, kind: "number" as const, sortValue: (i: ReadyStockItem) => pieceAge(i),
+      cell: (i: ReadyStockItem) => (i.quantity > 0 ? <span className="whitespace-nowrap tabular-nums">{pieceAge(i)} days<AgeTag days={pieceAge(i)} /></span> : <span className="text-muted-foreground">—</span>) }] : []),
     // The business's own fields — a column each, shown from View.
     ...customColumns<ReadyStockItem>(cfDefs, cfOf),
   ];
@@ -393,10 +400,13 @@ export function ReadyStockPage() {
     ...pickFilter("Karat", "All karats", karatSel, setKaratSel, i => (i.productKarats ?? "").trim() || NONE, v => (v === NONE ? "Not given" : v)),
     ...pickFilter("Stones", "All stones", stoneSel, setStoneSel, stoneOf, stoneLabel),
     { kind: "range", label: "Price", prefix: "$", min: priceMin, max: priceMax, onChange: (a: string, b: string) => { setPriceMin(a); setPriceMax(b); setPage(1); } },
+    // How long it has sat — slow-moving stock to push, mark down or melt.
+    ...(canManage ? [{ kind: "select" as const, label: "On the shelf", value: ageSel, onChange: (v: string) => { setAgeSel((v || "") as "" | "slow" | "old"); setPage(1); },
+      allLabel: "Any time", options: [{ value: "slow", label: `Slow — ${SLOW_DAYS}+ days` }, { value: "old", label: `Old — ${OLD_DAYS}+ days` }] }] : []),
   ];
   const clearFilters = () => {
     setCoSel("all"); setAvail("all"); setTypeSel("all"); setMetalSel("all"); setKaratSel("all"); setStoneSel("all");
-    setPriceMin(""); setPriceMax(""); setPage(1);
+    setPriceMin(""); setPriceMax(""); setAgeSel(""); setPage(1);
   };
   const onSearch = (v: string) => { setQ(v); setPage(1); };
   const searchHint = "Search name or SKU — SKU-1, SKU-2";
@@ -597,7 +607,7 @@ export function ReadyStockPage() {
                   </span>
                 </p>
               )}
-              <p className="text-[10px] text-muted-foreground mt-1">Added {fmtDate(item.createdAt)}</p>
+              <p className="text-[10px] text-muted-foreground mt-1">Added {fmtDate(item.createdAt)}{canManage && <AgeTag days={pieceAge(item)} />}</p>
             </div>
           </div>
           </Fragment>
@@ -663,4 +673,13 @@ export function ReadyStockPage() {
       </Dialog>
     </div>
   );
+}
+
+
+/** "Slow · 120 days" / "Old · 210 days" — how long a piece has sat (lib/stockAge.ts); nothing while fresh. */
+function AgeTag({ days }: { days: number }) {
+  const band = ageBand(days);
+  if (band === "fresh") return null;
+  return <span className={`ml-1.5 align-middle text-[10px] font-semibold rounded-full px-1.5 py-0.5 ${band === "old" ? "bg-destructive/10 text-destructive" : "bg-amber-500/15 text-amber-800"}`}
+    title={`On the shelf ${days} days`}>{band === "old" ? "Old" : "Slow"} · {days} days</span>;
 }

@@ -1,9 +1,10 @@
+import { priceOf } from "@/lib/priceList";
 import { GOLD_KARATS } from "@/lib/pure/basics";
 import { AddNewItem, useAddNew } from "@/components/create/QuickCreate";
 import { keptForOrder } from "@/lib/orderStock";
 import { StatStrip } from "@/components/TableToolbar";
 import { useCan, useHas } from "@/hooks/useCan";
-import { useState, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { useAuth } from "@/lib/auth";
 import { StockActivityLedger, type LedgerTotals } from "@/components/StockActivityLedger";
 import { LotPicker } from "@/components/LotFields";
@@ -364,6 +365,13 @@ function SellDiamond({ open, onOpenChange }: PanelProps) {
   const inStockPackets = (db.diamondPackets ?? []).filter(p => p.status === "in_stock" && !keptForOrder(p) && companyOf(p) === companyId).sort((a, b) => (a.stockNumber || "").localeCompare(b.stockNumber || ""));
   const selectedPacket = inStockPackets.find(p => p.id === packetId);
   const looseInStock = deriveStockBalances(db.stockMovements, "diamond", companyId)[shape] ?? 0;
+  // The price list (lib/priceList.ts): a priced lot or stone starts at its asking price — changed here freely.
+  const listed = kind === "certified" ? (packetId ? priceOf(db, "packet", packetId) : undefined) : (shape ? priceOf(db, "lot", shape) : undefined);
+  useEffect(() => {
+    if (!listed || rate.trim() !== "") return;
+    setRate(String(listed.rate)); setCurrency(listed.currency);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [listed?.rate, listed?.currency, kind, shape, packetId]);
 
   const effectiveCarat = kind === "certified" ? (selectedPacket?.carat ?? 0) : (Number(carat) || 0);
   const baseAmount = effectiveCarat * (Number(rate) || 0);
@@ -506,7 +514,7 @@ function SellDiamond({ open, onOpenChange }: PanelProps) {
                 </Select>
               )}</Field>
             )}
-            <Field label={`Rate / ct (${currency})`}>{id => (
+            <Field label={`Rate / ct (${currency})`} hint={listed ? `List price ${fmtCcy(listed.rate, listed.currency)}/ct` : undefined}>{id => (
               <UnitInput id={id} min={0} unit={`${ccySymbol(currency)}/ct`} value={rate} onChange={e => setRate(e.target.value)} />
             )}</Field>
             <Field label="Currency">{id => (

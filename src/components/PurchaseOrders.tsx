@@ -8,7 +8,7 @@ import {
 import { useDb } from "@/hooks/useDb";
 import { useHas } from "@/hooks/useCan";
 import { useAuth } from "@/lib/auth";
-import { ensureCollections, fmtDate, stampFor, todayLocal, type PurchaseCurrency, type PurchaseOrder } from "@/lib/db";
+import { ensureCollections, fmtDate, stampFor, todayLocal, type MemoLine, type PurchaseCurrency, type PurchaseOrder } from "@/lib/db";
 import { fmtCcy } from "@/lib/currency";
 import {
   PO_STATE_LABEL, cancelPo, closePoShort, createPo, deletePo, downloadPoPdf, lineOpenQty, lineReceived, liveReceipts,
@@ -46,8 +46,12 @@ export function PoBadge({ po }: { po: PurchaseOrder }) {
 }
 
 /** New purchase order, or one changed while nothing has come. */
-export function PoSheet({ open, onOpenChange, po, supplierId: fixedSupplier }: {
+export function PoSheet({ open, onOpenChange, po, supplierId: fixedSupplier, initialLines, companyId: fixedCo }: {
   open: boolean; onOpenChange: (v: boolean) => void; po?: PurchaseOrder; supplierId?: string;
+  /** A new PO's lines to start from — Order more on a low line of stock (lib/reorder.ts). */
+  initialLines?: MemoLine[];
+  /** A new PO's company to start on — the stock it is for. */
+  companyId?: string;
 }) {
   const db = useDb();
   const { user } = useAuth();
@@ -63,12 +67,12 @@ export function PoSheet({ open, onOpenChange, po, supplierId: fixedSupplier }: {
   useEffect(() => {
     if (!open) return;
     setSupplierId(po?.supplierId ?? fixedSupplier ?? "");
-    setCompanyId(po?.companyId ?? defaultCo);
+    setCompanyId(po?.companyId ?? (fixedCo && fixedCo !== "all" ? fixedCo : defaultCo));
     setDate(po ? po.at.slice(0, 10) : todayLocal());
     setExpected(po?.expectedAt ? po.expectedAt.slice(0, 10) : "");
     setCurrency(po?.currency ?? "INR");
     setNotes(po?.notes ?? "");
-    goods.setLines(po ? po.lines.map(draftOf) : [newIn("diamond")]);
+    goods.setLines(po ? po.lines.map(draftOf) : initialLines?.length ? initialLines.map(draftOf) : [newIn("diamond")]);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, po?.id, fixedSupplier]);
   const suppliers = db.suppliers.filter(s => s.active !== false || s.id === supplierId).sort((a, b) => a.name.localeCompare(b.name));
