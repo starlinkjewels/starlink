@@ -1,6 +1,9 @@
 import { BuyMaterialForm } from "@/components/BuyMaterialForm";
 import { CustomFieldsView } from "@/components/CustomFields";
-import { Undo2, Printer } from "lucide-react";
+import { Undo2, Printer, ClipboardList, Truck } from "lucide-react";
+import { PoSheet, PurchaseOrdersPanel } from "@/components/PurchaseOrders";
+import { LandedCostSheet } from "@/components/LandedCostSheet";
+import { landedExtraInr, landedKindLabel, takesLanded } from "@/lib/landedCost";
 import { PurchaseReturnSheet, printDebitNote } from "@/components/PurchaseReturnSheet";
 import { PartyMemos } from "@/components/MemoSheets";
 import { brokerSuppliers } from "@/lib/brokers";
@@ -228,6 +231,10 @@ function SupplierHistoryPageBody() {
   // ── Receive money FROM the supplier (refund / return credit) ──
   const [showReceiveForm, setShowReceiveForm] = useState(false);
   const [showSell, setShowSell] = useState(false);
+  // A purchase's landed cost (components/LandedCostSheet): which purchase's bill is open.
+  const [landedFor, setLandedFor] = useState<string | null>(null);
+  // Purchase orders to this supplier (components/PurchaseOrders): a new one, or their list.
+  const [poOpen, setPoOpen] = useState<"new" | "list" | null>(null);
   // Goods back to them on a debit note (lib/purchaseReturns.ts) — "" = choose the lines; an id = that bill line.
   const [returning, setReturning] = useState<string | null>(null);
   // Gold taken from them on loan (lib/supplierGold.ts) — its forms open from the ⋯.
@@ -330,6 +337,9 @@ function SupplierHistoryPageBody() {
       { label: "Edit", icon: Pencil, onSelect: () => openEditPurchase(p), disabled: !mayPurchase || !edit.ok,
         // Open, but only the rate: say so before the panel does.
         hint: !mayPurchase ? ADMIN_ONLY : !edit.ok ? edit.reason : !scope.quantity ? scope.reason : undefined },
+      // Freight, insurance, duty, lab fees on its bill — into the goods' cost (components/LandedCostSheet).
+      { label: "Landed cost", icon: Truck, onSelect: () => setLandedFor(p.id), show: takesLanded(p) && showCosts,
+        hint: landedExtraInr(p) > 0 ? `${fmtMoneyInr(landedExtraInr(p))} on this line — freight, duty, fees` : mayPurchase ? "Freight, insurance, duty, lab fees — into the cost" : "See what it cost to get here" },
       { label: "Return goods", icon: Undo2, onSelect: () => setReturning(p.id), show: p.purpose === "stock" && !p.fromGoldLoan,
         disabled: !mayPurchase, hint: !mayPurchase ? ADMIN_ONLY : "Back to them on a debit note — out of stock, off what we owe" },
       { label: voidingId === p.id ? "Voiding…" : "Void", icon: Trash2, danger: true,
@@ -757,6 +767,8 @@ function SupplierHistoryPageBody() {
       { label: "Description", value: purchaseDesc(p) },
       showCosts && { label: "Rate", value: purchaseRate(p) },
       !!p.discountPct && { label: p.discountPct > 0 ? "Discount" : "Added on", value: `${Math.abs(p.discountPct)}%` },
+      // Freight, duty, fees spread onto this line (lib/landedCost.ts) — in its cost, not the supplier's bill.
+      showCosts && landedExtraInr(p) > 0 && { label: "Landed cost", value: `${fmtMoneyInr(landedExtraInr(p))} — ${(p.landedCosts ?? []).map(c => landedKindLabel(c.kind)).join(", ")}` },
       !!p.roundOffInr && { label: "Rounded off", value: `${p.roundOffInr > 0 ? "+" : "−"}${fmtMoneyInr(Math.abs(p.roundOffInr))}` },
       p.gstBill !== undefined && { label: "GST", value: p.gstBill ? `${pctText(p.gstPct)}% · ${fmtMoneyInr(purchaseGstInr(p))} on ${fmtMoneyInr(preGstInr(p))}` : "No bill — no GST" },
       !!p.invoiceDate && { label: "Bill date", value: fmtDate(p.invoiceDate) },
@@ -832,6 +844,9 @@ function SupplierHistoryPageBody() {
         menu={[
           // Set once, when moving from an old system — so out of sight until then.
           { label: "Opening balance", icon: BookOpen, hint: "Not set — what was owed before the app", onSelect: openOpening, show: mayEdit && !openingSet },
+          // What we ask them for before the goods come — received into a bill when they do.
+          { label: "New purchase order", icon: ClipboardList, hint: "Ask them for goods — send it on WhatsApp", onSelect: () => setPoOpen("new"), show: mayPurchase },
+          { label: "Purchase orders", icon: ClipboardList, hint: "What we asked them for, what came, what is late", onSelect: () => setPoOpen("list") },
           { label: "Sell to them", icon: Tag, hint: "Diamonds, gold, a piece — off what we owe", onSelect: () => setShowSell(true), show: maySell },
           { label: "Return goods", icon: Undo2, hint: "Back to them on a debit note, against the bill", onSelect: () => setReturning(""), show: mayPurchase },
           // Gold borrowed from them: into our stock, owed back in gold (or turned into a bill).
@@ -1001,6 +1016,15 @@ function SupplierHistoryPageBody() {
       <MoneyEntryEditor entry={editingEntry} onClose={() => setEditingEntry(null)} mayDelete={can("payments", "delete")} />
       <SupplierEditDialog supplier={editingSupplier} onClose={() => setEditingSupplier(null)} />
       <SellToSupplierSheet open={showSell} onOpenChange={setShowSell} supplierId={id!} />
+      {landedFor && <LandedCostSheet purchaseId={landedFor} onClose={() => setLandedFor(null)} mayChange={mayPurchase}
+        describe={pid => { const x = purchases.find(q => q.id === pid); return x ? `${purchaseTitle(x)} — ${purchaseDesc(x)}` : "—"; }} />}
+      {poOpen === "new" && <PoSheet open onOpenChange={v => { if (!v) setPoOpen(null); }} supplierId={id!} />}
+      {poOpen === "list" && (
+        <ActionSheet open onOpenChange={o => { if (!o) setPoOpen(null); }} size="xl" icon={ClipboardList} title={`Purchase orders — ${supplier.name}`}
+          description="What we asked them for, what came, what is still awaited">
+          <PurchaseOrdersPanel supplierId={id!} />
+        </ActionSheet>
+      )}
       {returning != null && <PurchaseReturnSheet supplierId={id!} purchaseId={returning || undefined} onClose={() => setReturning(null)} />}
 
       {/* The three money actions slide in from the right, so the ledger and the

@@ -35,8 +35,9 @@ export function brokerageWePay(p: Pick<Purchase, "brokerId" | "brokerageInr" | "
 }
 
 /** What the material cost us: the supplier's bill plus the brokerage we pay on it. */
-export function landedInr(p: Pick<Purchase, "totalInr" | "brokerId" | "brokerageInr" | "brokeragePaidBy">): number {
-  return (p.totalInr || 0) + brokerageWePay(p);
+export function landedInr(p: Pick<Purchase, "totalInr" | "brokerId" | "brokerageInr" | "brokeragePaidBy" | "landedCosts">): number {
+  // + freight, insurance, duty, lab fees spread onto this line (lib/landedCost.ts).
+  return (p.totalInr || 0) + brokerageWePay(p) + (p.landedCosts ?? []).reduce((t, c) => t + (c.inr || 0), 0);
 }
 
 /** Brokerage on a sale to a supplier that we pay (0 when none, or the supplier pays). */

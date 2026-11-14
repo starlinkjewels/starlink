@@ -153,9 +153,11 @@ export function App() {
         try { seen = localStorage.getItem("memo-overdue-checked") === day; } catch { /* private window */ }
         if (!seen) {
           try {
-            await m.ensureCollections(["memos"]);
-            const [{ alertOverdueMemos }, { adminIds, notifyUsers }] = await Promise.all([import("./lib/memos"), import("./lib/notify")]);
+            await m.ensureCollections(["memos", "purchaseOrders", "purchases"]);
+            const [{ alertOverdueMemos }, { alertOverduePos }, { adminIds, notifyUsers }] = await Promise.all([import("./lib/memos"), import("./lib/purchaseOrders"), import("./lib/notify")]);
             m.updateDb(d => { alertOverdueMemos(d, (ids, title, body) => notifyUsers(d, [...ids, ...adminIds(d)], { title, body, type: "alert" })); });
+            // Purchase orders past their expected day — the same, once per expected day (lib/purchaseOrders.ts).
+            m.updateDb(d => { alertOverduePos(d, (ids, title, body) => notifyUsers(d, [...ids, ...adminIds(d)], { title, body, type: "alert" })); });
             try { localStorage.setItem("memo-overdue-checked", day); } catch { /* private window */ }
           } catch (e) { console.warn("[app] memo overdue check skipped:", e); }
         }

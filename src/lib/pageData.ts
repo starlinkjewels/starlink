@@ -21,7 +21,7 @@
 export const LAZY_COLS = [
   "materialIssuances", "purchases", "lockerTransactions", "stockMovements",
   "supplierReceipts", "supplierPayments", "factoryPayments",
-  "clientReceipts", "diamondPackets", "diamondSales", "supplierSales", "memos",
+  "clientReceipts", "diamondPackets", "diamondSales", "supplierSales", "memos", "purchaseOrders",
   // The catalog and product photos — only their two pages use them.
   "catalogFolders", "catalogFavorites", "productPhotoFolders", "productPhotoItems", "shares",
 ] as const;
@@ -68,7 +68,8 @@ const PAGE: Record<string, readonly LazyCol[]> = {
   "/clients": [],
   // + materialIssuances: the client's own material card reads what went to factories.
   "/clients/:id": ["clientReceipts", "lockerTransactions", "diamondSales", "diamondPackets", "materialIssuances", "memos"],
-  "/suppliers/:id": ["purchases", "materialIssuances", "diamondPackets", "stockMovements", "lockerTransactions", "supplierReceipts", "supplierPayments", "supplierSales", "memos"],
+  // + purchaseOrders: the supplier's purchase orders, and Receive fills a bill from one.
+  "/suppliers/:id": ["purchases", "materialIssuances", "diamondPackets", "stockMovements", "lockerTransactions", "supplierReceipts", "supplierPayments", "supplierSales", "memos", "purchaseOrders"],
   "/factories/:id": ["purchases", "materialIssuances", "diamondPackets", "stockMovements", "lockerTransactions", "factoryPayments"],
   // + materialIssuances: its Opening stock form (Buy & Assign's) records opening gold at a factory.
   "/stock": ["diamondPackets", "stockMovements", "materialIssuances", "memos"],

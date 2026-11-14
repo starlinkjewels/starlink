@@ -65,6 +65,10 @@ export function canVoidPurchase(db: DB, p: Purchase): { ok: boolean; reason?: st
   if (purchasePaid(p) > 0) {
     return { ok: false, reason: "A payment has already been made against this purchase. Cancel that payment in Payments → Supplier payments first, then remove it." };
   }
+  // Freight, duty, a lab fee on it (lib/landedCost.ts) — taken off first, so no account entry is left naming a bill that is gone.
+  if ((p.landedCosts ?? []).length) {
+    return { ok: false, reason: "It carries a landed cost (freight, duty, a fee…). Take that off first — the purchase's ⋯ Landed cost." };
+  }
   const issuances = (db.materialIssuances ?? []).filter(i => i.source === "purchase" && i.sourcePurchaseId === p.id);
   for (const i of issuances) {
     if (issuancePaid(i) > 0) {

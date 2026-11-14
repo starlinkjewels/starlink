@@ -9,7 +9,7 @@ import { Link } from "react-router-dom";
 import { useHas } from "@/hooks/useCan";
 import { useAuth } from "@/lib/auth";
 import { useDb } from "@/hooks/useDb";
-import { todayLocal, stampFor, fmtDate, type Memo, type PurchaseCurrency, type SupplierSaleKind } from "@/lib/db";
+import { todayLocal, stampFor, fmtDate, type Memo, type MemoLine, type PurchaseCurrency, type SupplierSaleKind } from "@/lib/db";
 import { fmtCcy } from "@/lib/currency";
 import { lotLabel, lotKey } from "@/lib/diamondLots";
 import { materialName, materialUnit, materialDef } from "@/lib/materials";
@@ -31,13 +31,13 @@ const r2 = (n: number) => Math.round(n * 100) / 100;
 const num = (s: string) => (s.trim() === "" ? 0 : Number(s) || 0);
 const SYM: Record<string, string> = { INR: "₹", USD: "$" };
 
-interface InDraft {
+export interface InDraft {
   key: string; kind: SupplierSaleKind;
   shape: string; type: string; variety: string; size: string; mm: string; color: string; clarity: string;
   certNo: string; lab: string; purity: string; materialId: string; grade: string; name: string;
   qty: string; pcs: string; rate: string; amount: string;
 }
-const newIn = (kind: SupplierSaleKind): InDraft => ({
+export const newIn = (kind: SupplierSaleKind): InDraft => ({
   key: Math.random().toString(36).slice(2), kind, shape: "Round", type: "", variety: "", size: "", mm: "", color: "", clarity: "",
   certNo: "", lab: "", purity: "22K", materialId: "", grade: "", name: "", qty: kind === "piece" ? "1" : "", pcs: "", rate: "", amount: "",
 });
@@ -51,29 +51,26 @@ const IN_KINDS: { kind: SupplierSaleKind; label: string; icon: LucideIcon }[] = 
 // The one karat list (lib/pure/basics.ts GOLD_KARATS) — every gold dropdown offers the same.
 const GOLD_PURITIES = GOLD_KARATS;
 
-/** Take a dealer's (or a broker's) goods in on memo. Our stock is untouched — the slip is the record. */
-export function MemoInSheet({ open, onOpenChange, party: fixed }: { open: boolean; onOpenChange: (v: boolean) => void; party?: MemoParty }) {
+/** A line as written (a memo-in slip's, a purchase order's) back as a draft to change. */
+export function draftOf(l: MemoLine): InDraft {
+  const s = l.spec ?? {};
+  return {
+    ...newIn(l.kind), shape: s.shape ?? "Round", type: s.type ?? "", variety: s.variety ?? "", size: s.size ?? "", mm: s.mm ?? "",
+    color: s.color ?? "", clarity: s.clarity ?? "", certNo: s.certNo ?? "", lab: s.lab ?? "", purity: s.purity ?? l.bucket ?? "22K",
+    materialId: s.materialId ?? (l.kind === "material" ? l.material : ""), grade: s.grade ?? "", name: s.pieceName ?? (l.kind === "piece" ? l.label : ""),
+    qty: String(l.qty), pcs: l.pieces ? String(l.pieces) : "", rate: l.rate != null ? String(l.rate) : "",
+    amount: l.rate != null && Math.abs(l.rate * l.qty - l.amount) < 0.01 ? "" : String(l.amount),
+  };
+}
+
+/**
+ * The goods of a slip, line by line — a loose lot, a certified stone, gold, a piece, gems or another
+ * material, with quantity, rate and amount. Taking goods in on memo and a purchase order use the same
+ * lines (each built as a memo line), so keeping or receiving them fills the purchase bill in.
+ */
+export function useInLines(currency: PurchaseCurrency, title = "The goods") {
   const db = useDb();
-  const { user } = useAuth();
-  const multiCo = useMultiCo();
-  const defaultCo = useDefaultCompany();
-  const [companyId, setCompanyId] = useState(defaultCo);
-  const [kind, setKind] = useState<"supplier" | "broker">(fixed?.kind === "broker" ? "broker" : "supplier");
-  const [partyId, setPartyId] = useState(fixed?.id ?? "");
-  const [date, setDate] = useState(todayLocal());
-  const [due, setDue] = useState("");
-  const [currency, setCurrency] = useState<PurchaseCurrency>("INR");
   const [lines, setLines] = useState<InDraft[]>([newIn("diamond")]);
-  const [notes, setNotes] = useState("");
-  useEffect(() => {
-    if (!open) return;
-    setKind(fixed?.kind === "broker" ? "broker" : "supplier"); setPartyId(fixed?.id ?? ""); setDate(todayLocal()); setDue("");
-    setLines([newIn("diamond")]); setNotes(""); setCurrency("INR"); setCompanyId(defaultCo);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, fixed?.kind, fixed?.id]);
-  const parties = (kind === "supplier"
-    ? db.suppliers.filter(s => s.active !== false || s.id === partyId).map(s => ({ id: s.id, name: s.name }))
-    : (db.brokers ?? []).map(b => ({ id: b.id, name: b.name }))).sort((a, b) => a.name.localeCompare(b.name));
   const sym = SYM[currency] ?? "";
   const set = (key: string, patch: Partial<InDraft>) => setLines(ls => ls.map(l => (l.key === key ? { ...l, ...patch } : l)));
   const isGem = (d: InDraft) => d.kind === "material" && materialDef(db.settings, d.materialId)?.kind === "stone";
@@ -113,57 +110,8 @@ export function MemoInSheet({ open, onOpenChange, party: fixed }: { open: boolea
   const built = lines.map(toLine);
   const total = r2(built.reduce((t, l) => t + (l?.amount ?? 0), 0));
 
-  const save = async () => {
-    if (built.some(l => !l)) { toast.error("Finish every line — or remove the empty one"); return; }
-    const input: MemoInInput = {
-      companyId: companyId === "main" ? undefined : companyId, party: { kind, id: partyId }, at: stampFor(date),
-      ...(due ? { dueAt: stampFor(due) } : {}), currency, lines: built as MemoInInput["lines"], notes,
-    };
-    const problem = memoInProblem(db, input);
-    if (problem) { toast.error(problem); return; }
-    try {
-      const memo = await recordMemoIn(db, input, user!);
-      toast.success(`Memo ${memo.no} — ${memoPartyName(db, memo.party)}'s goods are with us`);
-      onOpenChange(false);
-    } catch (e) { toast.error(e instanceof Error ? e.message : "The memo wasn't recorded"); }
-  };
-
-  return (
-    <ActionSheet open={open} onOpenChange={onOpenChange} size="lg" icon={FileInput} title="Take goods in on memo"
-      description="A dealer's goods with us on approval — not ours, and not in our stock, until we keep them."
-      footer={(
-        <div className="space-y-3">
-          <Stats>
-            <Stat big label="Memo value" value={total > 0 ? fmtCcy(total, currency) : "—"} sub="what we would owe if we kept it all — nothing is owed yet" />
-            <Stat label="Lines" value={String(built.filter(Boolean).length)} />
-          </Stats>
-          <PanelActions onCancel={() => onOpenChange(false)}>
-            <AsyncButton onClick={save} className="btn-hero rounded-xl h-11 flex-1 sm:flex-none sm:min-w-48">Take in on memo</AsyncButton>
-          </PanelActions>
-        </div>
-      )}>
-      <div className="@container space-y-5">
-        <Group>
-          <div className="grid grid-cols-2 gap-3">
-            {!fixed && <div className="col-span-2"><Segmented value={kind} onChange={k => { setKind(k); setPartyId(""); }} options={[["supplier", "Dealer"], ["broker", "Broker"]] as const} /></div>}
-            <Field label={kind === "supplier" ? "Dealer" : "Broker"} className="col-span-2 @md:col-span-1">{id => (
-              <Select value={partyId} onValueChange={setPartyId} disabled={!!fixed}>
-                <SelectTrigger id={id} className="h-10 rounded-xl" aria-label="Whose goods"><SelectValue placeholder={parties.length ? "Choose" : "None yet"} /></SelectTrigger>
-                <SelectContent>{parties.map(p => <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>)}</SelectContent>
-              </Select>
-            )}</Field>
-            <Field label="Prices in" className="col-span-2 @md:col-span-1">{id => (
-              <Select value={currency} onValueChange={v => setCurrency(v as PurchaseCurrency)}>
-                <SelectTrigger id={id} className="h-10 rounded-xl" aria-label="Prices in"><SelectValue /></SelectTrigger>
-                <SelectContent><SelectItem value="INR">Rupees (₹)</SelectItem><SelectItem value="USD">Dollars ($)</SelectItem></SelectContent>
-              </Select>
-            )}</Field>
-            <Field label="Date in">{id => <Input id={id} type="date" min={openMin()} value={date} onChange={e => setDate(e.target.value)} className="rounded-xl h-10" />}</Field>
-            <Field label="Due back" hint="Optional">{id => <Input id={id} type="date" min={date} value={due} onChange={e => setDue(e.target.value)} className="rounded-xl h-10" aria-label="Due back" />}</Field>
-            {multiCo && <div className="col-span-2"><CompanyPicker value={companyId} onChange={setCompanyId} label="Company — who holds them" /></div>}
-          </div>
-        </Group>
-        <Group title="The goods">
+  const editor = (
+        <Group title={title}>
           <div className="space-y-3">
             {lines.map((d, i) => {
               const k = IN_KINDS.find(x => x.kind === d.kind)!;
@@ -227,6 +175,85 @@ export function MemoInSheet({ open, onOpenChange, party: fixed }: { open: boolea
             </div>
           </div>
         </Group>
+  );
+  return { lines, setLines, built, total, editor };
+}
+
+/** Take a dealer's (or a broker's) goods in on memo. Our stock is untouched — the slip is the record. */
+export function MemoInSheet({ open, onOpenChange, party: fixed }: { open: boolean; onOpenChange: (v: boolean) => void; party?: MemoParty }) {
+  const db = useDb();
+  const { user } = useAuth();
+  const multiCo = useMultiCo();
+  const defaultCo = useDefaultCompany();
+  const [companyId, setCompanyId] = useState(defaultCo);
+  const [kind, setKind] = useState<"supplier" | "broker">(fixed?.kind === "broker" ? "broker" : "supplier");
+  const [partyId, setPartyId] = useState(fixed?.id ?? "");
+  const [date, setDate] = useState(todayLocal());
+  const [due, setDue] = useState("");
+  const [currency, setCurrency] = useState<PurchaseCurrency>("INR");
+  const goods = useInLines(currency);
+  const { built, total } = goods;
+  const [notes, setNotes] = useState("");
+  useEffect(() => {
+    if (!open) return;
+    setKind(fixed?.kind === "broker" ? "broker" : "supplier"); setPartyId(fixed?.id ?? ""); setDate(todayLocal()); setDue("");
+    goods.setLines([newIn("diamond")]); setNotes(""); setCurrency("INR"); setCompanyId(defaultCo);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, fixed?.kind, fixed?.id]);
+  const parties = (kind === "supplier"
+    ? db.suppliers.filter(s => s.active !== false || s.id === partyId).map(s => ({ id: s.id, name: s.name }))
+    : (db.brokers ?? []).map(b => ({ id: b.id, name: b.name }))).sort((a, b) => a.name.localeCompare(b.name));
+  const save = async () => {
+    if (built.some(l => !l)) { toast.error("Finish every line — or remove the empty one"); return; }
+    const input: MemoInInput = {
+      companyId: companyId === "main" ? undefined : companyId, party: { kind, id: partyId }, at: stampFor(date),
+      ...(due ? { dueAt: stampFor(due) } : {}), currency, lines: built as MemoInInput["lines"], notes,
+    };
+    const problem = memoInProblem(db, input);
+    if (problem) { toast.error(problem); return; }
+    try {
+      const memo = await recordMemoIn(db, input, user!);
+      toast.success(`Memo ${memo.no} — ${memoPartyName(db, memo.party)}'s goods are with us`);
+      onOpenChange(false);
+    } catch (e) { toast.error(e instanceof Error ? e.message : "The memo wasn't recorded"); }
+  };
+
+  return (
+    <ActionSheet open={open} onOpenChange={onOpenChange} size="lg" icon={FileInput} title="Take goods in on memo"
+      description="A dealer's goods with us on approval — not ours, and not in our stock, until we keep them."
+      footer={(
+        <div className="space-y-3">
+          <Stats>
+            <Stat big label="Memo value" value={total > 0 ? fmtCcy(total, currency) : "—"} sub="what we would owe if we kept it all — nothing is owed yet" />
+            <Stat label="Lines" value={String(built.filter(Boolean).length)} />
+          </Stats>
+          <PanelActions onCancel={() => onOpenChange(false)}>
+            <AsyncButton onClick={save} className="btn-hero rounded-xl h-11 flex-1 sm:flex-none sm:min-w-48">Take in on memo</AsyncButton>
+          </PanelActions>
+        </div>
+      )}>
+      <div className="@container space-y-5">
+        <Group>
+          <div className="grid grid-cols-2 gap-3">
+            {!fixed && <div className="col-span-2"><Segmented value={kind} onChange={k => { setKind(k); setPartyId(""); }} options={[["supplier", "Dealer"], ["broker", "Broker"]] as const} /></div>}
+            <Field label={kind === "supplier" ? "Dealer" : "Broker"} className="col-span-2 @md:col-span-1">{id => (
+              <Select value={partyId} onValueChange={setPartyId} disabled={!!fixed}>
+                <SelectTrigger id={id} className="h-10 rounded-xl" aria-label="Whose goods"><SelectValue placeholder={parties.length ? "Choose" : "None yet"} /></SelectTrigger>
+                <SelectContent>{parties.map(p => <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>)}</SelectContent>
+              </Select>
+            )}</Field>
+            <Field label="Prices in" className="col-span-2 @md:col-span-1">{id => (
+              <Select value={currency} onValueChange={v => setCurrency(v as PurchaseCurrency)}>
+                <SelectTrigger id={id} className="h-10 rounded-xl" aria-label="Prices in"><SelectValue /></SelectTrigger>
+                <SelectContent><SelectItem value="INR">Rupees (₹)</SelectItem><SelectItem value="USD">Dollars ($)</SelectItem></SelectContent>
+              </Select>
+            )}</Field>
+            <Field label="Date in">{id => <Input id={id} type="date" min={openMin()} value={date} onChange={e => setDate(e.target.value)} className="rounded-xl h-10" />}</Field>
+            <Field label="Due back" hint="Optional">{id => <Input id={id} type="date" min={date} value={due} onChange={e => setDue(e.target.value)} className="rounded-xl h-10" aria-label="Due back" />}</Field>
+            {multiCo && <div className="col-span-2"><CompanyPicker value={companyId} onChange={setCompanyId} label="Company — who holds them" /></div>}
+          </div>
+        </Group>
+        {goods.editor}
         <Field label="Remark">{id => <Input id={id} value={notes} onChange={e => setNotes(e.target.value)} className="rounded-xl h-10" placeholder="Optional" />}</Field>
       </div>
     </ActionSheet>
@@ -236,7 +263,7 @@ export function MemoInSheet({ open, onOpenChange, party: fixed }: { open: boolea
 type Pick = { lineId: string; qty: number; pieces?: number };
 
 /** A memo-in slip's goods as the Buy form's lines — what "Keep" fills the bill with. */
-export function memoInBuyLines(memo: Memo, picks: Pick[]): MemoInBuy["lines"] {
+export function memoInBuyLines(memo: { lines: MemoLine[] }, picks: Pick[]): MemoInBuy["lines"] {
   return picks.map(p => {
     const l = memo.lines.find(x => x.id === p.lineId)!;
     const s = l.spec ?? {};

@@ -65,7 +65,7 @@ const COL_MODULE: Record<string, ModuleKey> = {
   suppliers: "suppliers", purchases: "suppliers", supplierReceipts: "suppliers", supplierPayments: "suppliers", brokers: "suppliers",
   factories: "factories", materialIssuances: "factories", factoryPayments: "factories",
   designers: "designers", cadJobs: "designers",
-  stockMovements: "stock", diamondPackets: "stock", diamondSales: "stock", supplierSales: "suppliers", memos: "stock", diamondBags: "stock", customValues: "settings",
+  stockMovements: "stock", diamondPackets: "stock", diamondSales: "stock", supplierSales: "suppliers", memos: "stock", purchaseOrders: "suppliers", diamondBags: "stock", customValues: "settings",
   readyStock: "readyStock", giftCards: "giftCards", clientReceipts: "payments",
   catalogFolders: "catalog", catalogItems: "catalog", shares: "catalog",
   productPhotoFolders: "productPhotos", productPhotoItems: "productPhotos",
@@ -78,7 +78,7 @@ const COL_NOUN: Record<string, string> = {
   suppliers: "supplier", purchases: "purchase", supplierReceipts: "money from supplier",
   supplierPayments: "supplier payment", brokers: "broker", factories: "factory", materialIssuances: "material issue",
   factoryPayments: "factory payment", designers: "designer", cadJobs: "design job", stockMovements: "stock movement", diamondPackets: "certified stone",
-  diamondSales: "diamond sale", supplierSales: "sale to a supplier", memos: "memo", diamondBags: "diamond bag", customValues: "custom fields", readyStock: "ready-stock item", giftCards: "gift card",
+  diamondSales: "diamond sale", supplierSales: "sale to a supplier", memos: "memo", purchaseOrders: "purchase order", diamondBags: "diamond bag", customValues: "custom fields", readyStock: "ready-stock item", giftCards: "gift card",
   clientReceipts: "receipt", catalogFolders: "catalog folder", catalogItems: "catalog item",
   shares: "share link", productPhotoFolders: "photo folder", productPhotoItems: "product photo",
   tasks: "task", meta: "settings", adminRecords: "admin figure",
@@ -89,7 +89,7 @@ const COL_NOUN: Record<string, string> = {
 const PRIORITY = [
   "orders", "clients", "users", "invoices", "clientReceipts", "purchases", "expenses",
   "suppliers", "brokers", "factories", "designers", "cadJobs", "readyStock", "diamondPackets", "materialIssuances", "giftCards",
-  "supplierPayments", "factoryPayments", "supplierReceipts", "diamondSales", "supplierSales", "memos", "lockers",
+  "supplierPayments", "factoryPayments", "supplierReceipts", "diamondSales", "supplierSales", "memos", "purchaseOrders", "lockers",
   "catalogFolders", "catalogItems", "productPhotoFolders", "productPhotoItems", "shares",
   "tasks", "meta", "adminRecords", "lockerTransactions", "diamondBags", "stockMovements",
 ];
@@ -140,6 +140,7 @@ export function docLabel(col: string, d: Record<string, unknown> | null | undefi
     case "diamondSales": return `${num(d.carat)}ct ${s(d.shape)}`;
     case "supplierSales": return d.returnOf ? `Debit note ${String((d.returnOf as { noteNo?: string }).noteNo ?? "")}` : `₹${num(d.totalInr)} sale`;
     case "memos": return `Memo ${String(d.no ?? "")}`;
+    case "purchaseOrders": return `Purchase order ${String(d.no ?? "")}`;
     case "diamondBags": return s(d.no) ? `${s(d.no)} · ${s(d.key)}` : s(d.key) || id;
     case "customValues": return `custom fields of a${/^[aeiou]/.test(s(d.target)) ? "n" : ""} ${s(d.target) === "readyStock" ? "Ready Stock piece" : s(d.target) === "bags" ? "stone lot" : s(d.target) === "packets" ? "certified stone" : s(d.target).replace(/s$/, "")}`;
     case "readyStock": return s(d.sku) ? `${s(d.sku)} ${s(d.name)}` : s(d.name) || id;

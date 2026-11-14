@@ -438,6 +438,9 @@ function unclaimedRow(db: DB, t: LockerTransaction): { gone: string } | { unlink
     case "expense":
       if (t.refId && !has(db.expenses, t.refId)) return { gone: "Its expense is no longer on file" };
       return { unlinked: "Not linked to an expense (older entry) — check Expenses before changing it" };
+    case "landedCost":
+      if (t.refId && !has(db.purchases, t.refId)) return { gone: "The purchase it was paid on is no longer on file" };
+      return { unlinked: "A landed cost on a purchase (freight, duty, a fee) — change or remove it on the supplier's page: the purchase's ⋯ Landed cost" };
     case "diamondSale":
       if (t.refId && !has(db.diamondSales, t.refId)) return { gone: "Its diamond sale is no longer on file" };
       return { unlinked: "Not linked to a diamond sale (older entry) — check Buy & Assign before changing it" };
@@ -503,6 +506,11 @@ function lockerEntries(db: DB): MoneyEntry[] {
       lockedWhere = RECORDED_IN.diamondSale;
       lockedLabel = "Cancel the sale in Buy & Assign";
       locked = "This is the money from a diamond sale. Cancelling the sale in Buy & Assign puts the stone back in stock and takes this out of the account together; changing it here would leave the two disagreeing.";
+    } else if (ref === "landedCost" && (db.purchases ?? []).some(p => p.id === t.refId)) {
+      // Freight, duty, a fee paid on a purchase (lib/landedCost.ts): it is in the goods' cost too.
+      lockedWhere = "the supplier's page";
+      lockedLabel = "Change it on the purchase's ⋯ Landed cost";
+      locked = "This is a landed cost paid on a purchase (freight, duty, a fee). Change or remove it on the supplier's page — the purchase's ⋯ Landed cost — so the goods' cost and this account move together; changing it here would leave the two disagreeing.";
     } else if (ref === "clientPayment" || where) {
       lockedWhere = where ?? RECORDED_IN.clientPayment;
       locked = `This is the account side of an entry recorded in ${lockedWhere}. Correcting it there moves both; correcting it here would leave the two disagreeing.`;
