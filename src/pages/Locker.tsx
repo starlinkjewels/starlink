@@ -12,7 +12,7 @@ import { LOCKER_DELETE_COLS, lockerDeleteBlock } from "@/lib/lockerGuards";
 import { CHECKING, STILL_LOADING, needsAccess, recordsReady } from "@/lib/actionHints";
 import { MoneyEntryEditor, confirmDeleteEntry, entryRowActions, oneLine } from "@/components/MoneyEntryEditor";
 import { ApplyToClientDialog, applyBlock } from "@/components/ApplyToClientDialog";
-import { MoreMenu, type MoreAction } from "@/components/MoreMenu";
+import { MoreMenu, useRightClickMenu, type MoreAction } from "@/components/MoreMenu";
 import { useAuth } from "@/lib/auth";
 import { lockerBalance } from "@/lib/manufacturing";
 import { ccy, ccySymbol, fmtCcy, fmtCcyNumber, fmtCcyPdf, rateOf, rateText, roundCcy, type CurrencyCode } from "@/lib/currency";
@@ -198,6 +198,8 @@ export function LockerPage() {
   };
 
   /** A card's ⋯ — what can be done to the account, each greyed with the reason when it can't. */
+  // Right-click on a card: its ⋯, where the mouse is (components/MoreMenu).
+  const rightClick = useRightClickMenu();
   const lockerActions = (l: Locker): MoreAction[] => {
     const mayEdit = can("locker", "edit"), mayDelete = can("locker", "delete");
     const block = lockerDeleteBlock(db, l.id);
@@ -427,6 +429,7 @@ export function LockerPage() {
 
   return (
     <div className="max-w-7xl mx-auto space-y-5">
+      {rightClick.menu}
       <PageHeader
         title="Locker"
         // Each money page's job, in one line, and where the others are.
@@ -450,6 +453,7 @@ export function LockerPage() {
               tabIndex={0}
               aria-pressed={isSelected}
               onClick={() => setSelectedId(l.id)}
+              onContextMenu={rightClick.bind(() => lockerActions(l), l.name)}
               onKeyDown={e => { if (e.key === "Enter" && e.target === e.currentTarget) setSelectedId(l.id); }}
               className={`card-luxe snap-start shrink-0 flex-1 min-w-[15rem] sm:min-w-0 px-4 py-3.5 text-left transition-all cursor-pointer relative ${isSelected ? "ring-2 ring-primary" : "hover:shadow-md"} ${off ? "opacity-70" : ""}`}
             >

@@ -31,6 +31,7 @@ import { ActionSheet } from "@/components/ActionSheet";
 import { SectionTitle } from "@/components/SectionTitle";
 import { StatStrip, type TableFilter } from "@/components/TableToolbar";
 import { MoreMenu, type MoreAction } from "@/components/MoreMenu";
+import { openWhatsApp, waUrl } from "@/lib/whatsapp";
 import { buildInvoiceBlocks, type InvoicePayment } from "@/components/ClientInvoiceLedger";
 import { ReceiptEditSheet, cancelReceiptFlow, loadReceipts, paymentLockReason } from "@/components/ReceiptEditSheet";
 import { cancelCreditNoteFlow, creditNoteCancelBlocker } from "@/components/creditNoteCancel";
@@ -166,6 +167,19 @@ export function InvoicesPage() {
     const dueAt = invoiceDueAt(inv, client, db.settings);
     const late = paid ? 0 : daysOverdue(dueAt, bal);
     return { orders, amount, adv, bal, gift, paid, dueAt, late };
+  };
+  // Sending it: a short note — the number, what it comes to, what is still due, from which
+  // company — for WhatsApp or the mail app (its window, its ⋯ and the right-click). Nothing is sent from here.
+  const invoiceSendText = (inv: Invoice) => {
+    const { amount, bal, dueAt, late } = invLive(inv);
+    const fromCo = companyById(db.settings, companyIdOfInvoice(inv)).name;
+    return [
+      `Invoice ${inv.number} from ${fromCo}`,
+      `Amount: ${fmtMoney(amount)}`,
+      bal > 0 ? `Balance due: ${fmtMoney(bal)}` : "Paid in full — thank you",
+      // Its due day (lib/paymentTerms.ts), while something is owed.
+      ...(bal > 0 && dueAt ? [late > 0 ? `Was due ${fmtDate(dueAt)} — ${late} day${late === 1 ? "" : "s"} overdue` : `Due by ${fmtDate(dueAt)}`] : []),
+    ].join("\n");
   };
 
   // Paid or Pending as the Status column reads it (the live figures). The
@@ -489,6 +503,10 @@ export function InvoicesPage() {
       { label: "View", icon: Eye, onSelect: () => openInvoice(inv.id), show: !opened },
       { label: "Edit", icon: Pencil, onSelect: () => {}, disabled: true, hint: NO_EDIT, show: isStaff },
       { label: "Print", icon: Printer, onSelect: () => printInv(inv), show: mayExport && !opened },
+      // The same short note as the invoice's own WhatsApp button (invoiceSendText), to the client's number.
+      { label: "Send on WhatsApp", icon: MessageCircle, show: isStaff,
+        hint: "The number, amount and what is still due — to the client",
+        onSelect: () => openWhatsApp(db.clients.find(c => c.id === inv.clientId)?.phone, invoiceSendText(inv)) },
       { label: "Delete", icon: Trash2, danger: true, onSelect: () => removeInvoice(inv), show: isStaff, disabled: !!delWhy,
         hint: oneLine(delWhy) ?? "Orders and payments stay" },
     ];
@@ -666,21 +684,11 @@ export function InvoicesPage() {
           {detailInv && (() => {
             const { orders, amount, adv, bal, gift, dueAt, late } = invLive(detailInv);
             const client = db.clients.find(c => c.id === detailInv.clientId);
-            // Sending it: a short note — the number, what it comes to, what is
-            // still due, from which company — ready in WhatsApp or the mail app.
-            // Plain links; nothing is sent from here.
+            // Sending it (invoiceSendText): plain links, nothing is sent from here.
             const fromCo = companyById(db.settings, companyIdOfInvoice(detailInv)).name;
-            const sendText = [
-              `Invoice ${detailInv.number} from ${fromCo}`,
-              `Amount: ${fmtMoney(amount)}`,
-              bal > 0 ? `Balance due: ${fmtMoney(bal)}` : "Paid in full — thank you",
-              // Its due day (lib/paymentTerms.ts), while something is owed.
-              ...(bal > 0 && dueAt ? [late > 0 ? `Was due ${fmtDate(dueAt)} — ${late} day${late === 1 ? "" : "s"} overdue` : `Due by ${fmtDate(dueAt)}`] : []),
-            ].join("\n");
-            // wa.me wants the number in full with no + or leading zeros; one too
-            // short to be that opens WhatsApp to pick the chat instead.
-            const waDigits = (client?.phone ?? "").replace(/\D/g, "").replace(/^0+/, "");
-            const waLink = `https://wa.me/${waDigits.length >= 8 ? waDigits : ""}?text=${encodeURIComponent(sendText)}`;
+            const sendText = invoiceSendText(detailInv);
+            // wa.me wants the number in full with no + or leading zeros (lib/whatsapp.ts).
+            const waLink = waUrl(client?.phone, sendText);
             const mailLink = `mailto:${client?.email ?? ""}?subject=${encodeURIComponent(`Invoice ${detailInv.number} — ${fromCo}`)}&body=${encodeURIComponent(sendText)}`;
             return (
               <>

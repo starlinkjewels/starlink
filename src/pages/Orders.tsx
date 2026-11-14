@@ -27,7 +27,8 @@ import { StatusBadge } from "@/components/StatusBadge";
 import { TrackingModal } from "@/components/TrackingModal";
 import { Share2, AlertTriangle, Package, Plus, Search, Truck, ExternalLink, Rows3, LayoutGrid, Columns3, UserCog, Gem, FileText, FileSpreadsheet, Check, X, PackageCheck, TrendingUp, Eye, Pencil, XCircle, Trash2, Copy, Undo2 } from "lucide-react";
 import { copyBlocker, copyHref } from "@/lib/orderCopy";
-import { MoreMenu, type MoreAction } from "@/components/MoreMenu";
+import { MoreMenu, useRightClickMenu, type MoreAction } from "@/components/MoreMenu";
+import { orderWhatsAppAction } from "@/lib/whatsapp";
 import { OrderEditDialog } from "@/components/OrderEditDialog";
 import { cancelAccess, cancelBlocker, orderEditAccess, orderSpecLocks } from "@/lib/orderGuards";
 import { cancelOrder, cancelQuestion, cancelRefusal } from "@/lib/orderCancel";
@@ -113,6 +114,8 @@ export function OrdersPage() {
   // Orders just placed (?fresh=1 from New Order, with their numbers in the search):
   // shown whatever is remembered, for this visit — until a filter is changed here.
   const [fresh, setFresh] = useState(sp.get("fresh") === "1");
+  // Right-click on a photo card: its ⋯, where the mouse is (components/MoreMenu).
+  const rightClick = useRightClickMenu();
   const [linkStatus, setLinkStatus] = useState<string | null>(sp.get("status") ?? (fresh ? "all" : null));
   const status = linkStatus ?? storedStatus;
   const setStatus = (v: string) => { setLinkStatus(null); setFresh(false); setStoredStatus(v); };
@@ -294,6 +297,8 @@ export function OrdersPage() {
       { label: "View", icon: Eye, onSelect: () => nav(`/orders/${o.id}`) },
       { label: "Edit details", icon: Pencil, hint: editWhy ?? "Type, metal, size, due date", disabled: !!editWhy, onSelect: () => setEditing(o), show: isStaff },
       { label: "Duplicate", icon: Copy, hint: copyBlocker(user, can) ?? "A new order with these details — change what's different", disabled: !!copyBlocker(user, can), onSelect: () => nav(copyHref(o)), show: isStaff },
+      // Where it is, to the client on WhatsApp (lib/whatsapp.ts) — never a price.
+      { ...orderWhatsAppAction(db, o), show: isStaff && o.status !== "Rejected" },
       { label: "Cancel order", icon: XCircle, danger: true, hint: cancelWhy ?? "Closes it; can be re-opened", disabled: !!cancelWhy || cancellingId === o.id, onSelect: () => cancel(o), show: isStaff },
       { label: "Delete", icon: Trash2, danger: true, hint: orderDeleteBlocker(db, user, o) ?? deleteHint(db, o),
         disabled: !!orderDeleteBlocker(db, user, o), onSelect: () => { void deleteOrderFlow(o.id, user!); }, show: isStaff },
@@ -599,6 +604,7 @@ export function OrdersPage() {
 
   return (
     <div className="max-w-7xl mx-auto space-y-4">
+      {rightClick.menu}
 
       {/* ── Page header: the view switch, and the one main button ── */}
       <PageHeader
@@ -691,6 +697,7 @@ export function OrdersPage() {
             const img = orderImage(o);
             return (
               <Link key={o.id} to={`/orders/${o.id}`}
+                onContextMenu={isStaff ? rightClick.bind(() => orderActions(o), o.orderNumber, `/orders/${o.id}`) : undefined}
                 className={`group card-luxe card-hover overflow-hidden flex flex-col min-w-0 ${sel.has(o.id) ? "ring-2 ring-primary" : ""}`}>
                 {/* Status and the tick box sit above the photo, never on it —
                     a CAD sheet's measurements run right to its corners. On a

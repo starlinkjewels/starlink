@@ -12,7 +12,8 @@ import { FactoryEditDialog } from "@/components/FactoryEditDialog";
 import { PayFactorySheet } from "@/components/party/PayFactorySheet";
 import { useCan, useHas } from "@/hooks/useCan";
 import { needsAccess } from "@/lib/actionHints";
-import { MoreMenu, type MoreAction } from "@/components/MoreMenu";
+import { MoreMenu, useRightClickMenu, type MoreAction } from "@/components/MoreMenu";
+import { chatAction } from "@/lib/whatsapp";
 import { filled, noteText, type Detail } from "@/components/rowDetails";
 import { useDb } from "@/hooks/useDb";
 import { useAuth } from "@/lib/auth";
@@ -130,10 +131,13 @@ export function FactoriesPage() {
   // View first, then the changes — each greyed out with the reason when it
   // can't be done, never left out. Changing a factory is an admin's job.
   const ADMIN_ONLY = "Your access does not include changing factories";
+  // Right-click on a card: its ⋯, where the mouse is (components/MoreMenu).
+  const rightClick = useRightClickMenu();
   const actionsFor = (fac: Factory): MoreAction[] => {
     const guard = guardOf(fac);
     return [
       { label: "View ledger", icon: History, hint: "Material issued, labour and payments", onSelect: () => navigate(`/factories/${fac.id}`) },
+      chatAction(fac.name, fac.phone),
       { label: "Pay", icon: CreditCard, onSelect: () => setPaying(fac.id), disabled: !mayPay,
         hint: !mayPay ? needsAccess("payments", "add") : accounts.get(fac.id)!.chargesPending > 0 ? `Labour owed ${fmtMoneyInr(accounts.get(fac.id)!.chargesPending)} · oldest jobs first` : "Nothing owed now — would be paid ahead" },
       { label: "Edit details", icon: Pencil, onSelect: () => setEditing(fac), disabled: !mayEdit, hint: mayEdit ? "Name, contact, phone, address" : ADMIN_ONLY },
@@ -210,6 +214,7 @@ export function FactoriesPage() {
 
   return (
     <div className="max-w-7xl mx-auto space-y-5">
+      {rightClick.menu}
       {/* How many there are is the table's (or the grid's) own count. */}
       <PageHeader
         title="Factories"
@@ -290,7 +295,7 @@ export function FactoriesPage() {
             // The whole card opens the factory; what can be done to it is in
             // its one ⋯ — the same menu as a list row, each item greyed with
             // its reason when it can't be done.
-            <div key={fac.id} onClick={openCard(`/factories/${fac.id}`)} className="card-luxe card-hover p-5 flex flex-col min-w-0 cursor-pointer">
+            <div key={fac.id} onClick={openCard(`/factories/${fac.id}`)} onContextMenu={rightClick.bind(() => actionsFor(fac), fac.name, `/factories/${fac.id}`)} className="card-luxe card-hover p-5 flex flex-col min-w-0 cursor-pointer">
               <div className="flex items-start gap-3">
                 <div className="h-12 w-12 rounded-2xl bg-gradient-to-br from-orange-500/15 to-orange-400/20 text-orange-600 grid place-items-center shrink-0 ring-1 ring-orange-500/10">
                   <FactoryIcon className="h-5 w-5" />

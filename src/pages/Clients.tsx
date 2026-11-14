@@ -14,7 +14,8 @@ import { PageHeader, ViewSwitch } from "@/components/PageHeader";
 import { FilterChips, FiltersButton, StatStrip, type TableFilter } from "@/components/TableToolbar";
 import { invoicedOrderIds, splitClientAccount } from "@/components/billing/clientBilling";
 import { useEffect, useState, type MouseEvent } from "react";
-import { MoreMenu, type MoreAction } from "@/components/MoreMenu";
+import { MoreMenu, useRightClickMenu, type MoreAction } from "@/components/MoreMenu";
+import { chatAction } from "@/lib/whatsapp";
 import { Link, useNavigate } from "react-router-dom";
 import { overdueByClient } from "@/lib/paymentTerms";
 import { loadDb, updateDbAs, fmtMoney, fmtDate, isOnline, timeAgo, currentUserClients, hasOpeningBalance, cashbackPercentFor, giftMaxRedeemPctFor, type Client, type Order } from "@/lib/db";
@@ -415,6 +416,8 @@ export function ClientsPage() {
   // card's ⋯. An action someone's access doesn't reach, or that this client
   // can't take (Delete for a client with anything on record), is greyed with
   // the reason under it.
+  // Right-click on a card: its ⋯, where the mouse is (components/MoreMenu).
+  const rightClick = useRightClickMenu();
   const clientActions = (c: Client): MoreAction[] => {
     const noEdit = mayEdit ? undefined : needsAccess("clients", "edit");
     const delWhy = staff ? deleteWhy(c) : undefined;
@@ -423,6 +426,7 @@ export function ClientsPage() {
     const a = accountOf(c);
     return [
       { label: "View", icon: Eye, hint: "Account, invoices and orders", onSelect: () => navigate(`/clients/${c.id}`) },
+      { ...chatAction(c.companyName, c.phone), show: staff },
       // The client page's own panels, opened on arrival — nothing new is
       // worked out here, it is a shortcut to where it is already done.
       { label: "Record payment", icon: Wallet, show: staff, disabled: !can("payments", "add"),
@@ -454,6 +458,7 @@ export function ClientsPage() {
 
   return (
     <div className="max-w-7xl mx-auto space-y-5">
+      {rightClick.menu}
       {/* How many there are is the table's (or the grid's) own count. */}
       <PageHeader
         title="Clients"
@@ -553,7 +558,7 @@ export function ClientsPage() {
             // The whole card opens the client; what can be done to them is in
             // its one ⋯ — the same menu as a list row, each item greyed with
             // its reason when it can't be done.
-            <div key={c.id} onClick={openCard(`/clients/${c.id}`)} className="card-luxe card-hover p-4 sm:p-5 flex flex-col min-w-0 cursor-pointer">
+            <div key={c.id} onClick={openCard(`/clients/${c.id}`)} onContextMenu={rightClick.bind(() => clientActions(c), c.companyName, `/clients/${c.id}`)} className="card-luxe card-hover p-4 sm:p-5 flex flex-col min-w-0 cursor-pointer">
               <div className="flex items-start gap-3">
                 <div className="relative shrink-0">
                   {/* Their own photo (My Profile), else the company's first letter. */}

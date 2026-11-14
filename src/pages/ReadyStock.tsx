@@ -30,7 +30,7 @@ import { confirmBox } from "@/lib/confirm";
 import { ReturnsComingPanel } from "@/components/SalesReturn";
 import { CompanyBadge, useMultiCo, useDefaultCompany } from "@/components/CompanyFields";
 import { companiesOf, companyOf, companyIdOfClient } from "@/lib/companies";
-import { MoreMenu, type MoreAction } from "@/components/MoreMenu";
+import { MoreMenu, useRightClickMenu, type MoreAction } from "@/components/MoreMenu";
 import { PageHeader, TabBar, ViewSwitch } from "@/components/PageHeader";
 import { ExportMenu, FilterChips, FiltersButton, StatStrip, rangeText, useNarrow, type TableExport, type TableFilter } from "@/components/TableToolbar";
 import { MoveOfficeDialog, OfficesDialog, OfficeChip } from "@/components/ReadyStockOffices";
@@ -108,6 +108,8 @@ export function ReadyStockPage() {
   // Exactly one company in view: its pieces need no company badge.
   const oneCo = selList(coSel).length === 1;
   const [bandItem, setBandItem] = useState<ReadyStockItem | null>(null); // item whose barcode band modal is open
+  // Right-click on a piece's card: its ⋯, where the mouse is (components/MoreMenu).
+  const rightClick = useRightClickMenu();
   // Pieces being shared with a client (a PDF or a link).
   const [sharing, setSharing] = useState<ReadyStockItem[] | null>(null);
   const [view, setView] = useState<"list" | "grid">(() => {
@@ -481,6 +483,7 @@ export function ReadyStockPage() {
 
   return (
     <div className="max-w-7xl mx-auto space-y-5">
+      {rightClick.menu}
       <PageHeader
         title="Ready Stock"
         subtitle={canManage ? "Finished pieces, by office" : "Finished pieces to buy"}
@@ -529,7 +532,7 @@ export function ReadyStockPage() {
         {paged.map((item, idx) => (
           <Fragment key={item.id}>
           {groupHead(item, idx)}
-          <div onClick={openCard(item)} className={`group card-luxe card-hover overflow-hidden flex flex-col min-w-0 cursor-pointer ${sel.has(item.id) ? "ring-2 ring-primary" : ""}`}>
+          <div onClick={openCard(item)} onContextMenu={canManage ? rightClick.bind(() => itemActions(item), item.name) : undefined} className={`group card-luxe card-hover overflow-hidden flex flex-col min-w-0 cursor-pointer ${sel.has(item.id) ? "ring-2 ring-primary" : ""}`}>
             {/* Tick box and menu sit above the photo, never on it. The office is
                 the heading over its group or the tab, so the card doesn't repeat it. */}
             <div className="flex items-center gap-1.5 px-2.5 sm:px-3 pt-2.5 sm:pt-3 pb-2 min-w-0">

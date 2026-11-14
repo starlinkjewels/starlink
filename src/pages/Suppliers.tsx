@@ -9,7 +9,8 @@ import { Link, useNavigate } from "react-router-dom";
 import { updateDb, uid, fmtDate, hasOpeningBalance, openingCreditAmt, openingDebitAmt, type Supplier } from "@/lib/db";
 import { supplierDeleteGuard, deleteRefusal } from "@/lib/partyGuards";
 import { SupplierEditDialog } from "@/components/SupplierEditDialog";
-import { MoreMenu, type MoreAction } from "@/components/MoreMenu";
+import { MoreMenu, useRightClickMenu, type MoreAction } from "@/components/MoreMenu";
+import { chatAction } from "@/lib/whatsapp";
 import { filled, noteText, type Detail } from "@/components/rowDetails";
 import { useDb } from "@/hooks/useDb";
 import { useCan, useHas } from "@/hooks/useCan";
@@ -151,10 +152,13 @@ export function SuppliersPage() {
   // View first, then the changes — each greyed out with the reason when it
   // can't be done, never left out. Changing a supplier is an admin's job.
   const ADMIN_ONLY = "Your access does not include changing suppliers";
+  // Right-click on a card: its ⋯, where the mouse is (components/MoreMenu).
+  const rightClick = useRightClickMenu();
   const actionsFor = (s: Supplier): MoreAction[] => {
     const guard = guardOf(s);
     return [
       { label: "View ledger", icon: History, hint: "Purchases, payments, statement", onSelect: () => navigate(`/suppliers/${s.id}`) },
+      chatAction(s.name, s.phone),
       { label: "Edit details", icon: Pencil, onSelect: () => setEditing(s), disabled: !mayEdit, hint: mayEdit ? "Name, contact, GSTIN, address" : ADMIN_ONLY },
       { label: s.active === false ? "Activate" : "Deactivate", icon: Power, onSelect: () => toggle(s), disabled: !mayEdit, hint: mayEdit ? undefined : ADMIN_ONLY },
       { label: "Delete supplier", icon: Trash2, danger: true, onSelect: () => del(s),
@@ -221,6 +225,7 @@ export function SuppliersPage() {
 
   return (
     <div className="max-w-7xl mx-auto space-y-5">
+      {rightClick.menu}
       {/* How many there are is the table's (or the grid's) own count. */}
       <PageHeader
         title="Suppliers"
@@ -307,7 +312,7 @@ export function SuppliersPage() {
             // The whole card opens the supplier; what can be done to them is in
             // its one ⋯ — the same menu as a list row, each item greyed with
             // its reason when it can't be done.
-            <div key={s.id} onClick={openCard(`/suppliers/${s.id}`)} className="card-luxe card-hover p-5 flex flex-col min-w-0 cursor-pointer">
+            <div key={s.id} onClick={openCard(`/suppliers/${s.id}`)} onContextMenu={rightClick.bind(() => actionsFor(s), s.name, `/suppliers/${s.id}`)} className="card-luxe card-hover p-5 flex flex-col min-w-0 cursor-pointer">
               <div className="flex items-start gap-3">
                 <div className="h-12 w-12 rounded-2xl bg-gradient-to-br from-amber-500/15 to-amber-400/20 text-amber-600 grid place-items-center shrink-0 ring-1 ring-amber-500/10">
                   <Truck className="h-5 w-5" />

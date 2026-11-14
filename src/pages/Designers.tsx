@@ -14,6 +14,7 @@ import { PageHeader } from "@/components/PageHeader";
 import { StatStrip } from "@/components/TableToolbar";
 import { DataTable, CellMain, CellTag, CellAmount, type DataColumn } from "@/components/DataTable";
 import { type MoreAction } from "@/components/MoreMenu";
+import { chatAction } from "@/lib/whatsapp";
 import { DesignerCreateDialog } from "@/components/create/DesignerCreateDialog";
 import { PayDesignerSheet } from "@/components/PayDesignerSheet";
 import { DesignerLoginSheet } from "@/components/designers/DesignerLoginSheet";
@@ -75,6 +76,7 @@ export function DesignersPage() {
   };
   const actionsFor = (x: Designer): MoreAction[] => [
     { label: "View", icon: Eye, onSelect: () => navigate(`/designers/${x.id}`) },
+    chatAction(x.name, x.phone),
     { label: "Edit", icon: Pencil, disabled: !mayEdit, hint: mayEdit ? undefined : "Your access does not include changing designers", onSelect: () => setEditing(x) },
     { label: "Pay", icon: Wallet, show: x.kind === "freelance", disabled: !mayPay, hint: mayPay ? "From an account" : "You can't record payments", onSelect: () => setPaying(x) },
     { label: designerLogin(db, x.id) ? "Login" : "Give login", icon: KeyRound, show: isAdmin,

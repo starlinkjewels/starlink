@@ -1,6 +1,6 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, type MouseEvent as ReactMouseEvent } from "react";
 import type { LucideIcon } from "lucide-react";
-import { ChevronDown, MoreHorizontal } from "lucide-react";
+import { ChevronDown, ExternalLink, MoreHorizontal } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent, SheetTitle } from "@/components/ui/sheet";
@@ -21,6 +21,93 @@ export type MoreAction = {
   /** Left out of the menu when false. */
   show?: boolean;
 };
+
+/**
+ * A right-click on a row or card: the same actions as its ⋯, opened where the mouse is.
+ * The browser's own menu is kept where it is useful — over a link or a box one types in,
+ * with text selected (to copy it), on a phone, or when the row has nothing to offer
+ * (rightClickActions decides; this only shows the menu).
+ */
+export function ContextMenuAt({ at, actions, title, onClose }: {
+  at: { x: number; y: number } | null;
+  actions: MoreAction[];
+  title?: string;
+  onClose: () => void;
+}) {
+  const shown = actions.filter(a => a.show !== false);
+  if (!at || !shown.length) return null;
+  const safe = shown.filter(a => !a.danger);
+  const danger = shown.filter(a => a.danger);
+  const run = (a: MoreAction) => setTimeout(() => {
+    Promise.resolve().then(a.onSelect).catch(e => toast.error(e instanceof Error ? e.message : "That didn't work"));
+  }, 0);
+  const item = (a: MoreAction) => (
+    <DropdownMenuItem key={a.label} disabled={a.disabled} onSelect={() => run(a)}
+      className={`rounded-lg gap-2.5 py-2 cursor-pointer items-start ${a.danger ? "text-destructive focus:text-destructive focus:bg-destructive/10" : ""}`}>
+      {a.icon && <a.icon className={`h-4 w-4 mt-0.5 shrink-0 ${a.danger ? "" : "text-muted-foreground"}`} />}
+      <span className="min-w-0 flex-1">
+        <span className="block text-sm font-medium leading-snug">{a.label}</span>
+        {a.hint && <span className="block text-[11px] text-muted-foreground leading-snug mt-0.5 line-clamp-2" title={a.hint}>{a.hint}</span>}
+      </span>
+    </DropdownMenuItem>
+  );
+  return (
+    // Keyed by the spot, so a second right-click elsewhere opens a fresh menu there.
+    <DropdownMenu key={`${at.x}:${at.y}`} open modal={false} onOpenChange={o => { if (!o) onClose(); }}>
+      <DropdownMenuTrigger asChild>
+        <span aria-hidden className="fixed w-px h-px pointer-events-none" style={{ left: at.x, top: at.y }} />
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="start" side="bottom" sideOffset={2} collisionPadding={12}
+        onContextMenu={e => e.preventDefault()}
+        className="w-64 max-w-[calc(100vw-2rem)] max-h-[var(--radix-dropdown-menu-content-available-height)] overflow-y-auto rounded-xl p-1.5">
+        {title && <DropdownMenuLabel className="text-[11px] uppercase tracking-wider text-muted-foreground truncate">{title}</DropdownMenuLabel>}
+        {safe.map(item)}
+        {safe.length > 0 && danger.length > 0 && <DropdownMenuSeparator />}
+        {danger.map(item)}
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
+
+/**
+ * Whether a right-click here should open our menu: not over a link or a box one types in,
+ * not with text selected (so Copy is there), not on a touch screen (a long-press there stays
+ * the phone's own; the ⋯ is in thumb's reach).
+ */
+export function wantsOwnMenu(e: { target: EventTarget | null; currentTarget?: EventTarget | null; nativeEvent?: Event }): boolean {
+  const t = e.target as HTMLElement | null;
+  const cur = e.currentTarget as HTMLElement | null;
+  // A link or box INSIDE the row keeps the browser's menu; the row's own link (a card that is a link) does not.
+  const own = t?.closest("a[href], input, textarea, select, [contenteditable=''], [contenteditable='true']");
+  if (own && (!cur || (cur !== own && cur.contains(own)))) return false;
+  const sel = typeof window !== "undefined" ? window.getSelection?.() : null;
+  if (sel && !sel.isCollapsed && sel.toString().trim()) return false;
+  const pe = e.nativeEvent as PointerEvent | undefined;
+  if (pe && "pointerType" in pe && pe.pointerType === "touch") return false;
+  if (typeof window !== "undefined" && window.matchMedia?.("(hover: none)").matches) return false;
+  return true;
+}
+
+/**
+ * Right-click for a card that has its own ⋯ (outside the shared table): `bind(() => actions, title)`
+ * on the card, and `menu` once in the page. The actions are worked out when the menu opens.
+ */
+export function useRightClickMenu() {
+  const [ctx, setCtx] = useState<{ x: number; y: number; actions: () => MoreAction[]; title?: string } | null>(null);
+  /** `href`: the card is a page — "Open in a new tab" leads, as the browser's own menu would have. */
+  const bind = (actions: () => MoreAction[], title?: string, href?: string) => (e: ReactMouseEvent) => {
+    if (!wantsOwnMenu(e)) return;
+    const all = () => [
+      ...(href ? [{ label: "Open in a new tab", icon: ExternalLink, onSelect: () => { window.open(href, "_blank", "noopener"); } }] : []),
+      ...actions(),
+    ];
+    if (!all().some(a => a.show !== false)) return;
+    e.preventDefault();
+    setCtx({ x: e.clientX, y: e.clientY, actions: all, title });
+  };
+  const menu = <ContextMenuAt at={ctx} actions={ctx ? ctx.actions() : []} title={ctx?.title} onClose={() => setCtx(null)} />;
+  return { bind, menu };
+}
 
 /** A phone-width screen: the menu opens as a panel from the bottom, in thumb's reach. */
 function usePhoneMenu(): boolean {

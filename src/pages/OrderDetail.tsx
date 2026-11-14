@@ -39,6 +39,7 @@ import { WeightCheck } from "@/components/WeightCheck";
 import { weightProblem, pieceWeights, isSelfMetal, fmtG, otherMetalsOf, moreMetalsGrams, isOwnMetalStock } from "@/lib/weights";
 import { useCan, useHas, useMayExport } from "@/hooks/useCan";
 import { MoreMenu, type MoreAction } from "@/components/MoreMenu";
+import { orderWhatsAppAction } from "@/lib/whatsapp";
 import { OrderDesignBlock } from "@/components/designers/OrderDesignBlock";
 import { OrderEditDialog } from "@/components/OrderEditDialog";
 import { OrderPaymentEditDialog } from "@/components/OrderPaymentEditDialog";
@@ -2694,6 +2695,8 @@ It goes back to being our own build, and ${item ? item.name : "its piece"} goes 
     { label: "Edit details", icon: Pencil, hint: editWhy ?? "Type, metal, size, due date, instructions…", disabled: !!editWhy, onSelect: () => setEditOpen(true), show: isStaffUser },
     { label: "Share this piece", icon: Share2, hint: "A product PDF or a link — photos, video, details, a price you set", onSelect: () => setSharingPiece(true),
       show: isStaffUser && !isDiamondOnlyOrder(order) && sw("orders.share") },
+    // Where it is, to the client on WhatsApp (lib/whatsapp.ts) — never a price.
+    { ...orderWhatsAppAction(db, order), show: isStaffUser && !order.deletedAt && order.status !== "Rejected" },
     { label: "Duplicate", icon: Copy, hint: copyBlocker(user, can) ?? "A new order with these details filled in — change what's different, then place it",
       disabled: !!copyBlocker(user, can), onSelect: () => nav(copyHref(order)), show: isStaffUser },
     { label: "Change client", icon: Users, hint: changeClientWhy ?? "Picked the wrong client? Move it — while nothing is billed or paid", disabled: !!changeClientWhy, onSelect: () => setClientOpen(true), show: isStaffUser },
