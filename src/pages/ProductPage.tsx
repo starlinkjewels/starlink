@@ -6,9 +6,11 @@
 // missing, and share the page as a link; a client sees their own price — or, where the
 // business shows them details only, the details and "ask us for the price".
 // The page itself is components/catalog/ProductView.tsx (a shared link shows the same).
+import { useCan } from "@/hooks/useCan";
+import { officeLabel, officeOf } from "@/lib/offices";
 import { useEffect, useMemo, useState } from "react";
-import { Link, useParams } from "react-router-dom";
-import { AlertTriangle, Loader2, Settings2, Share2 } from "lucide-react";
+import { Link, useNavigate, useParams } from "react-router-dom";
+import { AlertTriangle, Loader2, Settings2, Share2, ShoppingBag } from "lucide-react";
 import { CellTag } from "@/components/DataTable";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -30,6 +32,9 @@ export function ProductPage() {
   const { key = "" } = useParams();
   const { user } = useAuth();
   const staff = user?.role === "admin" || user?.role === "employee";
+  const can = useCan();
+  const mayOrder = staff && (user?.role === "admin" || can("orders", "add"));
+  const nav = useNavigate();
   const db = useDb();
   const design = useDesign(key);
   const rules = usePriceRules(staff);
@@ -123,6 +128,14 @@ export function ProductPage() {
   const ready = staff ? !!specs : !!quote?.ready;
   const seesDetailsOnly = !staff && quote?.see === "details";
   const amount = staff ? (current && priced && !priced.missing.length ? priced.price : null) : quote?.ready && typeof quote.price === "number" ? quote.price : null;
+  // Ready Stock of this design (its SKU is the design number): pieces on the shelf, office by office.
+  const onShelf = (() => {
+    const no = design.designNo.trim().toLowerCase();
+    const lots = staff ? (db.readyStock ?? []).filter(i => i.quantity > 0 && (i.sku ?? "").trim().toLowerCase() === no) : [];
+    const by = new Map<string, number>();
+    for (const i of lots) by.set(officeLabel(officeOf(i)), (by.get(officeLabel(officeOf(i))) ?? 0) + i.quantity);
+    return { pcs: lots.reduce((t, i) => t + i.quantity, 0), where: by.size > 1 ? [...by].map(([o, n]) => `${o} ${n}`).join(", ") : [...by.keys()][0] ?? "" };
+  })();
   const at = rates?.at ?? (quote?.ready ? quote.asOf : null);
 
   return (
@@ -133,6 +146,9 @@ export function ProductPage() {
         back={{ label: "Catalog", to: design.folderIds?.[0] ? `/catalog?f=${design.folderIds[0]}` : "/catalog" }}
         headerActions={staff ? <>
           {design.status !== "ok" && <CellTag tone="amber">{design.status === "review" ? "Please check" : "No details yet"}</CellTag>}
+          {/* On the shelf now (Ready Stock's SKU is the design number), and order it — the catalogue is no dead end. */}
+          {onShelf.pcs > 0 && <Link to={`/ready-stock?q=${encodeURIComponent(design.designNo)}`} className="text-xs font-medium text-primary hover:underline whitespace-nowrap">In Ready Stock: {onShelf.pcs}{onShelf.where ? ` (${onShelf.where})` : ""}</Link>}
+          {mayOrder && <Button size="sm" variant="outline" className="gap-1.5" onClick={() => nav(`/orders/new?design=${encodeURIComponent(design.designNo)}`)}><ShoppingBag className="h-4 w-4" />Order this design</Button>}
           {ready && <Button size="sm" variant="outline" className="gap-1.5" onClick={() => setSharing(true)}><Share2 className="h-4 w-4" />Share</Button>}
         </> : undefined}
         pictures={pictures} spin={spin} videos={videos}

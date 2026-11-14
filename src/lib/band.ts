@@ -4,6 +4,7 @@
 //   • "label" — a 50×30mm spec label (barcode + type/metal/weights + optional price).
 // Each can be Printed (opens PDF + print dialog) or Downloaded. Works for both an
 // Order and a Ready Stock item via a normalised BandData shape.
+import { tagCode } from "./readyStockTag";
 import { isInstalledApp } from "./printView";
 import { brandFor, companyOf, companyOfOrder } from "./companies";
 import { pieceWeights } from "./weights";
@@ -37,7 +38,8 @@ interface BandData {
   price: number;       // 0 = none
 }
 
-function barcodeDataUrl(value: string): string {
+/** A Code128 barcode as a PNG data URL — the tags, bag labels and stone labels all use it. */
+export function barcodeDataUrl(value: string): string {
   const canvas = document.createElement("canvas");
   JsBarcode(canvas, value, { format: "CODE128", displayValue: false, margin: 0, width: 2, height: 60, background: "#ffffff", lineColor: "#000000" });
   return canvas.toDataURL("image/png");
@@ -123,13 +125,13 @@ export function generateBand(order: Order, settings: Settings, opts: BandOpts): 
   }, settings, opts);
 }
 
-/** Band for a Ready Stock item (barcode = SKU, or the item id when no SKU). */
+/** Band for a Ready Stock item (barcode = its own tag number, lib/readyStockTag.ts; the SKU is its label). */
 export function generateStockBand(item: ReadyStockItem, settings: Settings, opts: BandOpts): void {
   const gross = item.grossWeight ?? 0, net = item.netWeight ?? 0, diaCt = item.diamondWeight ?? 0;
   // The company whose Ready Stock the piece is in.
   const owner = brandFor(settings, companyOf(item));
   runBand({
-    code: item.sku || item.id,
+    code: tagCode(item),
     label: item.sku ? `#${item.sku}` : item.name.slice(0, 14),
     company: owner.companyName || "STARLINK JEWELS",
     jewelleryType: item.jewelleryType,

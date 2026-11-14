@@ -5,6 +5,7 @@ import { keptForOrder } from "@/lib/orderStock";
 import { StatStrip } from "@/components/TableToolbar";
 import { useCan, useHas } from "@/hooks/useCan";
 import { useEffect, useState, type ReactNode } from "react";
+import { useSearchParams } from "react-router-dom";
 import { useAuth } from "@/lib/auth";
 import { StockActivityLedger, type LedgerTotals } from "@/components/StockActivityLedger";
 import { LotPicker } from "@/components/LotFields";
@@ -16,6 +17,7 @@ import { useDb } from "@/hooks/useDb";
 import { decreaseStockSelfHealing } from "@/lib/stock";
 import { fmtMoneyInr, factoryFineGoldBalance, factoryOtherBalances, deriveStockBalances, lockerBalance } from "@/lib/manufacturing";
 import { fmtCcy, ccySymbol } from "@/lib/currency";
+import { rateOn, stockAverageRate } from "@/lib/orderCost";
 import { AsyncButton } from "@/components/AsyncButton";
 import { ActionSheet } from "@/components/ActionSheet";
 import { PageHeader } from "@/components/PageHeader";
@@ -57,6 +59,18 @@ export function BuyAssignPage() {
   const may = can("buyAssign", "add");
   const [panel, setPanel] = useState<Mode | null>(null);
   const panelFor = (m: Mode): PanelProps => ({ open: panel === m, onOpenChange: o => setPanel(o ? m : null) });
+  // A stone's or a bag's Sell (and a scan) arrives with ?sell=packet&id=… / ?sell=lot&lot=… — the sale opens with it chosen.
+  const [sp, setSp] = useSearchParams();
+  const [sellPreset, setSellPreset] = useState<SellPreset | null>(null);
+  useEffect(() => {
+    const kind = sp.get("sell");
+    if (!kind) return;
+    const preset: SellPreset | null = kind === "packet" && sp.get("id") ? { kind: "certified", packetId: sp.get("id")! }
+      : kind === "lot" && sp.get("lot") ? { kind: "loose", lot: sp.get("lot")! } : null;
+    if (preset && has("buyAssign.sell")) { setSellPreset(preset); setPanel("sell"); }
+    setSp(prev => { const n = new URLSearchParams(prev); n.delete("sell"); n.delete("id"); n.delete("lot"); return n; }, { replace: true });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sp]);
   // The ledger's own total, shown as the fourth figure up top.
   const [ledgerTotals, setLedgerTotals] = useState<LedgerTotals | null>(null);
   // A phone has room for two named buttons: there Assign to factory waits in the ⋯.
@@ -96,7 +110,7 @@ export function BuyAssignPage() {
           <BuyMaterialForm {...panelFor("buy")} />
           <OpeningStock {...panelFor("opening")} />
           <AssignGold {...panelFor("assign")} />
-          <SellDiamond {...panelFor("sell")} />
+          <SellDiamond {...panelFor("sell")} preset={sellPreset} />
           <SellToSupplierSheet {...panelFor("sellSupplier")} />
         </>
       )}
@@ -332,19 +346,27 @@ function AssignGold({ open, onOpenChange }: PanelProps) {
 /* ── Sell a diamond straight out of stock — no jewellery order involved ── */
 type SellKind = "loose" | "certified";
 type BuyerMode = "client" | "other";
-function SellDiamond({ open, onOpenChange }: PanelProps) {
+/** One line of a sale: a loose lot (how many carats, stones) or one certified stone — at its own rate. */
+interface SellLine { key: string; kind: SellKind; shape: string; carat: string; pcs: string; packetId: string; rate: string }
+const newSellLine = (kind: SellKind = "loose"): SellLine => ({ key: Math.random().toString(36).slice(2), kind, shape: "", carat: "", pcs: "", packetId: "", rate: "" });
+/** What opened the sale with something already chosen — a stone's or a bag's Sell (?sell=…). */
+export type SellPreset = { kind: "certified"; packetId: string } | { kind: "loose"; lot: string };
+
+/**
+ * Sell diamonds to one buyer — several lots and stones at once (a parcel to a client), each at its
+ * own rate, with the buyer, currency, exchange rate and account given once. Each line is saved as
+ * its own sale, exactly as a one-line sale always was (stock, account entry, what is owed), so
+ * statements, Receive payment and Undo work line by line. Cost and margin show to whoever may see
+ * costs, with a warning below cost. A priced lot or stone starts at its list price (lib/priceList.ts).
+ */
+function SellDiamond({ open, onOpenChange, preset }: PanelProps & { preset?: SellPreset | null }) {
   const { user } = useAuth();
   const db = useDb();
   const addNew = useAddNew();
   const multiCo = useMultiCo();
+  const showCosts = useHas()("fig.costs");
   const [companyId, setCompanyId] = useState(useDefaultCompany()); // whose stock it is sold from
-  const [kind, setKind] = useState<SellKind>("loose");
-  // Loose: the stock lot sold from (its bucket — "Round · +6.5-7 · G-H · VS", or just "Round") and how many stones.
-  const [shape, setShape] = useState("");
-  const [pcs, setPcs] = useState("");
-  const [packetId, setPacketId] = useState("");
-  const [carat, setCarat] = useState("");
-  const [rate, setRate] = useState("");
+  const [lines, setLines] = useState<SellLine[]>([newSellLine()]);
   const [currency, setCurrency] = useState<PurchaseCurrency>("INR");
   const [xrate, setXrate] = useState("");
   const [buyerMode, setBuyerMode] = useState<BuyerMode>("client");
@@ -358,113 +380,162 @@ function SellDiamond({ open, onOpenChange }: PanelProps) {
   const [date, setDate] = useState(todayLocal());
   const [saving, setSaving] = useState(false);
 
+  // Opened from a stone or a bag (its ⋯ Sell, a scan): that line, ready.
+  useEffect(() => {
+    if (!open || !preset) return;
+    setLines([preset.kind === "certified" ? { ...newSellLine("certified"), packetId: preset.packetId } : { ...newSellLine("loose"), shape: preset.lot }]);
+  }, [open, preset]);
+  // The $ rate starts at the day's rate in Settings → Exchange rates (as Memo does) — changed here freely.
+  useEffect(() => {
+    if (currency !== "USD" || xrate.trim() !== "") return;
+    const fx = rateOn(db, stampFor(date))?.rate;
+    if (fx) setXrate(String(fx));
+  }, [currency, date, db, xrate]);
+
   const clients = db.clients.filter(c => worksOnClientId(db, user, c.id)).sort((a, b) => a.companyName.localeCompare(b.companyName));
   // Every account in the sale's currency that isn't switched off — older ones carry no "active" flag at all.
   const lockers = db.lockers.filter(l => l.active !== false && (l.currency || "INR") === currency);
   // Not a stone kept for an order (lib/orderStock.ts keptForOrder) — that one is the order's.
   const inStockPackets = (db.diamondPackets ?? []).filter(p => p.status === "in_stock" && !keptForOrder(p) && companyOf(p) === companyId).sort((a, b) => (a.stockNumber || "").localeCompare(b.stockNumber || ""));
-  const selectedPacket = inStockPackets.find(p => p.id === packetId);
-  const looseInStock = deriveStockBalances(db.stockMovements, "diamond", companyId)[shape] ?? 0;
-  // The price list (lib/priceList.ts): a priced lot or stone starts at its asking price — changed here freely.
-  const listed = kind === "certified" ? (packetId ? priceOf(db, "packet", packetId) : undefined) : (shape ? priceOf(db, "lot", shape) : undefined);
-  useEffect(() => {
-    if (!listed || rate.trim() !== "") return;
-    setRate(String(listed.rate)); setCurrency(listed.currency);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [listed?.rate, listed?.currency, kind, shape, packetId]);
+  const lotBal = deriveStockBalances(db.stockMovements, "diamond", companyId);
+  const set = (key: string, patch: Partial<SellLine>) => setLines(ls => ls.map(l => (l.key === key ? { ...l, ...patch } : l)));
+  const listedOf = (l: SellLine) => (l.kind === "certified" ? (l.packetId ? priceOf(db, "packet", l.packetId) : undefined) : (l.shape ? priceOf(db, "lot", l.shape) : undefined));
+  // A priced lot or stone starts at its list price — the first priced line sets the currency when none has a rate yet.
+  const pick = (l: SellLine, patch: Partial<SellLine>) => {
+    const next = { ...l, ...patch };
+    const listed = listedOf(next);
+    if (listed && next.rate.trim() === "") {
+      const noneRated = lines.every(x => x.key === l.key || x.rate.trim() === "");
+      if (listed.currency === currency || noneRated) {
+        if (listed.currency !== currency) setCurrency(listed.currency);
+        next.rate = String(listed.rate);
+      }
+    }
+    set(l.key, next);
+  };
+  const caratOf = (l: SellLine) => (l.kind === "certified" ? (inStockPackets.find(p => p.id === l.packetId)?.carat ?? 0) : Number(l.carat) || 0);
+  const xr = Number(xrate) || 0;
+  const usd = currency === "USD";
+  const amountOf = (l: SellLine) => caratOf(l) * (Number(l.rate) || 0);
+  const inrOf = (l: SellLine) => (usd ? Math.round(amountOf(l) * xr) : Math.round(amountOf(l)));
+  const baseTotal = Math.round(lines.reduce((t, l) => t + amountOf(l), 0) * 100) / 100;
+  const totalInr = lines.reduce((t, l) => t + inrOf(l), 0);
+  // What a carat cost us (₹): a lot at its running average, a stone at its own rate — for the margin.
+  const nowIso = new Date().toISOString();
+  const costOf = (l: SellLine): number | null => (l.kind === "certified"
+    ? (inStockPackets.find(p => p.id === l.packetId)?.ratePerCaratInr ?? null)
+    : l.shape ? stockAverageRate(db, "diamond", l.shape, nowIso, companyId) : null);
+  const saleRateInr = (l: SellLine) => (Number(l.rate) || 0) * (usd ? xr : 1);
 
-  const effectiveCarat = kind === "certified" ? (selectedPacket?.carat ?? 0) : (Number(carat) || 0);
-  const baseAmount = effectiveCarat * (Number(rate) || 0);
-  const totalInr = currency === "USD" ? Math.round(baseAmount * (Number(xrate) || 0)) : Math.round(baseAmount);
+  const lineProblem = (l: SellLine, i: number): string | null => {
+    const n = lines.length > 1 ? ` (line ${i + 1})` : "";
+    if (l.kind === "loose") {
+      const c = Number(l.carat);
+      if (!l.shape) return `Choose the lot to sell from${n}`;
+      if (!c || c <= 0) return `Enter the carat${n}`;
+      // Lines of the same lot together can't sell more than it holds.
+      const asked = lines.filter(x => x.kind === "loose" && x.shape === l.shape).reduce((t, x) => t + (Number(x.carat) || 0), 0);
+      if (asked > (lotBal[l.shape] ?? 0) + 1e-9) return `Only ${lotBal[l.shape] ?? 0}ct of ${l.shape} in stock${n}`;
+    } else {
+      if (!l.packetId) return `Choose a certified diamond${n}`;
+      if (lines.filter(x => x.kind === "certified" && x.packetId === l.packetId).length > 1) return `The same stone is on two lines${n}`;
+    }
+    if (!l.rate || Number(l.rate) <= 0) return `Enter the rate${n}`;
+    return null;
+  };
 
   const submit = async () => {
-    if (kind === "loose") {
-      const c = Number(carat);
-      if (!shape) { toast.error("Choose the lot to sell from"); return; }
-      if (!c || c <= 0) { toast.error("Enter the carat"); return; }
-      if (c > looseInStock) { toast.error(`Only ${looseInStock}ct of ${shape} in stock`); return; }
-    } else if (!packetId) { toast.error("Choose a certified diamond"); return; }
-    if (!rate || Number(rate) <= 0) { toast.error("Enter the rate"); return; }
-    if (currency === "USD" && !xrate) { toast.error("Enter the exchange rate"); return; }
+    for (let i = 0; i < lines.length; i++) { const why = lineProblem(lines[i], i); if (why) { toast.error(why); return; } }
+    if (usd && !xrate) { toast.error("Enter the exchange rate"); return; }
     if (buyerMode === "client" && !clientId) { toast.error("Choose a client"); return; }
     if (buyerMode === "other" && !buyerName.trim()) { toast.error("Enter the buyer's name"); return; }
-    if (totalInr <= 0) { toast.error("Total comes to ₹0 — check the rate"); return; }
+    if (totalInr <= 0) { toast.error("Total comes to ₹0 — check the rates"); return; }
     if (paid === "now" && !lockerId) { toast.error("Choose the account the money went into"); return; }
 
-    const saleId = uid("ds_");
     const now = stampFor(date);
     const client = buyerMode === "client" ? clients.find(c => c.id === clientId) : undefined;
     const buyerLabel = client?.companyName || buyerName.trim();
-    const saleShape = kind === "certified" ? selectedPacket!.shape : lotShape(shape);
-    const salePcs = kind === "loose" && Number(pcs) > 0 ? Math.round(Number(pcs)) : undefined;
     setSaving(true);
+    const done: string[] = [];
     try {
-      if (kind === "loose") {
-        await decreaseStockSelfHealing({
-          material: "diamond", companyId, purityOrQuality: shape, quantity: effectiveCarat,
-          type: "issuance_out", refType: "diamondSale", refId: saleId, createdBy: user!.id,
-          note: `Sold to ${buyerLabel}`, lot: lotParts(shape), pieces: salePcs,
-        }, db.stockMovements);
-      }
-      updateDb(d => {
-        if (!d.diamondSales) d.diamondSales = [];
-        d.diamondSales.unshift({
-          id: saleId, kind, shape: saleShape, packetId: kind === "certified" ? packetId : undefined, ...coField(companyId),
-          ...(kind === "loose" ? { bucket: shape, pieces: salePcs } : {}),
-          carat: effectiveCarat, ratePerCarat: Number(rate), currency,
-          totalUsd: currency === "USD" ? Math.round(baseAmount * 100) / 100 : undefined,
-          exchangeRate: currency === "USD" ? Number(xrate) : undefined,
-          totalInr,
-          clientId: buyerMode === "client" ? clientId : undefined,
-          buyerName: buyerMode === "other" ? buyerName.trim() : undefined,
-          lockerId: paid === "now" ? lockerId || undefined : undefined,
-          // Not received yet: the buyer owes it until payments cover it (lib/diamondSalePay.ts).
-          ...(paid === "later" ? { unpaid: true } : {}),
-          notes: notes.trim() || undefined,
-          soldBy: user!.id, createdAt: now,
-        });
-        if (kind === "certified") {
-          const p = d.diamondPackets.find(x => x.id === packetId);
-          if (p) p.status = "sold";
+      // One sale per line, each as a one-line sale always was. Saved lines leave the form as they go,
+      // so a failure part-way keeps only what is still to save — a second try never sells one twice.
+      for (const l of lines) {
+        const saleId = uid("ds_");
+        const kind = l.kind;
+        const effectiveCarat = caratOf(l);
+        const packet = kind === "certified" ? inStockPackets.find(p => p.id === l.packetId) : undefined;
+        const saleShape = kind === "certified" ? packet!.shape : lotShape(l.shape);
+        const salePcs = kind === "loose" && Number(l.pcs) > 0 ? Math.round(Number(l.pcs)) : undefined;
+        const baseAmount = amountOf(l);
+        const lineInr = inrOf(l);
+        if (kind === "loose") {
+          await decreaseStockSelfHealing({
+            material: "diamond", companyId, purityOrQuality: l.shape, quantity: effectiveCarat,
+            type: "issuance_out", refType: "diamondSale", refId: saleId, createdBy: user!.id,
+            note: `Sold to ${buyerLabel}`, lot: lotParts(l.shape), pieces: salePcs,
+          }, db.stockMovements);
         }
-        if (paid === "now" && lockerId) {
-          if (!d.lockerTransactions) d.lockerTransactions = [];
-          d.lockerTransactions.push({
-            id: uid("ltx_"), lockerId, type: "income",
-            amountInr: currency === "USD" ? Math.round(baseAmount * 100) / 100 : totalInr,
-            // Marked as the sale's own money, tied to it by id: written as a
-            // plain "manual" entry it could be corrected alone in Payments →
-            // Account entries, leaving the sale and the stone out of step. It is
-            // also not a client paying a bill, so it is never offered for
-            // applying to one — that would rewrite it as a client payment.
-            currency, category: "Diamond Sale", refType: "diamondSale", refId: saleId, notClientPayment: true,
-            note: `${effectiveCarat}ct ${kind === "certified" ? "certified " : ""}${saleShape} sold to ${buyerLabel}`,
-            recordedBy: user!.id, createdAt: now,
+        updateDb(d => {
+          if (!d.diamondSales) d.diamondSales = [];
+          d.diamondSales.unshift({
+            id: saleId, kind, shape: saleShape, packetId: kind === "certified" ? l.packetId : undefined, ...coField(companyId),
+            ...(kind === "loose" ? { bucket: l.shape, pieces: salePcs } : {}),
+            carat: effectiveCarat, ratePerCarat: Number(l.rate), currency,
+            totalUsd: usd ? Math.round(baseAmount * 100) / 100 : undefined,
+            exchangeRate: usd ? Number(xrate) : undefined,
+            totalInr: lineInr,
+            clientId: buyerMode === "client" ? clientId : undefined,
+            buyerName: buyerMode === "other" ? buyerName.trim() : undefined,
+            lockerId: paid === "now" ? lockerId || undefined : undefined,
+            // Not received yet: the buyer owes it until payments cover it (lib/diamondSalePay.ts).
+            ...(paid === "later" ? { unpaid: true } : {}),
+            notes: notes.trim() || undefined,
+            soldBy: user!.id, createdAt: now,
           });
-        }
-      });
-      toast.success(`Sold ${effectiveCarat}ct ${saleShape} to ${buyerLabel} — ${fmtMoneyInr(totalInr)}`);
-      setCarat(""); setPcs(""); setRate(""); setXrate(""); setPacketId(""); setBuyerName(""); setClientId(""); setNotes(""); setLockerId(""); setPaid("now");
+          if (kind === "certified") {
+            const p = d.diamondPackets.find(x => x.id === l.packetId);
+            if (p) p.status = "sold";
+          }
+          if (paid === "now" && lockerId) {
+            if (!d.lockerTransactions) d.lockerTransactions = [];
+            d.lockerTransactions.push({
+              id: uid("ltx_"), lockerId, type: "income",
+              amountInr: usd ? Math.round(baseAmount * 100) / 100 : lineInr,
+              // Marked as the sale's own money, tied to it by id: written as a
+              // plain "manual" entry it could be corrected alone in Payments →
+              // Account entries, leaving the sale and the stone out of step. It is
+              // also not a client paying a bill, so it is never offered for
+              // applying to one — that would rewrite it as a client payment.
+              currency, category: "Diamond Sale", refType: "diamondSale", refId: saleId, notClientPayment: true,
+              note: `${effectiveCarat}ct ${kind === "certified" ? "certified " : ""}${saleShape} sold to ${buyerLabel}`,
+              recordedBy: user!.id, createdAt: now,
+            });
+          }
+        });
+        done.push(l.key);
+        setLines(ls => ls.filter(x => x.key !== l.key));
+      }
+      toast.success(`Sold ${done.length > 1 ? `${done.length} lines` : "it"} to ${buyerLabel} — ${fmtMoneyInr(totalInr)}`);
+      setLines([newSellLine()]); setXrate(""); setBuyerName(""); setClientId(""); setNotes(""); setLockerId(""); setPaid("now");
       onOpenChange(false);
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Failed to record sale");
+      const msg = e instanceof Error ? e.message : "Failed to record sale";
+      toast.error(done.length ? `${done.length} line${done.length === 1 ? "" : "s"} sold; the next one stopped — ${msg}. What is left is still here.` : msg);
     } finally { setSaving(false); }
   };
 
-  const usd = currency === "USD";
-
   return (
-    <ActionSheet open={open} onOpenChange={onOpenChange} size="md" icon={Tag} title="Sell a diamond"
-      description="From stock to any buyer — no jewellery order."
+    <ActionSheet open={open} onOpenChange={onOpenChange} size="lg" icon={Tag} title="Sell diamonds"
+      description="From stock to one buyer — several lots and stones at once, no jewellery order."
       footer={(
         <PanelFooter onCancel={() => onOpenChange(false)} figures={<>
-          <Stat label="Carat" value={effectiveCarat > 0 ? fmtQty(effectiveCarat, "ct") : "—"}
-            sub={kind === "certified" ? (selectedPacket ? `${selectedPacket.stockNumber ? `${selectedPacket.stockNumber} · ` : ""}${selectedPacket.shape}` : "choose the stone") : shape} />
-          <Stat label="Rate" value={Number(rate) > 0 ? `${fmtCcy(Number(rate), currency)} / ct` : "—"} />
-          <Stat big label="Total" value={baseAmount <= 0 ? "—" : usd ? fmtCcy(Math.round(baseAmount * 100) / 100, "USD") : fmtMoneyInr(totalInr)}
-            sub={usd ? (Number(xrate) > 0 ? `${fmtMoneyInr(totalInr)} at ₹${xrate} / $` : "enter the exchange rate") : undefined} />
+          <Stat label="Carat" value={lines.some(l => caratOf(l) > 0) ? fmtQty(Math.round(lines.reduce((t, l) => t + caratOf(l), 0) * 1000) / 1000, "ct") : "—"}
+            sub={`${lines.length} line${lines.length === 1 ? "" : "s"}`} />
+          <Stat big label="Total" value={baseTotal <= 0 ? "—" : usd ? fmtCcy(baseTotal, "USD") : fmtMoneyInr(totalInr)}
+            sub={usd ? (xr > 0 ? `${fmtMoneyInr(totalInr)} at ₹${xrate} / $` : "enter the exchange rate") : undefined} />
         </>}>
-          <AsyncButton onClick={submit} disabled={saving} className={SAVE}>{saving ? "Saving…" : "Record Sale"}</AsyncButton>
+          <AsyncButton onClick={submit} disabled={saving} className={SAVE}>{saving ? "Saving…" : lines.length > 1 ? `Record ${lines.length} sales` : "Record Sale"}</AsyncButton>
         </PanelFooter>
       )}>
       <div className="@container space-y-5">
@@ -472,7 +543,7 @@ function SellDiamond({ open, onOpenChange }: PanelProps) {
           <div className="grid grid-cols-2 gap-3">
             {multiCo && (
               <div className="col-span-2 @md:col-span-1">
-                <CompanyPicker value={companyId} onChange={v => { setCompanyId(v); setPacketId(""); }} label="Company — whose stock it is sold from" />
+                <CompanyPicker value={companyId} onChange={v => { setCompanyId(v); setLines(ls => ls.map(l => ({ ...l, packetId: "" }))); }} label="Company — whose stock it is sold from" />
               </div>
             )}
             <Field label="Date" className={multiCo ? "col-span-2 @md:col-span-1" : ""}>{id => (
@@ -481,42 +552,6 @@ function SellDiamond({ open, onOpenChange }: PanelProps) {
             <Field label="Remark" className={multiCo ? "col-span-2" : ""}>{id => (
               <Input id={id} value={notes} onChange={e => setNotes(e.target.value)} className="rounded-xl h-10" placeholder="Optional" />
             )}</Field>
-          </div>
-        </Group>
-
-        <Group title="Diamond">
-          <Segmented className="mb-3 max-w-[20rem]" value={kind} onChange={k => { setKind(k); setPacketId(""); }}
-            options={[["loose", "Loose", Gem], ["certified", "Certified", BadgeCheck]] as const} />
-          <div className="grid grid-cols-2 gap-3">
-            {kind === "loose" ? (
-              <>
-                <Field label="Lot" className="col-span-2">{id => (
-                  <LotPicker id={id} value={shape} onChange={setShape} companyId={companyId} />
-                )}</Field>
-                <Field label="Carat to sell" hint={shape ? <>In stock: <span className="font-semibold text-foreground">{looseInStock}ct</span></> : undefined}>{id => (
-                  <UnitInput id={id} min={0} step="0.01" unit="ct" value={carat} onChange={e => setCarat(e.target.value)} />
-                )}</Field>
-                <Field label="Pcs">{id => (
-                  <UnitInput id={id} min={0} step="1" value={pcs} onChange={e => setPcs(e.target.value)} placeholder="Optional" />
-                )}</Field>
-              </>
-            ) : (
-              <Field label="Certified diamond" className="col-span-2" hint={inStockPackets.length === 0 ? "No certified diamonds in stock." : undefined}>{id => (
-                <Select value={packetId} onValueChange={setPacketId}>
-                  <SelectTrigger id={id} className="h-10 rounded-xl"><SelectValue placeholder="Choose a diamond in stock" /></SelectTrigger>
-                  <SelectContent>
-                    {inStockPackets.map(p => (
-                      <SelectItem key={p.id} value={p.id}>
-                        {p.stockNumber ? `${p.stockNumber} · ` : ""}{p.shape} {p.carat}ct{p.certificateNumber ? ` · Report ${p.certificateNumber}` : ""}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              )}</Field>
-            )}
-            <Field label={`Rate / ct (${currency})`} hint={listed ? `List price ${fmtCcy(listed.rate, listed.currency)}/ct` : undefined}>{id => (
-              <UnitInput id={id} min={0} unit={`${ccySymbol(currency)}/ct`} value={rate} onChange={e => setRate(e.target.value)} />
-            )}</Field>
             <Field label="Currency">{id => (
               <Select value={currency} onValueChange={v => setCurrency(v as PurchaseCurrency)}>
                 <SelectTrigger id={id} className="h-10 rounded-xl"><SelectValue /></SelectTrigger>
@@ -524,10 +559,77 @@ function SellDiamond({ open, onOpenChange }: PanelProps) {
               </Select>
             )}</Field>
             {usd && (
-              <Field label="Exchange rate (₹/$)">{id => (
+              <Field label="Exchange rate (₹/$)" hint="From Settings → Exchange rates — change it if the deal was at another rate">{id => (
                 <UnitInput id={id} min={0} step="0.01" unit="₹/$" value={xrate} onChange={e => setXrate(e.target.value)} placeholder="Exchange rate (₹/$)" />
               )}</Field>
             )}
+          </div>
+        </Group>
+
+        <Group title="Diamonds">
+          <div className="space-y-3">
+            {lines.map((l, i) => {
+              const listed = listedOf(l);
+              const cost = showCosts ? costOf(l) : null;
+              const sale = saleRateInr(l);
+              const margin = cost && sale > 0 ? Math.round(((sale - cost) / sale) * 1000) / 10 : null;
+              const below = cost != null && sale > 0 && sale < cost;
+              return (
+                <div key={l.key} className="rounded-xl border border-border/70 bg-white p-3 space-y-2.5">
+                  <div className="flex items-center gap-2">
+                    <Segmented className="max-w-[16rem] flex-1" value={l.kind} onChange={k => set(l.key, { kind: k, packetId: "", shape: "", carat: "", pcs: "" })}
+                      options={[["loose", "Loose", Gem], ["certified", "Certified", BadgeCheck]] as const} />
+                    {lines.length > 1 && <span className="text-xs text-muted-foreground tabular-nums">#{i + 1}</span>}
+                    <span className="ml-auto text-sm font-semibold tabular-nums">{amountOf(l) > 0 ? fmtCcy(Math.round(amountOf(l) * 100) / 100, currency) : "—"}</span>
+                    {lines.length > 1 && (
+                      <button type="button" aria-label="Remove this line" onClick={() => setLines(ls => ls.filter(x => x.key !== l.key))}
+                        className="h-8 w-8 grid place-items-center rounded-lg text-muted-foreground hover:text-destructive hover:bg-destructive/10">×</button>
+                    )}
+                  </div>
+                  <div className="grid grid-cols-2 gap-3">
+                    {l.kind === "loose" ? (
+                      <>
+                        <Field label="Lot" className="col-span-2">{id => (
+                          <LotPicker id={id} value={l.shape} onChange={v => pick(l, { shape: v })} companyId={companyId} />
+                        )}</Field>
+                        <Field label="Carat to sell" hint={l.shape ? <>In stock: <span className="font-semibold text-foreground">{lotBal[l.shape] ?? 0}ct</span></> : undefined}>{id => (
+                          <UnitInput id={id} min={0} step="0.01" unit="ct" value={l.carat} onChange={e => set(l.key, { carat: e.target.value })} />
+                        )}</Field>
+                        <Field label="Pcs">{id => (
+                          <UnitInput id={id} min={0} step="1" value={l.pcs} onChange={e => set(l.key, { pcs: e.target.value })} placeholder="Optional" />
+                        )}</Field>
+                      </>
+                    ) : (
+                      <Field label="Certified diamond" className="col-span-2" hint={inStockPackets.length === 0 ? "No certified diamonds in stock." : undefined}>{id => (
+                        <Select value={l.packetId} onValueChange={v => pick(l, { packetId: v })}>
+                          <SelectTrigger id={id} className="h-10 rounded-xl"><SelectValue placeholder="Choose a diamond in stock" /></SelectTrigger>
+                          <SelectContent>
+                            {inStockPackets.map(p => (
+                              <SelectItem key={p.id} value={p.id}>
+                                {p.stockNumber ? `${p.stockNumber} · ` : ""}{p.shape} {p.carat}ct{p.certificateNumber ? ` · Report ${p.certificateNumber}` : ""}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      )}</Field>
+                    )}
+                    <Field label={`Rate / ct (${currency})`} className="col-span-2"
+                      hint={(listed || cost != null) ? (
+                        <span className={below ? "text-destructive font-medium" : undefined}>
+                          {listed ? `List price ${fmtCcy(listed.rate, listed.currency)}/ct` : ""}{listed && cost != null ? " · " : ""}
+                          {cost != null ? `Cost ≈ ${fmtMoneyInr(Math.round(cost))}/ct${margin != null ? ` · margin ${margin}%` : ""}${below ? " — below cost" : ""}` : ""}
+                        </span>
+                      ) : undefined}>{id => (
+                      <UnitInput id={id} min={0} unit={`${ccySymbol(currency)}/ct`} value={l.rate} onChange={e => set(l.key, { rate: e.target.value })} />
+                    )}</Field>
+                  </div>
+                </div>
+              );
+            })}
+            <div className="flex flex-wrap gap-1.5">
+              <Button type="button" variant="outline" size="sm" className="rounded-lg h-9" onClick={() => setLines(ls => [...ls, newSellLine("loose")])}><Plus className="h-3.5 w-3.5" />Loose lot</Button>
+              <Button type="button" variant="outline" size="sm" className="rounded-lg h-9" onClick={() => setLines(ls => [...ls, newSellLine("certified")])}><Plus className="h-3.5 w-3.5" />Certified stone</Button>
+            </div>
           </div>
         </Group>
 
@@ -553,7 +655,7 @@ function SellDiamond({ open, onOpenChange }: PanelProps) {
                 <Select value={lockerId} onValueChange={addNew("locker", setLockerId)}>
                   <SelectTrigger id={id} className="h-10 rounded-xl"><SelectValue placeholder={`Choose the ${currency} account`} /></SelectTrigger>
                   <SelectContent>
-                    {lockers.map(l => <SelectItem key={l.id} value={l.id}>{l.name}{l.type === "bank" && l.accountNumberLast4 ? ` ····${l.accountNumberLast4}` : ""} · {fmtCcy(lockerBalance(l, db.lockerTransactions), l.currency)}</SelectItem>)}
+                    {lockers.map(lk => <SelectItem key={lk.id} value={lk.id}>{lk.name}{lk.type === "bank" && lk.accountNumberLast4 ? ` ····${lk.accountNumberLast4}` : ""} · {fmtCcy(lockerBalance(lk, db.lockerTransactions), lk.currency)}</SelectItem>)}
                   <AddNewItem kind="locker" /></SelectContent>
                 </Select>
               )}</Field>

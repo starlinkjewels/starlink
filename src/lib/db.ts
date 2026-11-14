@@ -2286,6 +2286,9 @@ export interface ReadyStockItem {
   /** Custom fields shown to the client too (lib/customFields.ts) — staff-only ones are in customValues, admin-only in adminRecords. */
   custom?: import("./customFields").CfValues;
   id: string;
+  /** Its own tag number ("RS-00042") — the barcode on its tag, one per lot (lib/readyStockTag.ts); the SKU
+   *  (design number) is shared by lots and office splits. Given when its tag is first printed. */
+  tagNo?: string;
   name: string;
   jewelleryType: Order["jewelleryType"];
   metal: Order["metal"];

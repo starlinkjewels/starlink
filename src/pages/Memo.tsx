@@ -1,7 +1,7 @@
 // Memo — goods out on approval: what is out now, with whom, for how long (ageing),
 // what came back and what was sold. The books: lib/memos.ts.
-import { useMemo, useState } from "react";
-import { Link } from "react-router-dom";
+import { useEffect, useMemo, useState } from "react";
+import { Link, useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
 import { FileOutput, FileInput, Undo2, BadgeDollarSign, Printer, Trash2, Eye, Clock, AlertTriangle, Boxes, Wallet, CalendarClock, MessageCircle } from "lucide-react";
 import { useDb } from "@/hooks/useDb";
@@ -19,7 +19,7 @@ import {
 } from "@/lib/memos";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { MemoOutSheet, MemoBackSheet, qu } from "@/components/MemoSheets";
+import { MemoOutSheet, MemoBackSheet, qu, type MemoOutPreset } from "@/components/MemoSheets";
 import { MemoInSheet, MemoInBackSheet } from "@/components/MemoInSheets";
 import { Segmented } from "@/components/BillLayout";
 import { PageHeader, TabBar } from "@/components/PageHeader";
@@ -63,6 +63,18 @@ export function MemoPage() {
   const [dir, setDir] = useState<"out" | "in">("out");
   const isIn = dir === "in";
   const [adding, setAdding] = useState(false);
+  // A stone's or a bag's Send on memo (and a scan) arrives with ?out=packet&id=… / ?out=lot&lot=… — the memo opens with it on.
+  const [sp, setSp] = useSearchParams();
+  const [outPreset, setOutPreset] = useState<MemoOutPreset | null>(null);
+  useEffect(() => {
+    const k = sp.get("out");
+    if (!k) return;
+    const preset: MemoOutPreset | null = k === "packet" && sp.get("id") ? { kind: "certified", packetId: sp.get("id")! }
+      : k === "lot" && sp.get("lot") ? { kind: "diamond", bucket: sp.get("lot")! } : null;
+    if (preset && may) { setDir("out"); setOutPreset(preset); setAdding(true); }
+    setSp(prev => { const n = new URLSearchParams(prev); n.delete("out"); n.delete("id"); n.delete("lot"); return n; }, { replace: true });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sp]);
   const [viewId, setViewId] = useState<string | null>(null);
   const [back, setBack] = useState<{ id: string; mode: "return" | "sold" | "keep" } | null>(null);
   // Changing a memo's due day: which memo, and the day typed ("" = no due day).
@@ -229,7 +241,7 @@ export function MemoPage() {
           </ActionSheet>
         );
       })()}
-      {adding && !isIn && <MemoOutSheet open onOpenChange={v => { if (!v) setAdding(false); }} />}
+      {adding && !isIn && <MemoOutSheet open onOpenChange={v => { if (!v) { setAdding(false); setOutPreset(null); } }} preset={outPreset} />}
       {adding && isIn && <MemoInSheet open onOpenChange={v => { if (!v) setAdding(false); }} />}
       {backMemo && back && backMemo.dir === "out" && back.mode !== "keep" && <MemoBackSheet memo={backMemo} mode={back.mode} onClose={() => setBack(null)} />}
       {backMemo && back && backMemo.dir === "in" && back.mode !== "sold" && <MemoInBackSheet memo={backMemo} mode={back.mode} onClose={() => setBack(null)} />}

@@ -49,7 +49,9 @@ const SYM: Record<string, string> = { INR: "₹", USD: "$" };
 export const qu = (n: number, unit: string) => `${Math.round(n * 1000) / 1000} ${unit}`;
 
 /** Send goods out on memo — to a client, a dealer or a broker. `party` fixes who (opened from their page). */
-export function MemoOutSheet({ open, onOpenChange, party: fixed }: { open: boolean; onOpenChange: (v: boolean) => void; party?: MemoParty }) {
+/** What opened a memo out with something already on it — a stone's or a bag's Send on memo (?out=…). */
+export type MemoOutPreset = { kind: "certified"; packetId: string } | { kind: "diamond"; bucket: string };
+export function MemoOutSheet({ open, onOpenChange, party: fixed, preset }: { open: boolean; onOpenChange: (v: boolean) => void; party?: MemoParty; preset?: MemoOutPreset | null }) {
   const db = useDb();
   const { user } = useAuth();
   const multiCo = useMultiCo();
@@ -64,10 +66,12 @@ export function MemoOutSheet({ open, onOpenChange, party: fixed }: { open: boole
   const [notes, setNotes] = useState("");
   useEffect(() => {
     if (!open) return;
-    setKind(fixed?.kind ?? "client"); setPartyId(fixed?.id ?? ""); setDate(todayLocal()); setDue(""); setLines([newDraft("diamond")]); setNotes("");
+    setKind(fixed?.kind ?? "client"); setPartyId(fixed?.id ?? ""); setDate(todayLocal()); setDue(""); setNotes("");
+    setLines([preset?.kind === "certified" ? { ...newDraft("certified"), packetId: preset.packetId }
+      : preset?.kind === "diamond" ? { ...newDraft("diamond"), bucket: preset.bucket } : newDraft("diamond")]);
     setCurrency((fixed?.kind ?? "client") === "client" ? "USD" : "INR"); setCompanyId(defaultCo);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, fixed?.kind, fixed?.id]);
+  }, [open, fixed?.kind, fixed?.id, preset]);
 
   const parties = kind === "client"
     ? db.clients.filter(c => worksOnClientId(db, user, c.id)).map(c => ({ id: c.id, name: c.companyName }))

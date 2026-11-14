@@ -1,3 +1,4 @@
+import { ensureTagNo, tagShown } from "@/lib/readyStockTag";
 import { OLD_DAYS, SLOW_DAYS, ageBand, pieceAge } from "@/lib/stockAge";
 import { DataTable, CellTag, CellAmount, CellDate, type DataColumn } from "@/components/DataTable";
 import { PageViewsButton } from "@/components/SavedViews";
@@ -6,7 +7,7 @@ import { fieldsFor, filledPairs, searchWords, valuesOf } from "@/lib/customField
 import { WebVideo } from "@/components/ProductVideo";
 import { metalFamily, metalLabel } from "@/lib/metals";
 import { useCan, useMayExport } from "@/hooks/useCan";
-import { Fragment, useState, type MouseEvent } from "react";
+import { Fragment, useEffect, useState, type MouseEvent } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { ensureCollections, loadDb, updateDb, fmtDate, fmtMoney, stockCostOf, worksOnOrder, type Order, type ReadyStockItem } from "@/lib/db";
 import { readyStockDeleteBlocker, readyStockOutLabel } from "@/lib/readyStockGuards";
@@ -112,6 +113,8 @@ export function ReadyStockPage() {
   // Exactly one company in view: its pieces need no company badge.
   const oneCo = selList(coSel).length === 1;
   const [bandItem, setBandItem] = useState<ReadyStockItem | null>(null); // item whose barcode band modal is open
+  // Its own tag number, given as its tag window opens — so Print itself is instant (lib/readyStockTag.ts).
+  useEffect(() => { if (bandItem && !bandItem.tagNo) ensureTagNo(bandItem.id).catch(() => { /* printed with its SKU then */ }); }, [bandItem]);
   // Right-click on a piece's card: its ⋯, where the mouse is (components/MoreMenu).
   const rightClick = useRightClickMenu();
   // Pieces being shared with a client (a PDF or a link).
@@ -586,7 +589,7 @@ export function ReadyStockPage() {
                 </p>
               )}
               <p className="text-[11px] text-muted-foreground mt-0.5 font-mono truncate">
-                ID {item.id.slice(-6).toUpperCase()}{item.sku ? ` · #${item.sku}` : ""}
+                {tagShown(item)}{item.sku ? ` · #${item.sku}` : ""}
               </p>
               {canManage && (item.fromReturn || !oneCo) && (
                 <div className="flex flex-wrap gap-1 mt-1">
@@ -661,7 +664,8 @@ export function ReadyStockPage() {
         onOpenChange={o => { if (!o) setBandItem(null); }}
         presets={labelPresets(db.settings)}
         showPrice={db.settings.barcodeBandShowPrice !== false}
-        onGenerate={(preset, mode, copies) => { if (bandItem) generateStockBand(bandItem, db.settings, { style: preset.style, width: preset.widthMm, height: preset.heightMm, mode, copies }); }}
+        // Printed from the lot as it is now — with the tag number given as the window opened (lib/readyStockTag.ts).
+        onGenerate={(preset, mode, copies) => { if (bandItem) generateStockBand(db.readyStock.find(x => x.id === bandItem.id) ?? bandItem, db.settings, { style: preset.style, width: preset.widthMm, height: preset.heightMm, mode, copies }); }}
       />
 
       {/* Product video viewer */}
