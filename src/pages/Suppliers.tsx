@@ -21,9 +21,10 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { Plus, Mail, Phone, MapPin, Search, Trash2, Truck, History, Hash, Rows3, LayoutGrid, Power, Pencil, Handshake, CalendarClock } from "lucide-react";
+import { Plus, Mail, Phone, MapPin, Search, Trash2, Truck, History, Hash, Rows3, LayoutGrid, Power, Pencil, Handshake, CalendarClock, ClipboardList } from "lucide-react";
 import { DataTable, CellMain, CellTag, CellAmount, type DataColumn } from "@/components/DataTable";
 import { PageHeader, TabBar, ViewSwitch } from "@/components/PageHeader";
+import { PurchaseOrdersPanel } from "@/components/PurchaseOrders";
 import { SuppliersToPay } from "@/components/SuppliersToPay";
 import { BrokersPanel } from "@/components/BrokersPanel";
 import { toast } from "sonner";
@@ -74,12 +75,12 @@ export function SuppliersPage() {
   const [editing, setEditing] = useState<Supplier | null>(null);
   // Suppliers, or the brokers (dalals) who bring purchases — remembered on this device.
   // Suppliers, the bills to pay (lib/supplierDue.ts), or the brokers — remembered on this device.
-  const [tabPick, setTab] = useState<"suppliers" | "topay" | "brokers">(() => {
-    try { const t = localStorage.getItem("suppliers-tab"); return t === "brokers" || t === "topay" ? t : "suppliers"; } catch { return "suppliers"; }
+  const [tabPick, setTab] = useState<"suppliers" | "topay" | "po" | "brokers">(() => {
+    try { const t = localStorage.getItem("suppliers-tab"); return t === "brokers" || t === "topay" || t === "po" ? t : "suppliers"; } catch { return "suppliers"; }
   });
   // "To pay" is what we owe: only for those who may see it.
   const tab = tabPick === "topay" && !showOwed ? "suppliers" : tabPick;
-  const pickTab = (t: "suppliers" | "topay" | "brokers") => { setTab(t); try { localStorage.setItem("suppliers-tab", t); } catch { /* ignore */ } };
+  const pickTab = (t: "suppliers" | "topay" | "po" | "brokers") => { setTab(t); try { localStorage.setItem("suppliers-tab", t); } catch { /* ignore */ } };
   const [newBroker, setNewBroker] = useState(false);
   const navigate = useNavigate();
 
@@ -229,8 +230,8 @@ export function SuppliersPage() {
       {/* How many there are is the table's (or the grid's) own count. */}
       <PageHeader
         title="Suppliers"
-        subtitle={tab === "brokers" ? "Brokers who bring purchases, and their brokerage" : "Purchases, payments and balances"}
-        primary={!mayAdd ? null : tab === "brokers"
+        subtitle={tab === "brokers" ? "Brokers who bring purchases, and their brokerage" : tab === "po" ? "What we asked suppliers for — and what came" : "Purchases, payments and balances"}
+        primary={!mayAdd || tab === "po" ? null : tab === "brokers"
           ? { label: "New Broker", icon: Plus, onClick: () => setNewBroker(true) }
           : { label: "New Supplier", icon: Plus, onClick: () => setOpen(true) }}
         actions={tab === "suppliers" ? <ViewSwitch view={view} onChange={saveView} /> : undefined}
@@ -240,10 +241,13 @@ export function SuppliersPage() {
       <TabBar label="Suppliers and brokers" value={tab} onChange={pickTab} tabs={[
         { key: "suppliers", label: "Suppliers", icon: Truck, count: db.suppliers.length },
         ...(showOwed ? [{ key: "topay" as const, label: "To pay", icon: CalendarClock }] : []),
+        // What we asked suppliers for, before the goods came (components/PurchaseOrders).
+        { key: "po" as const, label: "Purchase orders", icon: ClipboardList },
         { key: "brokers", label: "Brokers", icon: Handshake, count: (db.brokers ?? []).length },
       ]} />
 
       {tab === "topay" && <SuppliersToPay mayPay={can("payments", "add")} />}
+      {tab === "po" && <PurchaseOrdersPanel />}
 
       {tab === "brokers" && <BrokersPanel mayAdd={mayAdd} mayEdit={mayEdit} mayDelete={mayDelete} creating={newBroker} onCreating={setNewBroker} />}
 

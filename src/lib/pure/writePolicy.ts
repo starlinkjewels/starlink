@@ -88,6 +88,8 @@ export const WRITE_POLICY: Policy = {
   // + suppliers.purchase: a purchase return (lib/purchaseReturns.ts) is recorded here too.
   supplierSales: { create: ["suppliers.sell", "buyAssign.sell", "stock.memo", "suppliers.purchase"], update: ["suppliers.sell", "buyAssign.sell", "suppliers.purchase"], delete: ["suppliers.sell", "buyAssign.sell", "suppliers.purchase"] },
   memos: { create: ["stock.memo"], update: ["stock.memo"], delete: ["stock.memo"] },
+  // Purchase orders (lib/purchaseOrders.ts) — whoever records a supplier's purchases.
+  purchaseOrders: { create: ["suppliers.purchase"], update: ["suppliers.purchase"], delete: ["suppliers.purchase"] },
   diamondSales: { create: ["buyAssign.sell", "stock.memo"], update: ["payments.add", "payments.delete", "buyAssign.delete"], delete: ["buyAssign.delete"] },
 
   // ── Material, stock and manufacturing ──
@@ -162,7 +164,7 @@ export const POLICY_NOUN: Record<string, string> = {
   clients: "clients", invoices: "invoices", giftCards: "gift cards",
   lockerTransactions: "account entries", expenses: "expenses", clientReceipts: "client receipts",
   supplierReceipts: "money from suppliers", supplierPayments: "supplier payments", factoryPayments: "factory payments",
-  supplierSales: "sales to suppliers", diamondSales: "diamond sales", memos: "memos",
+  supplierSales: "sales to suppliers", diamondSales: "diamond sales", memos: "memos", purchaseOrders: "purchase orders",
   purchases: "purchases", materialIssuances: "material given to factories", diamondPackets: "certified stones",
   stockMovements: "stock", stockLevels: "stock", diamondBags: "diamond bags", customValues: "custom fields", cadJobs: "design jobs",
   readyStock: "Ready Stock", catalogFolders: "catalogue folders", catalogItems: "catalogue designs",

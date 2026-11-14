@@ -148,6 +148,9 @@ service cloud.firestore {
     function pol_memos_create() { return ['stock.memo']; }
     function pol_memos_update() { return ['stock.memo']; }
     function pol_memos_delete() { return ['stock.memo']; }
+    function pol_purchaseOrders_create() { return ['suppliers.purchase']; }
+    function pol_purchaseOrders_update() { return ['suppliers.purchase']; }
+    function pol_purchaseOrders_delete() { return ['suppliers.purchase']; }
     function pol_diamondSales_create() { return ['buyAssign.sell', 'stock.memo']; }
     function pol_diamondSales_update() { return ['payments.add', 'payments.delete', 'buyAssign.delete']; }
     function pol_diamondSales_delete() { return ['buyAssign.delete']; }
@@ -456,6 +459,8 @@ service cloud.firestore {
     match /supplierSales/{id}       { allow read: if isStaff(); allow create: if staffMay(pol_supplierSales_create()); allow update: if staffMay(pol_supplierSales_update()); allow delete: if staffMay(pol_supplierSales_delete()); }
     // Goods out on memo — on approval (lib/memos.ts) — staff only; never a client.
     match /memos/{id}               { allow read: if isStaff(); allow create: if staffMay(pol_memos_create()); allow update: if staffMay(pol_memos_update()); allow delete: if staffMay(pol_memos_delete()); }
+    // Purchase orders — what we asked a supplier for (lib/purchaseOrders.ts) — staff only; never a client.
+    match /purchaseOrders/{id}      { allow read: if isStaff(); allow create: if staffMay(pol_purchaseOrders_create()); allow update: if staffMay(pol_purchaseOrders_update()); allow delete: if staffMay(pol_purchaseOrders_delete()); }
     // Totals kept by the server (functions/src/summaries.ts) — read by staff,
     // written only by the server, which the rules do not govern.
     match /summaries/{id}           { allow read: if isStaff(); allow write: if false; }
