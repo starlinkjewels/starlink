@@ -1,3 +1,5 @@
+import { PriceListSheet } from "@/components/PriceListSheet";
+import { LowStockBox } from "@/components/LowStock";
 import { PageHeader } from "@/components/PageHeader";
 import { OpeningStock } from "@/pages/BuyAssign";
 import { BuyMaterialForm } from "@/components/BuyMaterialForm";
@@ -22,7 +24,7 @@ import { MaterialEditor } from "@/components/MaterialsSettings";
 import { CompanyFilter, useMultiCo } from "@/components/CompanyFields";
 import { StockTransferDialog } from "@/components/StockTransfer";
 import { companiesOf, companyOf } from "@/lib/companies";
-import { ArrowRightLeft } from "lucide-react";
+import { ArrowRightLeft, Tags } from "lucide-react";
 import { useDataFresh } from "@/hooks/useDataFresh";
 import { goldOwedToSuppliers, fmtG } from "@/lib/supplierGold";
 
@@ -66,6 +68,7 @@ export function StockPage() {
   const [addingMaterial, setAddingMaterial] = useState(false);
   const [moving, setMoving] = useState(false);
   const [counting, setCounting] = useState(false);
+  const [pricing, setPricing] = useState(false);
   const can = useCan();
   const mayAddStock = can("buyAssign", "add");
   const [opening, setOpening] = useState(false);
@@ -207,12 +210,17 @@ export function StockPage() {
           { label: "Opening stock", icon: Boxes, hint: "From before the app — no dues", onSelect: () => setOpening(true), show: mayAddStock },
           { label: "Move between companies", icon: ArrowRightLeft, hint: "From one company to another", onSelect: () => setMoving(true), show: multiCo && hasFeature(user, db.roles ?? [], "stock.companies") },
           // Count what is really on the shelf, then post the differences with reasons (lib/stockCount.ts).
+          // What we ask for loose lots and certified stones — to send a buyer (lib/priceList.ts).
+          { label: "Price list", icon: Tags, hint: "Loose lots and certified stones — send as PDF or WhatsApp", onSelect: () => setPricing(true), show: user?.role === "admin" || hasFeature(user, db.roles ?? [], "buyAssign.sell") },
           { label: "Stock count", icon: ClipboardCheck, hint: "Count, then post differences with reasons", onSelect: () => setCounting(true), show: user?.role === "admin" },
           { label: recomputing ? "Recomputing…" : "Recompute from history", icon: RotateCcw, hint: "Rebuild counters from movements", onSelect: recompute, disabled: recomputing, show: user?.role === "admin" },
         ]}
       />
       {moving && <StockTransferDialog onClose={() => setMoving(false)} />}
       {counting && <StockCountSheet open onOpenChange={v => { if (!v) setCounting(false); }} />}
+      {pricing && <PriceListSheet companyId={view} onClose={() => setPricing(false)} />}
+      {/* Lines below their reorder level — with Order more (lib/reorder.ts). */}
+      <LowStockBox companyId={view} />
 
 
       <div className="grid gap-3 grid-cols-2 lg:grid-cols-3">

@@ -1259,6 +1259,12 @@ export interface Company {
   createdAt: string;
 }
 
+/** One asking price: a loose lot (bucket) or a certified stone (packetId), per carat, in ₹ or $. */
+export interface PriceListEntry { kind: "lot" | "packet"; ref: string; rate: number; currency: "INR" | "USD"; at: string }
+
+/** One reorder level: the stock line (gold purity, loose lot, a material's grade) and how low it may go. */
+export interface ReorderLevel { material: string; bucket: string; min: number; companyId?: string }
+
 export interface Settings {
   /** Custom fields the admin added (Settings → Custom fields, lib/customFields.ts). Admin-only to change. */
   customFields?: import("./customFields").CustomFieldDef[];
@@ -1364,6 +1370,14 @@ export interface Settings {
   // Monotonic counter behind nextDiamondStockNumber() — never reused even if
   // a packet is later deleted, unset = no certified packet has been numbered yet.
   nextDiamondStockNo?: number;
+  /** Reorder levels (lib/reorder.ts): a line of stock below its level is "low" on the Stock screens,
+   *  with Order more. Set by an admin from Stock; one per material, line and company (unset = all together). */
+  reorderLevels?: ReorderLevel[];
+  /** The selling price list (lib/priceList.ts): asking price per carat for a loose lot or a certified
+   *  stone — never its cost. Set by an admin; Sell a diamond starts from it. */
+  priceList?: PriceListEntry[];
+  /** Suggested price = average cost + this % (Stock → Price list), where none is set. Unset = no suggestion. */
+  priceListMarkupPct?: number;
   /** Year closing (lib/yearLock.ts): the last day of the last closed financial
    *  year, "YYYY-MM-DD". Nothing dated on or before it can be added, changed or
    *  deleted until the main admin reopens that year. Unset = no year closed. */

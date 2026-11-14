@@ -1,3 +1,6 @@
+import { ageBand, lineIdleDays } from "@/lib/stockAge";
+import { ReorderLevelSheet } from "@/components/LowStock";
+import { reorderLevelOf } from "@/lib/reorder";
 import { useEffect, useMemo, useState } from "react";
 import { customColumns } from "@/components/CustomFields";
 import { fieldsFor, searchWords, valuesOf } from "@/lib/customFields";
@@ -20,7 +23,7 @@ import { useUrlState } from "@/hooks/useUrlState";
 import { useStickyFilter } from "@/hooks/useStickyFilter";
 import { selList, selOn } from "@/lib/filterSel";
 import { BagPanel } from "@/components/BagPanel";
-import { ArrowRightLeft, Coins, FolderOpen, Gem, Hash, Layers, Package, Printer, Wallet, X } from "lucide-react";
+import { ArrowRightLeft, Coins, FolderOpen, Gem, Hash, Layers, Package, Printer, Wallet, X, Gauge } from "lucide-react";
 
 /** One line of stock: a gold purity, a loose-diamond lot, or a material's grade —
  *  or, seen together, every lot of one size (every purity of one karat). */
@@ -237,6 +240,19 @@ export function StockLotsTable({ material, companyId, selected, onSelect }: {
       </span>
     );
   };
+  // Reorder levels (lib/reorder.ts): a single line below its level says Low; an admin sets the level from its ⋯.
+  const coArg = companyId || "all";
+  const levelOf = (r: Row) => (r.members ? undefined : reorderLevelOf(db, material, r.key, coArg));
+  const lowTag = (r: Row) => { const l = levelOf(r); return l && r.qty < l.min - 1e-9
+    ? <span className="ml-1.5 align-middle text-[10px] font-semibold uppercase rounded-full px-1.5 py-0.5 bg-amber-500/15 text-amber-800" title={`Below its reorder level of ${fmtQty(l.min, unit)}`}>Low</span> : null; };
+  const [leveling, setLeveling] = useState<string | null>(null);
+  const levelAction = (r: Row) => ({ label: "Reorder level", icon: Gauge, show: user?.role === "admin" && !r.members,
+    hint: levelOf(r) ? `Low below ${fmtQty(levelOf(r)!.min, unit)}` : "When it is low — with Order more", onSelect: () => setLeveling(r.key) });
+  // Slow-moving (lib/stockAge.ts): days since any of the line last went out (or came in, never used).
+  const idleOf = (r: Row) => (r.qty > 0 ? lineIdleDays(db.stockMovements ?? [], material, keysOf(r), companyId) : 0);
+  const idleCol: DataColumn<Row> = { key: "idle", header: "Idle", align: "right", kind: "number", sortValue: r => idleOf(r),
+    cell: r => { if (!(r.qty > 0)) return dash; const d = idleOf(r), band = ageBand(d);
+      return <span className="whitespace-nowrap tabular-nums" title="Days since any of it last went out">{d} days{band !== "fresh" && <span className={`ml-1.5 align-middle text-[10px] font-semibold rounded-full px-1.5 py-0.5 ${band === "old" ? "bg-destructive/10 text-destructive" : "bg-amber-500/15 text-amber-800"}`}>{band === "old" ? "Old" : "Slow"}</span>}</span>; } };
   const columns: DataColumn<Row>[] = lotLike ? [
     ...(diamond ? [{ key: "bag", header: together ? "Bags" : "Bag", always: true, sortValue: (r: Row) => (r.members ? r.members.length : r.bag ?? "~"),
       csv: (r: Row) => (r.members ? r.members.map(m => m.bag).filter(Boolean).join(", ") : r.bag ?? ""), cell: bagsCell }] : []),
@@ -252,7 +268,8 @@ export function StockLotsTable({ material, companyId, selected, onSelect }: {
     ...(diamond ? [{ key: "pcs", header: "Pcs", align: "right" as const, kind: "number" as const, sortValue: (r: Row) => r.pcs,
       cell: (r: Row) => (r.pcs != null ? <span className="tabular-nums">{r.pcs.toLocaleString()}</span> : dash) }] : []),
     { key: "qty", card: "figure" as const, header: diamond ? "Carats" : `In stock (${unit})`, align: "right", kind: "number", sortValue: r => r.qty,
-      cell: r => <span className="tabular-nums font-semibold text-brand-dark whitespace-nowrap">{fmtQty(r.qty, unit)}</span> },
+      cell: r => <span className="tabular-nums font-semibold text-brand-dark whitespace-nowrap">{fmtQty(r.qty, unit)}{lowTag(r)}</span> },
+    idleCol,
     { key: "avg", header: `Avg ₹/${unit}`, align: "right", kind: "number", sortValue: r => r.avg,
       cell: r => (r.avg != null ? <span className="tabular-nums whitespace-nowrap">{fmtMoneyInr(r.avg)}</span> : dash) },
     { key: "value", card: "first" as const, header: "Value", align: "right", kind: "number", sortValue: r => r.value,
@@ -263,9 +280,10 @@ export function StockLotsTable({ material, companyId, selected, onSelect }: {
     { key: "lot", header: gold ? (together ? "Karat" : "Purity") : "Grade", always: true, sortValue: r => r.label ?? r.key, csv: r => r.label ?? r.key,
       cell: r => <CellMain title={r.label ?? r.key} sub={r.members ? (r.members.length > 1 ? r.members.map(m => m.key).join(" · ") : r.members[0].key !== r.label ? r.members[0].key : undefined) : undefined} /> },
     { key: "qty", card: "figure" as const, header: `In stock (${unit})`, align: "right", kind: "number", sortValue: r => r.qty,
-      cell: r => <span className="tabular-nums font-semibold text-brand-dark whitespace-nowrap">{fmtQty(r.qty, unit)}</span> },
+      cell: r => <span className="tabular-nums font-semibold text-brand-dark whitespace-nowrap">{fmtQty(r.qty, unit)}{lowTag(r)}</span> },
     ...(gold ? [{ key: "fine", header: "Fine (24K)", align: "right" as const, kind: "number" as const, sortValue: (r: Row) => r.fine,
       cell: (r: Row) => <span className="tabular-nums whitespace-nowrap">{fmtQty(r.fine ?? 0, "g")}</span> }] : []),
+    idleCol,
     { key: "avg", header: `Avg ₹/${unit}`, align: "right", kind: "number", sortValue: r => r.avg,
       cell: r => (r.avg != null ? <span className="tabular-nums whitespace-nowrap">{fmtMoneyInr(r.avg)}</span> : dash) },
     { key: "value", card: "first" as const, header: "Value", align: "right", kind: "number", sortValue: r => r.value,
@@ -340,6 +358,7 @@ export function StockLotsTable({ material, companyId, selected, onSelect }: {
         rows={tableRows}
         rowKey={r => r.key}
         rowActions={diamond ? (r => [
+          levelAction(r),
           ...(r.members && r.members.length > 1
             ? [{ label: `Open its ${r.members.length} bags`, icon: FolderOpen, hint: "Each bag and the history of all of them", onSelect: () => setPanel({ keys: keysOf(r), label: r.label, start: "view" }) }]
             : [
@@ -350,7 +369,7 @@ export function StockLotsTable({ material, companyId, selected, onSelect }: {
           r.members
             ? { label: `Print ${r.members.length === 1 ? "its bag label" : `its ${r.members.length} bag labels`}`, icon: Printer, disabled: !r.members.some(m => m.bag), hint: r.members.map(m => m.bag).filter(Boolean).join(", ") || "Give these lots bag numbers first", onSelect: () => print([r]) }
             : { label: "Print bag label", icon: Printer, disabled: !r.bag, hint: r.bag ? `${r.bag} · ${lotLabel(r.key)}` : "Give this lot a bag number first", onSelect: () => print([r]) },
-        ]) : undefined}
+        ]) : (r => [levelAction(r)])}
         columns={showCosts ? columns : columns.filter(c => c.key !== "avg" && c.key !== "value")}
         filters={filters}
         onClearFilters={() => { setShape(ALL); setVariety(ALL); setType(ALL); setMm(ALL); setSize(ALL); setColor(ALL); setClarity(ALL); }}
@@ -362,6 +381,7 @@ export function StockLotsTable({ material, companyId, selected, onSelect }: {
         details={false}
         emptyText={rows.length ? "No lot matches these filters." : "Nothing in stock."}
       />
+      {leveling && <ReorderLevelSheet material={material} bucket={leveling} companyId={coArg} onClose={() => setLeveling(null)} />}
       {diamond && <BagPanel keys={panel?.keys ?? null} label={panel?.label} start={panel?.start} companyId={companyId} onClose={() => setPanel(null)} />}
       {/* An opened line: what it is made of — each bag (purity) opens on its own. */}
       {open && open.members!.length > 1 && (
