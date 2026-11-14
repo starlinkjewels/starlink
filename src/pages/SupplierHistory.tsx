@@ -13,8 +13,9 @@ import { AddNewItem, useAddNew } from "@/components/create/QuickCreate";
 import { bagNoOfPurchase } from "@/lib/diamondBags";
 import { diamondSpec, isOtherMaterial, isReadyPiece, materialName, materialUnit, purchaseQty, purchaseText, readyPieceSpec } from "@/lib/materials";
 import { gstTag, gstText, preGstInr, purchaseGstInr, pctText } from "@/lib/purchaseGst";
-import { useState } from "react";
-import { useParams, Link, useNavigate } from "react-router-dom";
+import { useEffect, useState } from "react";
+import { useParams, Link, useNavigate, useSearchParams } from "react-router-dom";
+import { supplierBillsDue } from "@/lib/supplierDue";
 import { collectionLoaded, updateDb, uid, fmtDate, todayLocal, stampFor, KARAT_PURITY, hasOpeningBalance, openingDebitAmt, openingCreditAmt, type Purchase, type LedgerDir, type Supplier } from "@/lib/db";
 import { OpeningBalanceFields } from "@/components/OpeningBalanceFields";
 import { useDb } from "@/hooks/useDb";
@@ -185,6 +186,17 @@ function SupplierHistoryPageBody() {
     if (!payLockerId) { const last = lastPayLocker(user?.id); if (payLockers.some(l => l.id === last)) setPayLockerId(last); }
     setShowPayForm(true);
   };
+  // Came from Suppliers → To pay (?pay=<bill>): the Pay panel opens, set to that bill and what is owed on it.
+  const [sp, setSp] = useSearchParams();
+  const payAsk = sp.get("pay");
+  useEffect(() => {
+    if (payAsk === null || !mayPay) return;
+    const bill = payAsk ? db.purchases.find(x => x.id === payAsk && x.supplierId === id) : undefined;
+    if (bill) { setPayTargetPurchase(bill.id); setPayAmount(String(Math.round(purchasePending(bill) * 100) / 100)); }
+    openPay();
+    setSp(prev => { const n = new URLSearchParams(prev); n.delete("pay"); return n; }, { replace: true });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [payAsk, mayPay]);
 
   const recordPayment = async () => {
     const amt = Number(payAmount);
@@ -683,6 +695,8 @@ function SupplierHistoryPageBody() {
   /** A diamond's lot or report under its title: "Round · +6.5-7 · G-H · VS · 12 pcs". */
   const purchaseSub = (p: Purchase) => p.material !== "diamond" ? undefined
     : [bagNoOfPurchase(db, p), diamondSpec(p.diamond, p.diamond?.kind === "certified" ? (db.diamondPackets ?? []).find(x => x.purchaseId === p.id) : undefined)].filter(Boolean).join(" · ") || undefined;
+  // Each unpaid bill's due day and lateness, as Suppliers → To pay works it out.
+  const dueOf = new Map(supplierBillsDue(db, supplier).filter(b => b.purchase).map(b => [b.purchase!.id, b]));
   const purchaseColumns: DataColumn<Purchase>[] = [
     { key: "date", header: "Date", always: true, kind: "date", sortValue: p => +new Date(p.createdAt), csv: p => fmtDate(p.createdAt),
       cell: p => <CellDate>{fmtDate(p.createdAt)}</CellDate> },
@@ -708,6 +722,20 @@ function SupplierHistoryPageBody() {
       cell: p => <CellAmount>{fmtMoneyInr(p.totalInr)}</CellAmount> },
     { key: "paid", header: "Paid", align: "right", kind: "number", sortValue: p => purchasePaid(p),
       cell: p => (purchasePaid(p) > 0 ? <CellAmount tone="in">{fmtMoneyInr(purchasePaid(p))}</CellAmount> : <span className="text-muted-foreground/50">—</span>) },
+    // Due by their credit days (lib/supplierDue.ts) — only once they have credit days.
+    ...(supplier.creditDays != null ? [{ key: "due", header: "Due", kind: "date" as const,
+      sortValue: (p: Purchase) => +new Date(dueOf.get(p.id)?.dueAt ?? p.invoiceDate ?? p.createdAt),
+      csv: (p: Purchase) => (dueOf.get(p.id)?.dueAt ? fmtDate(dueOf.get(p.id)!.dueAt!) : ""),
+      cell: (p: Purchase) => {
+        const b = dueOf.get(p.id);
+        if (!b?.dueAt) return <span className="text-muted-foreground/50">—</span>;
+        return (
+          <span className="text-xs whitespace-nowrap">
+            <span className={b.late > 0 ? "text-destructive font-semibold" : ""}>{fmtDate(b.dueAt)}</span>
+            <span className={`block text-[10px] ${b.late > 0 ? "text-destructive" : "text-muted-foreground"}`}>{b.late > 0 ? `${b.late} d late` : b.left === 0 ? "due today" : `in ${b.left} d`}</span>
+          </span>
+        );
+      } }] : []),
     { key: "pending", header: "Pending", align: "right", kind: "number", sortValue: p => purchasePending(p),
       cell: p => (purchasePending(p) > 0 ? <CellAmount tone="out">{fmtMoneyInr(purchasePending(p))}</CellAmount> : <CellTag tone="green">Paid</CellTag>) },
   ];

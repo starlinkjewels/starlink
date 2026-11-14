@@ -1,3 +1,4 @@
+import { atFactoryNow } from "@/lib/factoryWip";
 import { studioOn } from "@/lib/studio";
 import { PageViewsButton } from "@/components/SavedViews";
 import { factoryFigures } from "@/lib/partyTotals";
@@ -156,11 +157,15 @@ export function FactoriesPage() {
   const otherHeld = (fac: Factory) => { const o = accountOf(fac).other ?? {};
     return bySettingsOrder(db.settings, Object.keys(o)).map(k => `${materialName(db.settings, k)} ${o[k].toLocaleString()} ${materialUnit(db.settings, k)}`); };
   const anyOther = db.factories.some(fac => otherHeld(fac).length > 0);
+  // Orders each is making now — not back yet (lib/factoryWip.ts), and how many of them are late.
+  const wip = new Map(db.factories.map(fac => { const rows = atFactoryNow(db, fac.id); return [fac.id, { n: rows.length, late: rows.filter(r => r.late > 0).length }]; }));
   const columns: DataColumn<Factory>[] = [
     { key: "factory", header: "Factory", always: true, sortValue: fac => fac.name, csv: fac => fac.name,
       cell: fac => <CellMain
         title={<>{fac.name}{fac.active === false && <span className="ml-2 align-middle"><CellTag>Inactive</CellTag></span>}</>}
         sub={fac.contactPerson || fac.phone || undefined} /> },
+    { key: "atnow", header: "At the factory", align: "right", kind: "number", sortValue: fac => wip.get(fac.id)?.n ?? 0, csv: fac => wip.get(fac.id)?.n ?? 0,
+      cell: fac => { const w = wip.get(fac.id); return w?.n ? <span className="tabular-nums whitespace-nowrap">{w.n} order{w.n === 1 ? "" : "s"}{w.late > 0 && <span className="block text-[10px] font-semibold text-destructive">{w.late} late</span>}</span> : <span className="text-muted-foreground/50">—</span>; } },
     // Reserved fine gold (24KT, opening included) and diamond — the figures the
     // factory's own page shows.
     { key: "gold", header: "Fine gold 24KT", align: "right", kind: "number", sortValue: fac => accountOf(fac).fineGold,

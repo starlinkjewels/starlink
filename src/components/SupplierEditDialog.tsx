@@ -30,17 +30,21 @@ export function SupplierEditDialog({ supplier, onClose }: { supplier: Supplier |
   const db = useDb();
   const { user } = useAuth();
   const [f, setF] = useState<Form>(formOf(supplier));
+  // Days we have to pay their bill (lib/supplierDue.ts) — "" = none.
+  const [days, setDays] = useState(supplier?.creditDays != null ? String(supplier.creditDays) : "");
   // Custom fields (lib/customFields.ts) — the ones this person may see.
   const [cf, setCf] = useState<CfValues>({});
   // A different supplier opened: start from what is saved for them.
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  useEffect(() => { if (supplier) { setF(formOf(supplier)); setCf(valuesOf(db, "suppliers", supplier.id)); } }, [supplier]);
+  useEffect(() => { if (supplier) { setF(formOf(supplier)); setCf(valuesOf(db, "suppliers", supplier.id)); setDays(supplier.creditDays != null ? String(supplier.creditDays) : ""); } }, [supplier]);
 
   const save = () => {
     if (!supplier) return;
     if (!f.name.trim()) { toast.error("Enter a supplier name"); return; }
     const cfWhy = customProblem(db.settings, "suppliers", cf, user, valuesOf(db, "suppliers", supplier.id));
     if (cfWhy) { toast.error(cfWhy); return; }
+    const cd = days.trim() === "" ? undefined : Number(days);
+    if (cd != null && (!Number.isInteger(cd) || cd < 0 || cd > 365)) { toast.error("Credit days: whole days, 0 to 365"); return; }
     updateDb(d => {
       const s = d.suppliers.find(x => x.id === supplier.id);
       if (!s) return;
@@ -51,6 +55,7 @@ export function SupplierEditDialog({ supplier, onClose }: { supplier: Supplier |
         const v = f[k].trim();
         if (v) s[k] = v; else delete s[k];
       }
+      if (cd != null) s.creditDays = cd; else delete s.creditDays;
       if (!sameValues(cf, valuesOf(d, "suppliers", s.id))) writeValues(d, "suppliers", s.id, cf, user, user?.id);
     });
     toast.success("Supplier updated");
@@ -62,7 +67,7 @@ export function SupplierEditDialog({ supplier, onClose }: { supplier: Supplier |
       open={!!supplier}
       onOpenChange={o => { if (!o) onClose(); }}
       title="Edit Supplier"
-      description="Name and contact details only"
+      description="Name, contact details and credit days"
       icon={Truck}
       size="md"
       footer={
@@ -88,6 +93,11 @@ export function SupplierEditDialog({ supplier, onClose }: { supplier: Supplier |
             <Input id={`sup-edit-${k}`} value={f[k]} onChange={e => setF({ ...f, [k]: e.target.value })} className="rounded-xl mt-1" />
           </div>
         ))}
+        <div className="col-span-2">
+          <Label htmlFor="sup-edit-days" className="text-xs">Credit days</Label>
+          <Input id="sup-edit-days" type="number" inputMode="numeric" min={0} max={365} step={1} value={days} onChange={e => setDays(e.target.value)} className="rounded-xl mt-1 w-40" placeholder="None" />
+          <p className="text-[11px] text-muted-foreground mt-1">Days we have to pay their bill — each bill is due its date + these, and shows on Suppliers → To pay. Blank = no due days.</p>
+        </div>
       </div>
       <CustomFieldInputs target="suppliers" values={cf} onChange={setCf} className="mt-4" />
     </ActionSheet>

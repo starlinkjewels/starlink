@@ -118,6 +118,7 @@ import { confirmBox } from "@/lib/confirm";
 import { creditCheck } from "@/lib/paymentTerms";
 import { cadClear, cadReviewNow, recordCadReview } from "@/lib/cadApproval";
 import { CadApprovalBox } from "@/components/order/CadApprovalBox";
+import { printJobCard } from "@/lib/factoryWip";
 import { IfExport } from "@/components/IfExport";
 import { ReturnDialog, OrderReturns, useMayReturn } from "@/components/SalesReturn";
 import { returnBlocker } from "@/lib/salesReturn";
@@ -4068,6 +4069,10 @@ It goes back to being our own build, and ${item ? item.name : "its piece"} goes 
             ];
             const hasEstimate = order.estimatedMakingCharges != null || order.estimatedGrossWeight != null;
             const moreActions: MoreAction[] = [
+              // For the factory: what to make, the pictures and the material given — never the client or a price (lib/factoryWip.ts).
+              { label: "Print job card", icon: Printer, show: !faDone, disabled: !order.assignedFactoryId,
+                hint: order.assignedFactoryId ? `For ${db.factories.find(f => f.id === order.assignedFactoryId)?.name ?? "the factory"}` : "Assign the factory first",
+                onSelect: () => printJobCard(db, order) },
               { label: hasEstimate ? "Edit estimate" : "Add estimate", icon: Calculator, show: !faDone, onSelect: openEstimate },
               { label: faDone || hasActuals ? "Edit actual details" : "Record actual details", icon: PackageCheck, show: faDone || faStepIdx < 0,
                 disabled: !faDone && !hasActuals && !diamondOnly && !order.assignedFactoryId,

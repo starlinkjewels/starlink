@@ -3,7 +3,7 @@
 import { useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { toast } from "sonner";
-import { FileOutput, FileInput, Undo2, BadgeDollarSign, Printer, Trash2, Eye, Clock, AlertTriangle, Boxes, Wallet } from "lucide-react";
+import { FileOutput, FileInput, Undo2, BadgeDollarSign, Printer, Trash2, Eye, Clock, AlertTriangle, Boxes, Wallet, CalendarClock, MessageCircle } from "lucide-react";
 import { useDb } from "@/hooks/useDb";
 import { useAuth } from "@/lib/auth";
 import { useHas } from "@/hooks/useCan";
@@ -15,7 +15,10 @@ import { confirmBox } from "@/lib/confirm";
 import { downloadLedgerPdf } from "@/lib/ledgerExport";
 import {
   memoState, memoAge, memoOpenValue, memoValue, memoPartyName, PARTY_WORD, lineOpen, lineDone, memoOutAsAt, cancelMemo, memoCancelBlocker,
+  memoDueBlocker, setMemoDue, memoPartyPhone, memoReminderText,
 } from "@/lib/memos";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { MemoOutSheet, MemoBackSheet, qu } from "@/components/MemoSheets";
 import { MemoInSheet, MemoInBackSheet } from "@/components/MemoInSheets";
 import { Segmented } from "@/components/BillLayout";
@@ -62,6 +65,8 @@ export function MemoPage() {
   const [adding, setAdding] = useState(false);
   const [viewId, setViewId] = useState<string | null>(null);
   const [back, setBack] = useState<{ id: string; mode: "return" | "sold" | "keep" } | null>(null);
+  // Changing a memo's due day: which memo, and the day typed ("" = no due day).
+  const [dueEdit, setDueEdit] = useState<{ id: string; day: string } | null>(null);
 
   const all = useMemo(() => (db.memos ?? []).filter(m => m.dir === dir), [db.memos, dir]);
   const out = all.filter(m => memoState(m) !== "closed");
@@ -89,6 +94,23 @@ export function MemoPage() {
     try { await cancelMemo(m.id, user!); toast.success(m.dir === "in" ? `Memo ${m.no} cancelled` : `Memo ${m.no} cancelled — everything is back in stock`); setViewId(null); }
     catch (e) { toast.error(e instanceof Error ? e.message : "Couldn't cancel it"); }
   };
+  // A reminder to whoever holds our goods (lib/memos.ts memoReminderText) — WhatsApp when we have
+  // their phone; else the text is copied to send another way.
+  const remind = async (m: Memo) => {
+    const text = memoReminderText(m, brandFor(db.settings, m.companyId ?? "main").companyName || "us");
+    const digits = (memoPartyPhone(db, m.party) ?? "").replace(/\D/g, "").replace(/^0+/, "");
+    if (digits.length >= 8) { window.open(`https://wa.me/${digits}?text=${encodeURIComponent(text)}`, "_blank", "noopener"); return; }
+    try { await navigator.clipboard.writeText(text); toast.success(`No phone on record for ${memoPartyName(db, m.party)} — the reminder is copied, paste it where you reach them`); }
+    catch { toast.error("No phone on record — add one to their details first"); }
+  };
+  const saveDue = () => {
+    if (!dueEdit) return;
+    try {
+      setMemoDue(dueEdit.id, dueEdit.day, user!);
+      toast.success(dueEdit.day ? `Due back ${fmtDate(new Date(`${dueEdit.day}T12:00:00`).toISOString())}` : "No due day now");
+      setDueEdit(null);
+    } catch (e) { toast.error(e instanceof Error ? e.message : "Couldn't change it"); }
+  };
   const actions = (m: Memo): MoreAction[] => {
     const open = memoState(m) !== "closed";
     const block = memoCancelBlocker(db, m);
@@ -98,6 +120,11 @@ export function MemoPage() {
       { label: "Sold", icon: BadgeDollarSign, hint: "They keep it — becomes a sale", show: open && may && m.dir === "out", onSelect: () => setBack({ id: m.id, mode: "sold" }) },
       { label: "Keep (buy)", icon: BadgeDollarSign, hint: "We buy it — the purchase bill opens, filled in", show: open && may && m.dir === "in", onSelect: () => setBack({ id: m.id, mode: "keep" }) },
       { label: "Return", icon: Undo2, hint: "Goes back to its owner", show: open && may && m.dir === "in", onSelect: () => setBack({ id: m.id, mode: "return" }) },
+      { label: "Change due date", icon: CalendarClock, show: open && may, hint: m.dueAt ? `Due back ${fmtDate(m.dueAt)} now` : "No due day yet",
+        onSelect: () => setDueEdit({ id: m.id, day: m.dueAt ? m.dueAt.slice(0, 10) : "" }) },
+      { label: "Send reminder", icon: MessageCircle, show: open && m.dir === "out",
+        hint: memoPartyPhone(db, m.party) ? "On WhatsApp — the goods still with them, the due day" : "No phone on record — the text is copied",
+        onSelect: () => void remind(m) },
       { label: "Print slip", icon: Printer, onSelect: () => printMemoSlip(db, m) },
       { label: "Cancel memo", icon: Trash2, danger: true, show: may, disabled: !!block, hint: block ?? "Made by mistake — everything back", onSelect: () => void cancel(m) },
     ];
@@ -181,6 +208,27 @@ export function MemoPage() {
         </div>
       )}
 
+      {dueEdit && (() => {
+        const m = all.find(x => x.id === dueEdit.id);
+        if (!m) return null;
+        const why = memoDueBlocker(m, dueEdit.day);
+        return (
+          <ActionSheet open onOpenChange={o => { if (!o) setDueEdit(null); }} size="md" icon={CalendarClock} title={`Due date — memo ${m.no}`}
+            description={`${memoPartyName(db, m.party)} · ${m.dir === "in" ? "came" : "out"} ${fmtDate(m.at)}${m.dueAt ? ` · due ${fmtDate(m.dueAt)} now` : ""}`}
+            footer={<div className="flex justify-end gap-2">
+              <Button variant="outline" onClick={() => setDueEdit(null)} className="rounded-xl">Cancel</Button>
+              <Button onClick={saveDue} disabled={!!why} className="btn-hero rounded-xl px-6">Save</Button>
+            </div>}>
+            <div className="space-y-2">
+              <Label htmlFor="memo-due" className="text-xs">Due back on</Label>
+              <Input id="memo-due" type="date" min={m.at.slice(0, 10)} value={dueEdit.day} onChange={e => setDueEdit({ ...dueEdit, day: e.target.value })} className="rounded-xl h-10" />
+              <button type="button" className="text-xs text-primary hover:underline" onClick={() => setDueEdit({ ...dueEdit, day: "" })}>No due date</button>
+              {why && <p className="text-xs text-destructive">{why}</p>}
+              <p className="text-[11px] text-muted-foreground">Kept in the memo's history. Past the new day, the team is alerted again.</p>
+            </div>
+          </ActionSheet>
+        );
+      })()}
       {adding && !isIn && <MemoOutSheet open onOpenChange={v => { if (!v) setAdding(false); }} />}
       {adding && isIn && <MemoInSheet open onOpenChange={v => { if (!v) setAdding(false); }} />}
       {backMemo && back && backMemo.dir === "out" && back.mode !== "keep" && <MemoBackSheet memo={backMemo} mode={back.mode} onClose={() => setBack(null)} />}
@@ -202,6 +250,19 @@ export function MemoPage() {
               <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-1">The goods</p>
               <div className="rounded-xl border border-border/70 px-3">{view.lines.map(l => lineRow(view, l))}</div>
             </section>
+            {(view.dueChanges ?? []).length > 0 && (
+              <section>
+                <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-1">Due date changed</p>
+                <div className="rounded-xl border border-border/70 px-3">
+                  {[...view.dueChanges!].reverse().map((c, i) => (
+                    <p key={i} className="py-2 border-t border-border/50 first:border-t-0 text-sm">
+                      {c.from ? fmtDate(c.from) : "none"} → <span className="font-medium">{c.to ? fmtDate(c.to) : "none"}</span>
+                      <span className="text-muted-foreground"> · {fmtDate(c.at)} · {c.byName}</span>
+                    </p>
+                  ))}
+                </div>
+              </section>
+            )}
             <section>
               <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-1">What happened</p>
               {(view.events ?? []).length === 0 ? <p className="text-sm text-muted-foreground">{view.dir === "in" ? "Nothing returned or kept yet." : "Nothing back or sold yet."}</p> : (
