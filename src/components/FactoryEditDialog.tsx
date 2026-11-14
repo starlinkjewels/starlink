@@ -8,6 +8,8 @@ import { AsyncButton } from "@/components/AsyncButton";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { FactoryLabourFields, labourDraftOf, labourOf, rememberItems, type LabourDraft } from "@/components/FactoryLabourFields";
+import { FactoryWastageField } from "@/components/FactoryWastageField";
+import { wastageProblem } from "@/lib/factoryGoldCheck";
 
 const FIELDS = ["name", "contactPerson", "phone", "email", "address"] as const;
 type Field = (typeof FIELDS)[number];
@@ -25,12 +27,17 @@ const formOf = (f: Factory | null): Form => ({
 export function FactoryEditDialog({ factory, onClose }: { factory: Factory | null; onClose: () => void }) {
   const [f, setF] = useState<Form>(formOf(factory));
   const [labour, setLabour] = useState<LabourDraft>(labourDraftOf(factory?.labour));
-  useEffect(() => { if (factory) { setF(formOf(factory)); setLabour(labourDraftOf(factory.labour)); } }, [factory]);
+  // The agreed making wastage % (lib/factoryGoldCheck.ts) — "" = none.
+  const [waste, setWaste] = useState(factory?.wastagePct != null ? String(factory.wastagePct) : "");
+  useEffect(() => { if (factory) { setF(formOf(factory)); setLabour(labourDraftOf(factory.labour)); setWaste(factory.wastagePct != null ? String(factory.wastagePct) : ""); } }, [factory]);
 
   const save = () => {
     if (!factory) return;
     if (!f.name.trim()) { toast.error("Enter a factory name"); return; }
     if (f.email.trim() && !/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(f.email.trim())) { toast.error("That email address doesn't look right"); return; }
+    const wp = waste.trim() === "" ? undefined : Number(waste);
+    const wWhy = wastageProblem(wp);
+    if (wWhy) { toast.error(wWhy); return; }
     updateDb(d => {
       const x = d.factories.find(y => y.id === factory.id);
       if (!x) return;
@@ -42,6 +49,7 @@ export function FactoryEditDialog({ factory, onClose }: { factory: Factory | nul
       }
       const rates = labourOf(labour);
       if (rates) x.labour = rates; else delete x.labour;
+      if (wp != null && wp > 0) x.wastagePct = Math.round(wp * 100) / 100; else delete x.wastagePct;
       rememberItems(d, labour);
     });
     toast.success("Factory updated");
@@ -77,6 +85,7 @@ export function FactoryEditDialog({ factory, onClose }: { factory: Factory | nul
           </div>
         ))}
         <div className="col-span-2"><FactoryLabourFields value={labour} onChange={setLabour} idPrefix="fac-edit-labour" /></div>
+        <div className="col-span-2"><FactoryWastageField id="fac-edit-waste" value={waste} onChange={setWaste} /></div>
       </div>
     </ActionSheet>
   );

@@ -466,7 +466,28 @@ service cloud.firestore {
     // Finished-goods inventory — unlike the rest of Manufacturing, a client
     // CAN read this (to pick a piece to buy directly in New Order), same as
     // the Catalog below; only staff can add/edit it.
-    match /readyStock/{id} { allow read: if isActive(); allow create: if staffMay(pol_readyStock_create()); allow update: if staffMay(pol_readyStock_update()); allow delete: if staffMay(pol_readyStock_delete()); }
+    // A client buying a piece (New order → From Ready Stock) takes it off the shelf in the same save
+    // as their new order: clientTakesReadyStock checks that one write against the other.
+    match /readyStock/{id} { allow read: if isActive(); allow create: if staffMay(pol_readyStock_create()); allow update: if staffMay(pol_readyStock_update()) || clientTakesReadyStock(id); allow delete: if staffMay(pol_readyStock_delete()); }
+
+    // Only the quantity and the piece's history change; the history's newest line names an order
+    // that this same save creates (it did not exist before — getAfter sees it, exists() does not),
+    // that order is the client's own, for this piece, and the quantity drops by exactly what it took.
+    function clientTakesReadyStock(itemId) {
+      let before = resource.data;
+      let after = request.resource.data;
+      let last = after.history[after.history.size() - 1];
+      let orderPath = /databases/$(database)/documents/orders/$(last.ref.orderId);
+      let o = getAfter(orderPath).data;
+      return isClientRole()
+        && after.diff(before).affectedKeys().hasOnly(['quantity', 'history'])
+        && after.quantity is number && after.quantity >= 0 && after.quantity < before.quantity
+        && !exists(orderPath)
+        && o.clientId == myClientId()
+        && o.get('readyStockItemId', '') == itemId
+        && o.get('materialSourcing', '') == 'readyStock'
+        && o.get('readyStockQty', 1) == before.quantity - after.quantity;
+    }
 
     // Shared collections — any active user (catalog is a shared library).
     match /catalogFolders/{id}  { allow read: if isActive(); allow create: if staffMay(pol_catalogFolders_create()); allow update: if staffMay(pol_catalogFolders_update()); allow delete: if staffMay(pol_catalogFolders_delete()); }

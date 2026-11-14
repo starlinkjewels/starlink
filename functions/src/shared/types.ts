@@ -34,6 +34,8 @@ export interface MaterialIssuance {
   companyId?: string;
   finishedNetWeight?: number;
   clientGoldNet?: number;
+  /** The agreed making wastage credited to the factory for this piece, in fine grams (Final Approval). */
+  finishWastageFine?: number;
   finishedPurity?: number;
   finishedKarat?: string;
   finishedPieces?: { quantityUsed: number }[];

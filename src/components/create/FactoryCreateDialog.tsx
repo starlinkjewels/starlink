@@ -8,6 +8,8 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { FactoryLabourFields, labourDraftOf, labourOf, rememberItems, type LabourDraft } from "@/components/FactoryLabourFields";
+import { FactoryWastageField } from "@/components/FactoryWastageField";
+import { wastageProblem } from "@/lib/factoryGoldCheck";
 
 const EMPTY: Partial<Factory> = { name: "", contactPerson: "", phone: "", email: "", address: "" };
 
@@ -21,23 +23,29 @@ export function FactoryCreateDialog({ open, onOpenChange, onCreated }: {
   const [saving, setSaving] = useState(false);
   const [f, setF] = useState<Partial<Factory>>(EMPTY);
   const [labour, setLabour] = useState<LabourDraft>(labourDraftOf());
+  // The agreed making wastage % (lib/factoryGoldCheck.ts) — "" = none.
+  const [waste, setWaste] = useState("");
 
   const create = () => {
     if (!f.name?.trim()) { toast.error("Enter a factory name"); return; }
     if (f.email?.trim() && !/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(f.email.trim())) { toast.error("That email address doesn't look right"); return; }
+    const wp = waste.trim() === "" ? undefined : Number(waste);
+    const wWhy = wastageProblem(wp);
+    if (wWhy) { toast.error(wWhy); return; }
     setSaving(true);
     try {
       const id = uid("fac_");
       updateDb(d => {
         if (!d.factories) d.factories = [];
         const rates = labourOf(labour);
-        d.factories.unshift({ ...f, name: f.name!.trim(), email: f.email?.trim() || undefined, id, active: true, createdAt: new Date().toISOString(), ...(rates ? { labour: rates } : {}) } as Factory);
+        d.factories.unshift({ ...f, name: f.name!.trim(), email: f.email?.trim() || undefined, id, active: true, createdAt: new Date().toISOString(), ...(rates ? { labour: rates } : {}), ...(wp != null && wp > 0 ? { wastagePct: Math.round(wp * 100) / 100 } : {}) } as Factory);
         rememberItems(d, labour);
       });
       toast.success("Factory added");
       onOpenChange(false);
       setF(EMPTY);
       setLabour(labourDraftOf());
+      setWaste("");
       onCreated?.(id);
     } finally { setSaving(false); }
   };
@@ -101,6 +109,7 @@ export function FactoryCreateDialog({ open, onOpenChange, onCreated }: {
           <p className="text-[11px] text-muted-foreground">24KT gold already with them — added to their fine gold.</p>
         </div>
         <div className="col-span-2"><FactoryLabourFields value={labour} onChange={setLabour} idPrefix="fac-new-labour" /></div>
+        <div className="col-span-2"><FactoryWastageField id="fac-new-waste" value={waste} onChange={setWaste} /></div>
       </div>
     </ActionSheet>
   );

@@ -1,4 +1,4 @@
-import { ourFinishedFine } from "./pure/accounts";
+import { finishWastageFine, ourFinishedFine } from "./pure/accounts";
 import { companyOf } from "@/lib/companies";
 import { orderTotal, balanceDue, toPureGold, pureFromPurity, type DB, type Order, type MaterialIssuance } from "./db";
 import { recognisedSale, saleDate, profitReport, inrOn, orderCost } from "./orderCost";
@@ -415,8 +415,9 @@ export interface FactoryRow {
   openJobs: number; avgDays: number | null;
 }
 
-// Our gold the factory used — gold the client gave it straight is not counted.
-const fineOf = (mi: MaterialIssuance) => ourFinishedFine({ ...mi, finishedNetWeight: mi.finishedNetWeight ?? 0 }, mi.purityOrQuality);
+// Our gold the factory used — gold the client gave it straight is not counted; the agreed making
+// wastage credited for the piece is (lib/pure/accounts.ts).
+const fineOf = (mi: MaterialIssuance) => ourFinishedFine({ ...mi, finishedNetWeight: mi.finishedNetWeight ?? 0 }, mi.purityOrQuality) + finishWastageFine(mi);
 
 /** What each factory turned out in the period, the gold it used and what it charged. */
 export function factoryTable(db: DB, p: Period, companyId?: string): FactoryRow[] {

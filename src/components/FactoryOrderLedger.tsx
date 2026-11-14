@@ -1,4 +1,4 @@
-import { ourFinishedFine } from "@/lib/pure/accounts";
+import { finishWastageFine, ourFinishedFine } from "@/lib/pure/accounts";
 import { useMemo, useState, type ReactNode } from "react";
 import { metalLabel } from "@/lib/metals";
 import { Link } from "react-router-dom";
@@ -192,8 +192,9 @@ export function buildFactoryOrderRows(
       if (mi.source !== "factoryPool") row.goldOut += toPureGold(mi.quantityIssued, mi.purityOrQuality);
       if (mi.finishedNetWeight != null) {
         issueNet.set(key, (issueNet.get(key) ?? 0) + mi.finishedNetWeight);
-        // Only our part: gold the client gave the factory straight was never ours there.
-        row.goldIn += ourFinishedFine(mi, "24K");
+        // Only our part: gold the client gave the factory straight was never ours there —
+        // plus the agreed making wastage credited for the piece (lib/pure/accounts.ts).
+        row.goldIn += ourFinishedFine(mi, "24K") + finishWastageFine(mi);
       }
     }
     if (mi.material === "diamond") {
@@ -225,6 +226,12 @@ export function buildFactoryOrderRows(
           text: repair ? `Added to the piece in the repair — ${mi.finishedNetWeight}g${mi.finishedKarat ? ` ${mi.finishedKarat}` : ""}`
             : `Finished piece — net ${mi.finishedNetWeight}g${mi.finishedPurity ? ` @ ${mi.finishedPurity}‰` : ""}${theirs}`,
           qty: `${fine.toFixed(3)} g fine`,
+        });
+        const wf = finishWastageFine(mi);
+        if (wf > 0) row.entries.push({
+          id: mi.id + "-gwaste", date: mi.issuedAt, kind: "in",
+          text: `Agreed making wastage${mi.finishWastagePct ? ` ${mi.finishWastagePct}%` : ""} — credited to the factory`,
+          qty: `${wf.toFixed(3)} g fine`,
         });
       }
     }

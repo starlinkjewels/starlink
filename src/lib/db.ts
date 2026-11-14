@@ -2162,6 +2162,26 @@ export interface Factory {
   openingFineGoldDate?: string;
   /** The factory's making charge, set once — Final Approval starts from it (components/FactoryLabourFields). */
   labour?: FactoryLabour;
+  /** Agreed making wastage on gold, % of the fine gold in each piece — credited to the factory at Final
+   *  Approval (MaterialIssuance.finishWastageFine). Unset = none, as before (lib/pure/accounts.ts). */
+  wastagePct?: number;
+  /** Gold checks: what the factory really holds, against the book, newest last (lib/factoryGoldCheck.ts). */
+  goldChecks?: FactoryGoldCheck[];
+}
+
+/** One gold check at a factory: the fine gold it holds by its own count, against our book. */
+export interface FactoryGoldCheck {
+  id: string;
+  at: string;
+  /** Fine (24K) grams: our book's balance then, and what the factory holds by count. */
+  book: number;
+  actual: number;
+  /** actual − book: below 0 = gold short (lost beyond the agreed wastage). */
+  diff: number;
+  /** Fine gold given to the factory since the check before — what the shortfall is a % of. */
+  givenSince: number;
+  note?: string;
+  byName: string;
 }
 
 /** One line of a factory's rate card: a metal ("Gold" = every gold), an item (unset = every item
@@ -2319,6 +2339,10 @@ export interface MaterialIssuance {
   /** Of finishedNetWeight, the grams of gold the CLIENT supplied straight to the factory (Final
    *  Approval) — never ours: not drawn from our gold there, not in our cost. See ourFinishedNet. */
   clientGoldNet?: number;
+  /** The agreed making wastage credited to the factory for this piece (Final Approval), in fine grams,
+   *  and the % it was worked out at — kept, so changing the factory's % later never moves it. */
+  finishWastageFine?: number;
+  finishWastagePct?: number;
   finishedKarat?: string;     // its karat, e.g. "18K" — legacy / label
   finishedPurity?: number;    // actual purity entered at Final Approval (‰, e.g. 750) — drives the pure-gold conversion
   finishDisposition?: "used" | "returned"; // certified diamond issuances: chosen at Final Approval (so a later edit knows the current state)
